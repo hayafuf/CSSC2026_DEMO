@@ -1,0 +1,18 @@
+{
+  "name": "pirate_poppers",
+  "version": "1.0.0",
+  "description": "Pirate Poppers(PlayFirst, 2006)風の **チェーンシューター(Luxor 系)** パズルゲームです。 CreateJS(EaselJS + TweenJS)で実装しています。",
+  "main": "index.js",
+  "directories": {
+    "doc": "docs"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "playwright-core": "^1.62.1"
+  }
+}

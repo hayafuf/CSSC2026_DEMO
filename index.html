@@ -1,0 +1,237 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>🏴‍☠️ 海賊の秘宝</title>
+<!-- Web フォント: タイトル=Pirata One / 見出し・数値=Cinzel(Decorative)。
+     読み込めない環境ではシステムフォントにフォールバックする -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@500;700;900&family=Cinzel+Decorative:wght@700;900&family=Pirata+One&display=swap" rel="stylesheet">
+<style>
+  html, body {
+    margin: 0;
+    padding: 0;
+    background: #05090f;
+    /* 深い海と、上方から差し込む霞んだ光。周辺は落として舞台を締める */
+    background-image:
+      radial-gradient(ellipse 70% 55% at 50% -8%, rgba(58,110,140,.55) 0%, rgba(20,44,66,.35) 40%, rgba(7,13,22,0) 72%),
+      radial-gradient(ellipse 120% 100% at 50% 120%, rgba(6,10,18,.9) 0%, rgba(7,13,22,0) 60%),
+      linear-gradient(180deg, #0c1826 0%, #070d16 60%, #04070c 100%);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    font-family: "Cinzel", "Hiragino Kaku Gothic ProN", "Meiryo", serif;
+    /* スクロールバーを出さない: キャンバスは常にビューポート内に収まるよう縮尺する */
+    overflow: hidden;
+  }
+  /* ページ背景を動かす: 巨大なぼかしラジアルを非常にゆっくり漂わせる */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: -25%;
+    z-index: -1;
+    pointer-events: none;
+    background:
+      radial-gradient(38% 40% at 28% 30%, rgba(46,98,132,.22), transparent 70%),
+      radial-gradient(44% 46% at 76% 62%, rgba(20,64,96,.20), transparent 70%),
+      radial-gradient(48% 40% at 55% 12%, rgba(96,138,170,.15), transparent 72%);
+    filter: blur(34px);
+    animation: bgDrift 46s ease-in-out infinite alternate;
+  }
+  @keyframes bgDrift {
+    0%   { transform: translate3d(-2%, -1%, 0) scale(1.05); }
+    100% { transform: translate3d(3%, 2%, 0)   scale(1.13); }
+  }
+  h1 {
+    font-family: "Pirata One", "Cinzel", serif;
+    font-size: 52px;
+    letter-spacing: 3px;
+    margin: 20px 0 12px;
+    font-weight: 400;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    animation: titleFloat 6s ease-in-out infinite;
+  }
+  @keyframes titleFloat {
+    0%, 100% { transform: translateY(0); }
+    50%      { transform: translateY(-4px); }
+  }
+  h1 .flag {
+    -webkit-text-fill-color: initial;
+    font-family: "Segoe UI Emoji", "Apple Color Emoji", sans-serif;
+    font-size: 40px;
+    filter: drop-shadow(0 3px 8px rgba(0,0,0,.6));
+  }
+  h1 .title-text {
+    /* 打ち出した真鍮の質感: 金のグラデ文字を横切る照り(シマー)が流れる */
+    background: linear-gradient(100deg,
+      #8a5a12 0%, #d9a53a 26%, #fff6d0 44%, #f0c040 56%, #b8860b 78%, #7a4d10 100%);
+    background-size: 240% 100%;
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+    color: #f0c040;
+    filter: drop-shadow(0 2px 0 rgba(0,0,0,.55))
+            drop-shadow(0 0 24px rgba(240,192,64,.4));
+    animation: titleSheen 6.5s linear infinite;
+  }
+  @keyframes titleSheen {
+    0%   { background-position: 190% 0; }
+    100% { background-position: -50% 0; }
+  }
+  .stage-wrap { position: relative; display: inline-block; line-height: 0; }
+  #gameCanvas {
+    border-radius: 16px;
+    /* 甲板の枠: 真鍮の縁取り + 落ち影 + 内側の柔らかい照り。金の外周がゆっくり呼吸する */
+    border: 1px solid rgba(210,168,96,.4);
+    box-shadow:
+      0 0 0 3px rgba(20,13,6,.92),
+      0 0 0 4px rgba(160,118,58,.55),
+      0 22px 65px rgba(0,0,0,.75),
+      0 0 40px rgba(240,192,64,.10),
+      inset 0 1px 14px rgba(255,230,180,.07);
+    cursor: pointer;
+    /* 画面が狭いときは縮めて全体が見えるようにする
+       (CreateJS はマウス座標を CSS 表示サイズから換算するので狙いはズレない)。
+       幅・高さの両方でビューポートに収め、スクロールバーを出さない。
+       calc は 縦(100vh − タイトル/説明のぶん190px)を横比13:7に換算した上限。 */
+    width: min(1500px, 98vw, calc((100vh - 190px) * 13 / 7));
+    height: auto;
+    animation: frameGlow 8s ease-in-out infinite;
+  }
+  /* 全画面ボタン(甲板の右上に置く真鍮の小ボタン) */
+  .fs-btn {
+    position: absolute; top: 10px; right: 10px; z-index: 5;
+    width: 34px; height: 34px; padding: 0;
+    font-size: 17px; line-height: 34px; text-align: center;
+    color: #f4e2a0; cursor: pointer;
+    background: linear-gradient(180deg, rgba(40,30,14,.72), rgba(16,11,5,.72));
+    border: 1px solid rgba(210,168,96,.5); border-radius: 9px;
+    box-shadow: 0 3px 12px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,240,200,.12);
+    -webkit-backdrop-filter: blur(4px); backdrop-filter: blur(4px);
+    transition: background .15s, transform .1s, box-shadow .15s;
+  }
+  .fs-btn:hover { background: linear-gradient(180deg, rgba(60,44,18,.85), rgba(28,19,8,.85));
+    box-shadow: 0 4px 16px rgba(0,0,0,.55), 0 0 14px rgba(240,192,64,.25); }
+  .fs-btn:active { transform: scale(.94); }
+  /* 全画面時: ラップを黒く敷き、キャンバスを画面いっぱいに収める(比率維持) */
+  .stage-wrap:fullscreen, .stage-wrap:-webkit-full-screen {
+    width: 100vw; height: 100vh; background: #04070c;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .stage-wrap:fullscreen #gameCanvas, .stage-wrap:-webkit-full-screen #gameCanvas {
+    /* 比率(13:7)を保ったまま画面いっぱいまで拡大(黒でレターボックス) */
+    width: min(100vw, calc(100vh * 13 / 7)); height: auto;
+    max-width: 100vw; max-height: 100vh;
+    border-radius: 0; box-shadow: none; animation: none;
+  }
+  @keyframes frameGlow {
+    0%, 100% { box-shadow:
+      0 0 0 3px rgba(20,13,6,.92), 0 0 0 4px rgba(160,118,58,.5),
+      0 22px 65px rgba(0,0,0,.75), 0 0 34px rgba(240,192,64,.08),
+      inset 0 1px 14px rgba(255,230,180,.06); }
+    50%      { box-shadow:
+      0 0 0 3px rgba(20,13,6,.92), 0 0 0 4px rgba(190,144,74,.7),
+      0 22px 65px rgba(0,0,0,.75), 0 0 52px rgba(240,192,64,.20),
+      inset 0 1px 14px rgba(255,230,180,.10); }
+  }
+  p.hint {
+    color: #a7bccf;
+    font-family: "Cinzel", "Hiragino Kaku Gothic ProN", "Meiryo", serif;
+    font-size: 13.5px;
+    line-height: 1.8;
+    max-width: min(1100px, 92vw);
+    text-align: center;
+    margin: 16px auto 24px;
+    padding: 13px 22px;
+    background: linear-gradient(180deg, rgba(20,32,48,.5), rgba(10,16,26,.34));
+    border: 1px solid rgba(150,180,210,.16);
+    border-radius: 12px;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.05), 0 8px 24px rgba(0,0,0,.35);
+    -webkit-backdrop-filter: blur(6px);
+    backdrop-filter: blur(6px);
+  }
+  p.hint b { color: #f0c86a; font-weight: 700; }
+</style>
+</head>
+<body>
+  <h1><span class="flag">🏴‍☠️</span><span class="title-text">海賊の秘宝</span></h1>
+  <div class="stage-wrap" id="stageWrap">
+    <canvas id="gameCanvas" width="1300" height="700"></canvas>
+    <button id="fsBtn" class="fs-btn" title="全画面表示 (F キー)" aria-label="全画面表示">⛶</button>
+  </div>
+  <p class="hint">マウスで大砲を左右に移動、クリックで真上に発射!右クリックか Space で玉を交換。落ちてくる宝やパワーアップは大砲でキャッチ!<br>BGM と効果音は最初のクリックで鳴り始めます(M キーで消音)。<br>🛠 <b>E キー</b>か下のボタンで<b>コースエディタ</b>を開いて、自分だけの航路を作れます。</p>
+
+  <script src="https://code.createjs.com/1.0.0/createjs.min.js"></script>
+  <script>
+    if (typeof createjs === "undefined") {
+      document.body.innerHTML =
+        '<h1 style="color:#f0c040">CreateJS の読み込みに失敗しました</h1>' +
+        '<p style="color:#8aa4be">インターネット接続を確認してから再読み込みしてください。</p>';
+    }
+  </script>
+  <!-- 依存順に読み込む(config が PP 名前空間を作り、main が起動する) -->
+  <script src="js/config.js"></script>
+  <script src="js/background.js"></script>
+  <script src="js/audio.js"></script>
+  <script src="js/rail.js"></script>
+  <script src="js/ball.js"></script>
+  <script src="js/fx.js"></script>
+  <script src="js/chain.js"></script>
+  <script src="js/powerups.js"></script>
+  <script src="js/cannon.js"></script>
+  <script src="js/hud.js"></script>
+  <script src="js/crisis.js"></script>
+  <script src="js/gameover.js"></script>
+  <script src="js/course-view.js"></script>
+  <script src="js/main.js"></script>
+  <!-- ポーズ機能(main の後: PP.game / PP.hud / PP.audio を使う) -->
+  <script src="js/pause.js"></script>
+  <!-- コース自作 API とビジュアルエディタ(main の後: PP.stage / PP.playCourse を使う) -->
+  <script src="js/course-api.js"></script>
+  <script src="js/editor.js"></script>
+  <!-- 【課題3】エディタで作った自作コースの登録(course-api の後に読む) -->
+  <script src="js/my-course.js"></script>
+  <!-- Web フォントが遅れて届いた場合、キャンバスの文字を1回描き直して反映させる -->
+  <script>
+    if (document.fonts && document.fonts.ready) {
+      document.fonts.ready.then(function () {
+        if (window.PP && PP.stage) PP.stage.update();
+      });
+    }
+  </script>
+  <!-- 全画面表示(F キー or 右上ボタン)。ラップ要素ごと全画面にして
+       キャンバスを画面いっぱいに収める。CreateJS は表示サイズから座標を
+       換算するので、拡大しても大砲の狙いはズレない。 -->
+  <script>
+    (function () {
+      var wrap = document.getElementById("stageWrap");
+      var btn = document.getElementById("fsBtn");
+      function fsEl() { return document.fullscreenElement || document.webkitFullscreenElement; }
+      function toggleFs() {
+        if (fsEl()) {
+          (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+        } else if (wrap.requestFullscreen || wrap.webkitRequestFullscreen) {
+          (wrap.requestFullscreen || wrap.webkitRequestFullscreen).call(wrap);
+        }
+      }
+      function sync() { btn.textContent = fsEl() ? "🗗" : "⛶"; }
+      btn.addEventListener("click", toggleFs);
+      document.addEventListener("fullscreenchange", sync);
+      document.addEventListener("webkitfullscreenchange", sync);
+      window.addEventListener("keydown", function (e) {
+        if (e.code !== "KeyF") return;
+        var t = e.target;
+        if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
+        e.preventDefault();
+        toggleFs();
+      });
+    })();
+  </script>
+</body>
+</html>
