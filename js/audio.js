@@ -144,7 +144,7 @@
   // ゲームオーバー: チェーンが樽へ吸い込まれていく音
   var seSuck = sfx("SE/gameover_球が吸い込まれる_SE.mp3", 0.9);
   // 追加SE: コンボ(合成音に重ねて厚みを足す)/ 囚人の歩み(スロー)発動
-  var seCombo = sfx("SE/combo_SE.mp3", 0.6);
+  var seCombo = sfx("SE/Combo_SE.mp3", 0.6);
   var seSlow = sfx("SE/囚人SE.mp3", 0.6);
   // 追加SE: 逆風(発動)/ 生存ゲージの時間切れ(掃討フェーズ移行)
   var seWind = sfx("SE/風.mp3", 0.6);
