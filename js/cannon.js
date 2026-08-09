@@ -380,7 +380,7 @@
     stockLabel.textBaseline = "middle";
     stockLabel.shadow = new createjs.Shadow("rgba(0,0,0,0.8)", 0, 1, 1);
     stockSlot.addChild(stockLabel);
-    var caption = new createjs.Text("クリックで交換",
+    var caption = new createjs.Text(PP.TAP + "で交換",
       '700 10px "Hiragino Kaku Gothic ProN","Meiryo",serif', "#f5e8c8");
     caption.x = 0; caption.y = 40;
     caption.textAlign = "center";
@@ -415,10 +415,13 @@
     stockSlot.addChildAt(stockIcon, 1);   // 台座の上・ラベルの下
   }
 
-  // (sx, sy) がストックスロットのクリック範囲内か(特殊弾所持中のみ有効)
+  // (sx, sy) がストックスロットのクリック範囲内か(特殊弾所持中のみ有効)。
+  // タッチ端末では指の太さぶん判定を広げる(見た目はそのまま)
+  var STOCK_PAD = PP.TOUCH ? 12 : 0;
   function hitStock(sx, sy) {
     return PP.game.state === "playing" && !!PP.game.special &&
-           Math.abs(sx - STOCK_SX) < STOCK_R && Math.abs(sy - STOCK_SY) < STOCK_R;
+           Math.abs(sx - STOCK_SX) < STOCK_R + STOCK_PAD &&
+           Math.abs(sy - STOCK_SY) < STOCK_R + STOCK_PAD;
   }
 
   // マウス追従の横移動(縦は固定)

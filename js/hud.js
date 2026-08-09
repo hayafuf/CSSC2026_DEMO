@@ -25,6 +25,13 @@
   // 難易度ボタンと同じ「矩形当たり判定」方式(発射クリックと混ざらないため)
   var pauseBtn = null;
   var PAUSE_RECT = { x: W - 46, y: 74, w: 36, h: 36 };
+  // ⇄ 交換ボタン(タッチ端末だけに出す)。スマホには右クリックも Space も無いので、
+  // 玉の交換をこのボタンで行う。判定はポーズボタンと同じ矩形当たり判定方式。
+  // 位置は右下(左下の特殊弾ストックスロットと被らないところ)
+  var swapBtn = null;
+  var SWAP_RECT = { x: W - 116, y: PP.H - 104, w: 92, h: 80 };
+  // タッチ端末では見た目はそのまま、当たり判定だけ指の太さぶん広げる
+  var TOUCH_PAD = PP.TOUCH ? 12 : 0;
 
   // レイアウト(バーは 62px。1段目 y=104 に触れない高さで、文字を大きく取る)
   var BAR = 62;
@@ -144,6 +151,29 @@
     pauseBtn.visible = false;
     L.addChild(pauseBtn);
 
+    // ---- ⇄ 交換ボタン(タッチ端末用。ポーズボタンと同じ真鍮の意匠) ----
+    if (PP.TOUCH) {
+      swapBtn = new createjs.Container();
+      var sb = new createjs.Shape();
+      var sr = SWAP_RECT;
+      sb.graphics
+        .beginLinearGradientFill(["rgba(40,30,14,0.72)", "rgba(16,11,5,0.72)"], [0, 1], sr.x, sr.y, sr.x, sr.y + sr.h)
+        .drawRoundRect(sr.x, sr.y, sr.w, sr.h, 12)
+        .setStrokeStyle(1).beginStroke("rgba(210,168,96,0.5)")
+        .drawRoundRect(sr.x, sr.y, sr.w, sr.h, 12);
+      swapBtn.addChild(sb);
+      var st = new createjs.Text("⇄", '700 34px "Segoe UI Symbol","Meiryo",sans-serif', "#f4e2a0");
+      st.x = sr.x + sr.w / 2; st.y = sr.y + 28;
+      st.textAlign = "center"; st.textBaseline = "middle";
+      swapBtn.addChild(st);
+      var sl = new createjs.Text("交換", 'bold 15px "Meiryo",sans-serif', "#caa96a");
+      sl.x = sr.x + sr.w / 2; sl.y = sr.y + sr.h - 17;
+      sl.textAlign = "center"; sl.textBaseline = "middle";
+      swapBtn.addChild(sl);
+      swapBtn.visible = false;
+      L.addChild(swapBtn);
+    }
+
     dispScore = PP.game.score;
   }
 
@@ -181,6 +211,7 @@
     // updateEffects はプレイ中しか呼ばれないので、ここでボタンを出す
     // (プレイ以外の画面では showOverlay() が隠す)
     if (pauseBtn) pauseBtn.visible = true;
+    if (swapBtn) swapBtn.visible = true;
 
     // スコアのカウントアップ(急変・減少時は即反映)
     if (g.score < dispScore || Math.abs(g.score - dispScore) > 200000) dispScore = g.score;
@@ -406,6 +437,7 @@
     overlaySub.color = s.sub; overlaySub.text = sub;
 
     if (pauseBtn) pauseBtn.visible = false;   // 全画面パネルの上にボタンを残さない
+    if (swapBtn) swapBtn.visible = false;
 
     O.visible = true; O.alpha = 0;
     createjs.Tween.get(O, { override: true }).to({ alpha: 1 }, s.fade);
@@ -423,8 +455,8 @@
   function showPause(reason) {
     showOverlay("⚓ PAUSE ⚓",
       reason === "auto"
-        ? "船の外に出ていたので錨を下ろして停泊中\n用が済んだら、クリックか P キーで再開"
-        : "錨を下ろして停泊中…\nクリックか P キーで再開",
+        ? "船の外に出ていたので錨を下ろして停泊中\n用が済んだら、" + (PP.TOUCH ? "タップで再開" : "クリックか P キーで再開")
+        : "錨を下ろして停泊中…\n" + (PP.TOUCH ? "タップで再開" : "クリックか P キーで再開"),
       "normal");
     var O = PP.layers.overlay;
     createjs.Tween.removeTweens(O);
@@ -435,14 +467,22 @@
   // (x, y) がポーズボタンの上か。プレイ中に出ているときだけ当たる
   function hitPauseBtn(x, y) {
     if (!pauseBtn || !pauseBtn.visible || PP.game.state !== "playing") return false;
-    var r = PAUSE_RECT;
-    return x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
+    var r = PAUSE_RECT, p = TOUCH_PAD;
+    return x >= r.x - p && x <= r.x + r.w + p && y >= r.y - p && y <= r.y + r.h + p;
+  }
+
+  // (x, y) が ⇄ 交換ボタンの上か。タッチ端末のプレイ中だけ当たる
+  function hitSwapBtn(x, y) {
+    if (!swapBtn || !swapBtn.visible || PP.game.state !== "playing") return false;
+    var r = SWAP_RECT, p = TOUCH_PAD;
+    return x >= r.x - p && x <= r.x + r.w + p && y >= r.y - p && y <= r.y + r.h + p;
   }
 
   PP.hud = {
     build: build, update: update, updateEffects: updateEffects,
     buildOverlay: buildOverlay, showOverlay: showOverlay, hideOverlay: hideOverlay,
     showPause: showPause, hidePause: hidePause, hitPauseBtn: hitPauseBtn,
+    hitSwapBtn: hitSwapBtn,
     hitDifficulty: hitDifficulty, setDifficulty: setDifficulty
   };
 })();

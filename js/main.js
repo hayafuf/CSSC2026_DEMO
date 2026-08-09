@@ -175,13 +175,13 @@
       PP.hud.update();
       PP.hud.showOverlay("🏆 全海域制覇!",
         "全 " + total + " ステージを生き延びた! 秘宝は我らのものだ!\n" +
-        "制覇ボーナス +5000\n最終スコア " + g.score + " 点\nクリックで最初の海へ");
+        "制覇ボーナス +5000\n最終スコア " + g.score + " 点\n" + PP.TAP + "で最初の海へ");
       return;
     }
     g.state = "clear";
     PP.hud.update();
     PP.hud.showOverlay("⚓ ステージ " + g.level + "/" + total + " 制覇!",
-      "耐え切って残りも掃討した! 生存ボーナス +1000\nスコア " + g.score + " 点\nクリックで次のステージへ");
+      "耐え切って残りも掃討した! 生存ボーナス +1000\nスコア " + g.score + " 点\n" + PP.TAP + "で次のステージへ");
   }
 
   // 【課題5】ライフを使った復帰: いまのステージを「最初から」やり直す。
@@ -215,7 +215,7 @@
     var g = PP.game;
     g.state = "over";
     PP.hud.showOverlay("☠ ゲームオーバー",
-      "船は宝もろとも呑まれた…\n最終スコア " + g.score + " 点 (ステージ " + g.level + ")\nクリックでリスタート",
+      "船は宝もろとも呑まれた…\n最終スコア " + g.score + " 点 (ステージ " + g.level + ")\n" + PP.TAP + "でリスタート",
       "doom");
   }
 
@@ -250,14 +250,16 @@
         }
       });
       if (deadLane) {
-        // TODO【課題5-2】ライフ制にしよう。今は樽が溢れると即ゲームオーバー。
-        // ライフ(g.lives)が残っていたら、ゲームオーバーの代わりに
-        //   1) g.lives を1減らして、
-        //   2) retryLevel() を呼ぼう(このステージの「最初から」やり直せる。
-        //      スコアとコインはそのまま残る)。
-        // ヒント: if / else を使う。ライフが無い(g.lives <= 0)ときだけ gameOver() を呼ぶ。
-        // (コインでライフを増やす処理は powerups.js の TODO【課題5-1】)
-        gameOver();
+        // 【課題5-2】ライフが残っていればゲームオーバーの代わりに、ライフを1つ
+        // 使ってこのステージの最初からやり直す(スコアとコインはそのまま残る)。
+        // 難易度「深海の悪魔」(useLives: false)は救済のない1発ゲームオーバー。
+        // (コインでライフを増やす処理は powerups.js の【課題5-1】)
+        if (PP.diff().useLives !== false && g.lives > 0) {
+          g.lives--;
+          retryLevel();
+        } else {
+          gameOver();
+        }
       }
 
       // 生存ゲージ(ロールアウト完了後から減る)。空になったら掃討フェーズへ。
@@ -409,6 +411,18 @@
   PP.retryLevel = retryLevel;
 
   // ---------- 入力 ----------
+  // タッチ操作は「押した瞬間に発射」だと狙う余地が無いので、
+  //   指を置く/なぞる … 照準(大砲が指の X に追従)
+  //   指を離す       … 発射
+  //   大砲を(動かさず)ちょんとタップ … 玉の交換
+  // にする。マウスは従来どおり「クリックした瞬間に発射」。
+  var touchAiming = false;   // タッチで照準中(離したら発射する)か
+  var touchDownX = 0, touchDownT = 0, touchOnCannon = false;
+  function isTouchEv(e) {
+    var n = e && e.nativeEvent;
+    return !!(n && n.type && n.type.indexOf("touch") === 0);
+  }
+
   function onStageDown(e) {
     if (PP.editor && PP.editor.active) return;
     if (e.nativeEvent && e.nativeEvent.button === 2) return;   // 右ボタンは交換専用
@@ -438,13 +452,27 @@
         PP.pauseCtl.pause("manual");
         return;
       }
+      // ⇄ 交換ボタン(タッチ端末用。右クリック/Space の代わり)は発射ではなく交換
+      if (PP.hud.hitSwapBtn(e.stageX, e.stageY)) {
+        PP.cannon.swap();
+        return;
+      }
       // 特殊弾ストックスロットへのクリックは発射ではなく交換
       if (PP.cannon.hitStock(e.stageX, e.stageY)) {
         PP.cannon.toggleSpecial();
         return;
       }
-      PP.cannon.setX(e.stageX);
-      PP.cannon.fire();
+      if (isTouchEv(e)) {
+        // タッチは照準だけ。発射(または大砲タップ=交換)は指を離したとき
+        touchAiming = true;
+        touchDownX = e.stageX; touchDownT = Date.now();
+        // 「大砲の上から触り始めたか」は大砲を動かす前に測る
+        touchOnCannon = Math.abs(e.stageX - PP.cannon.x) < 80 && e.stageY > PP.cannon.y - 90;
+        if (!touchOnCannon) PP.cannon.setX(e.stageX);
+      } else {
+        PP.cannon.setX(e.stageX);
+        PP.cannon.fire();
+      }
     } else if (g.state === "clear") {
       g.level++;
       PP.hud.hideOverlay();
@@ -470,6 +498,10 @@
   // ---------- 初期化 ----------
   function init() {
     stage = PP.stage = new createjs.Stage("gameCanvas");
+    // スマホ/タブレット対応: タッチを CreateJS のマウスイベントに変換する。
+    // これでタップが stagemousedown、指のドラッグが stagemousemove として届く
+    // (タップ = その位置へ照準して発射。既存の onStageDown がそのまま使える)。
+    if (createjs.Touch.isSupported()) createjs.Touch.enable(stage);  // シングルタッチで十分
 
     // 玉は立体交差・トンネルのために層を分ける:
     //   bridgeUnder(橋の落ち影・アーチ・橋脚)→ ballUnder(橋の下/道の玉)
@@ -537,11 +569,32 @@
       function () {
         PP.game.state = "title";
         PP.hud.showOverlay("🏴‍☠️ Are you ready?",
-          "クリックで出航!\nマウスで大砲を移動、クリックで発射\n右クリック / Space で玉を交換、M で消音\n特殊弾は左下のスロットをクリックで交換");
+          PP.TOUCH
+            ? "タップで出航!\n指でなぞって大砲をねらい、はなすと発射\n大砲か ⇄ ボタンをタップで玉を交換\n特殊弾は左下のスロットをタップで交換"
+            : "クリックで出航!\nマウスで大砲を移動、クリックで発射\n右クリック / Space で玉を交換、M で消音\n特殊弾は左下のスロットをクリックで交換");
       }
     );
 
     stage.on("stagemousedown", onStageDown);
+    // タッチの発射は「指を離した瞬間」。ドラッグで狙いを調整してから離す。
+    // 大砲の上で「動かさず短く」タップしたときだけ、発射ではなく玉の交換
+    stage.on("stagemouseup", function (e) {
+      if (!touchAiming) return;
+      touchAiming = false;
+      if (PP.game.state !== "playing") return;
+      if (PP.pauseCtl && PP.pauseCtl.active) return;
+      var moved = Math.abs(e.stageX - touchDownX) > 24;
+      var quick = Date.now() - touchDownT < 350;
+      if (touchOnCannon && !moved && quick) {
+        PP.cannon.swap();
+        return;
+      }
+      PP.cannon.setX(e.stageX);
+      PP.cannon.fire();
+    });
+    // 音の解錠の保険: ブラウザの自動再生制限は「ユーザー操作の中」でしか
+    // 解けない。タッチ変換が効かない環境でも最初の1タップで確実に解く
+    document.addEventListener("pointerdown", function () { PP.audio.unlock(); }, { once: true });
     stage.on("stagemousemove", function (e) {
       if (PP.pauseCtl && PP.pauseCtl.active) return;   // ポーズ中は大砲も動かさない
       PP.cannon.setX(e.stageX);

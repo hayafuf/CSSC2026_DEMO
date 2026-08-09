@@ -2,7 +2,7 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>🏴‍☠️ 海賊の秘宝</title>
 <!-- Web フォント: タイトル=Pirata One / 見出し・数値=Cinzel(Decorative)。
      読み込めない環境ではシステムフォントにフォールバックする -->
@@ -27,6 +27,8 @@
     font-family: "Cinzel", "Hiragino Kaku Gothic ProN", "Meiryo", serif;
     /* スクロールバーを出さない: キャンバスは常にビューポート内に収まるよう縮尺する */
     overflow: hidden;
+    /* スマホ: 端で引っぱってもページごと揺れない(プルリフレッシュ等の抑止) */
+    overscroll-behavior: none;
   }
   /* ページ背景を動かす: 巨大なぼかしラジアルを非常にゆっくり漂わせる */
   body::before {
@@ -84,7 +86,14 @@
     0%   { background-position: 190% 0; }
     100% { background-position: -50% 0; }
   }
-  .stage-wrap { position: relative; display: inline-block; line-height: 0; }
+  .stage-wrap {
+    position: relative; display: inline-block; line-height: 0;
+    /* ゲーム領域だけタッチのブラウザ既定動作(スクロール・ダブルタップズーム)を
+       切る。ページ全体では切らないので、領域の外は普通に操作できる */
+    touch-action: none;
+    -webkit-tap-highlight-color: transparent;
+    -webkit-user-select: none; user-select: none;
+  }
   #gameCanvas {
     border-radius: 16px;
     /* 甲板の枠: 真鍮の縁取り + 落ち影 + 内側の柔らかい照り。金の外周がゆっくり呼吸する */
@@ -100,7 +109,7 @@
        (CreateJS はマウス座標を CSS 表示サイズから換算するので狙いはズレない)。
        幅・高さの両方でビューポートに収め、スクロールバーを出さない。
        calc は 縦(100vh − タイトル/説明のぶん190px)を横比13:7に換算した上限。 */
-    width: min(1500px, 98vw, calc((100vh - 190px) * 13 / 7));
+    width: min(1500px, 98vw, calc((100dvh - 190px) * 13 / 7));
     height: auto;
     animation: frameGlow 8s ease-in-out infinite;
   }
@@ -157,6 +166,41 @@
     backdrop-filter: blur(6px);
   }
   p.hint b { color: #f0c86a; font-weight: 700; }
+
+  /* ---------- スマホ(横向き)対応 ----------
+     タッチ端末で画面が低いとき(=スマホの横持ち)は、タイトルと説明文を隠して
+     キャンバスに画面の高さを全部使わせる。論理解像度(1300x700)はそのままで、
+     CSS の表示サイズだけを 13:7 の比率を保って画面にフィットさせる。 */
+  @media (pointer: coarse) and (max-height: 560px) {
+    h1, p.hint { display: none; }
+    body { min-height: 100dvh; }
+    .stage-wrap {
+      padding: env(safe-area-inset-top) env(safe-area-inset-right)
+               env(safe-area-inset-bottom) env(safe-area-inset-left);
+    }
+    #gameCanvas {
+      width: min(100vw, calc(100dvh * 13 / 7));
+      max-height: 100dvh;
+      border: none; border-radius: 0;   /* 枠ぶんの数pxでも画面からはみ出さない */
+      box-shadow: none;
+      animation: none;   /* 枠の光アニメはスマホでは負荷を減らすため止める */
+    }
+  }
+
+  /* ---------- 縦向きの案内 ----------
+     スマホを縦に持っているときは「横向きにしてね」と案内する(ゲームは止めない。
+     回転するとメディアクエリが外れて自動的に消え、そのまま遊べる)。 */
+  #rotateHint { display: none; }
+  @media (pointer: coarse) and (orientation: portrait) {
+    #rotateHint {
+      display: flex; position: fixed; inset: 0; z-index: 50;
+      align-items: center; justify-content: center; text-align: center;
+      padding: 24px; line-height: 1.9;
+      background: rgba(4, 7, 12, .94);
+      color: #f0c86a; font-size: 22px; font-weight: 700;
+      font-family: "Cinzel", "Hiragino Kaku Gothic ProN", "Meiryo", serif;
+    }
+  }
 </style>
 </head>
 <body>
@@ -165,6 +209,8 @@
     <canvas id="gameCanvas" width="1300" height="700"></canvas>
     <button id="fsBtn" class="fs-btn" title="全画面表示 (F キー)" aria-label="全画面表示">⛶</button>
   </div>
+  <!-- スマホ縦持ちのときだけ CSS(orientation: portrait)で表示される案内 -->
+  <div id="rotateHint">📱 端末を横向きにしてください<br>この海賊船は横長の海でしか戦えません</div>
   <p class="hint">マウスで大砲を左右に移動、クリックで真上に発射!右クリックか Space で玉を交換。落ちてくる宝やパワーアップは大砲でキャッチ!<br>BGM と効果音は最初のクリックで鳴り始めます(M キーで消音)。<br>🛠 <b>E キー</b>か下のボタンで<b>コースエディタ</b>を開いて、自分だけの航路を作れます。</p>
 
   <script src="https://code.createjs.com/1.0.0/createjs.min.js"></script>
@@ -231,6 +277,32 @@
         e.preventDefault();
         toggleFs();
       });
+
+      // ---------- スマホ: 最初のタップで全画面 + 横向き固定を試みる ----------
+      // 全画面や画面方向の固定は「ユーザー操作の中」でしか許可されないので、
+      // タイトル画面の最初のタップ(=出航のタップを兼ねる)で試みる。
+      // どの API が失敗してもゲーム開始は止めない:
+      //   - iPhone Safari は全画面 API 自体が無い → そのまま通常表示で遊べる
+      //   - iPad Safari は全画面は出来るが横固定は不可 → CSS の縦向き案内で誘導
+      if (window.matchMedia && matchMedia("(pointer: coarse)").matches) {
+        wrap.addEventListener("pointerdown", function goFs() {
+          wrap.removeEventListener("pointerdown", goFs);
+          function lockLandscape() {
+            try {
+              if (screen.orientation && screen.orientation.lock)
+                screen.orientation.lock("landscape").catch(function () {});
+            } catch (e2) {}
+          }
+          try {
+            if (fsEl()) { lockLandscape(); return; }
+            var req = wrap.requestFullscreen || wrap.webkitRequestFullscreen;
+            if (!req) return;                      // 全画面 API なし: 何もしない
+            var p = req.call(wrap);
+            if (p && p.then) p.then(lockLandscape).catch(function () {});
+            else lockLandscape();
+          } catch (e1) {}
+        });
+      }
     })();
   </script>
 </body>
