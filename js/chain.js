@@ -38,6 +38,10 @@
   var lastWaveSoundT = -1e9;
   var WAVE_SOUND_GAP = 150;   // この間隔(ms)以内の波は音を鳴らし直さない
 
+  // ホットループ用の使い回しオブジェクト(posAtInto の書き込み先)。ミサイル飛行中は
+  // 毎フレーム全玉の座標を引くので、座標オブジェクトの確保を無くす(cannon.js と同じ手)。
+  var _pos = { x: 0, y: 0, tx: 0, ty: 0 };
+
   // 次の波までの間隔(秒)。レベルが上がるほど短くなる
   function waveInterval() {
     var w = PP.WAVE_INTERVAL;
@@ -57,6 +61,7 @@
     lane.needTreasure = true;
     lane.waveFresh = true;
     lane.waveTimer = waveInterval();
+    PP.game.colorsDirty = true;   // 補給が再開した → 装填色の見張りの前提が変わる
     // 波の効果音は、近接タイミングで湧いた複数レーンぶんをまとめて1回だけ鳴らす
     if (g.state === "playing") {
       var now = Date.now();
@@ -100,6 +105,7 @@
       PP.layers.ballUnder.addChild(view);   // 既定は下層。交差では描画側が上層へ移す
       balls.push({ d: d, color: color, wave: lane.wave, view: view, pull: 0, slide: 0 });
       PP.game.ballsDirty = true;   // 玉の増減 → 描画側が重なり順を積み直す
+      PP.game.colorsDirty = true;  // 盤面の色構成が変わった → 装填色の見張りを回す
       lane.pending--;
     }
 
@@ -116,6 +122,7 @@
           view: tview, pull: 0, slide: 0
         });
         PP.game.ballsDirty = true;
+        PP.game.colorsDirty = true;   // 補給完了(pending/needTreasure が変化)
       }
     }
   }
@@ -627,6 +634,7 @@
     var balls = lane.balls;
     var removed = balls.splice(i, j - i + 1);
     PP.game.ballsDirty = true;
+    PP.game.colorsDirty = true;   // 色が盤面から消えたかもしれない → 見張りを回す
     // 反動の起点が消えたら、後ろ(補給側)に残った玉へ引き継ぐ。
     if (lane.recoil && removed.indexOf(lane.recoil.anchor) >= 0) {
       lane.recoil.anchor = balls[i] || null;
@@ -745,7 +753,7 @@
         if (b.treasure) continue;
         if (b.d < PP.R) continue;              // まだ洞窟の中
         if (lane.rail.tunnelAt(b.d)) continue; // トンネル内=隠れている
-        var p = lane.rail.posAt(b.d);
+        var p = lane.rail.posAtInto(b.d, _pos);
         if (Math.abs(p.x - x) >= H) continue;
         if (p.y > yBottom + H || p.y < yTop - H) continue;
         if (!fxAt) fxAt = { x: p.x, y: p.y };
@@ -796,6 +804,7 @@
     }
     balls.splice(at, 0, newBall);
     PP.game.ballsDirty = true;
+    PP.game.colorsDirty = true;   // 玉が増えた → 装填色の見張りを回す
     PP.audio.hit();
     // 重なりを前方へ押し出して解消(表示は slide で滑らかに開く)
     relax(lane, true);

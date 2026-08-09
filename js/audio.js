@@ -61,7 +61,9 @@
   }
   // HTMLAudio(mp3 の SE)を seBus に載せてリバーブを掛ける。クローンごとに一度だけ
   // MediaElementSource を作る。WebAudio が使えない/失敗した場合は素の再生に戻る。
-  function routeSE(el) {
+  // persistent=true(プールで使い回すクローン)は配線を繋ぎっぱなしにする:
+  // 停止中の media 要素は無音を出すだけなので、聴こえ方は都度切断と同一。
+  function routeSE(el, persistent) {
     if (el._seSrc) return;
     // file:// で直接開くと MediaElementSource が無音化するブラウザがあるため、
     // その場合は配線せず素のまま鳴らす(合成音 beep のリバーブは有効のまま)
@@ -73,10 +75,12 @@
       src.connect(seBus);
       el._seSrc = src;
       activeSE.push(src);
-      el.addEventListener("ended", function () {
-        try { src.disconnect(); } catch (e) {}
-        var k = activeSE.indexOf(src); if (k >= 0) activeSE.splice(k, 1);
-      });
+      if (!persistent) {
+        el.addEventListener("ended", function () {
+          try { src.disconnect(); } catch (e) {}
+          var k = activeSE.indexOf(src); if (k >= 0) activeSE.splice(k, 1);
+        });
+      }
     } catch (e) { /* フォールバック: そのまま destination で鳴る */ }
   }
 
@@ -101,7 +105,10 @@
   // ---------- 効果音(mp3) ----------
   var sources = [];   // preload() で読み込み完了を待つ音源
 
-  // 同じ音が重なっても切れないよう、再生のたびに複製して鳴らす。
+  // 同じ音が重なっても切れないよう、複製した実体をプールして鳴らす。
+  // 再生中(= ended でも paused でもない)の実体は絶対に奪わないので、
+  // 重なりの聴こえ方は「毎回複製」と同一のまま、Audio 要素と WebAudio 配線の
+  // 生成が実同時再生数(通常 2〜4 個)で頭打ちになる。
   // 長い音(ゲームオーバーの吸い込み)はリスタート時に止めたいので、
   // 最後に鳴らした実体を覚えておいて stop() で黙らせられるようにする。
   function sfx(src, vol) {
@@ -109,14 +116,24 @@
     proto.preload = "auto";
     proto.volume = vol;
     sources.push(proto);
+    var pool = [];
     var last = null;
     var f = function () {
       if (muted) return;
       try {
-        var a = proto.cloneNode();
-        a.volume = vol;
+        var a = null;
+        for (var i = 0; i < pool.length; i++) {
+          if (pool[i].ended || pool[i].paused) { a = pool[i]; break; }
+        }
+        if (a) {
+          a.currentTime = 0;        // 使い回し: 頭出しして鳴らし直す
+        } else {
+          a = proto.cloneNode();    // 全部再生中: 従来どおり複製を増やす
+          a.volume = vol;
+          routeSE(a, true);         // BGM 以外の SE は軽いリバーブを通す(配線は恒久)
+          pool.push(a);
+        }
         last = a;
-        routeSE(a);                 // BGM 以外の SE は軽いリバーブを通す
         var p = a.play();
         if (p && p.catch) p.catch(function () { /* 未解錠なら鳴らさない */ });
       } catch (e) { /* 無音でも続行 */ }

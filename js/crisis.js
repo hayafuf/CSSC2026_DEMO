@@ -52,6 +52,21 @@
       var creep = new createjs.Shape();
       creep.compositeOperation = "lighter";
       creep.alpha = 0;
+      // 太い丸ストローク2本の再ラスタライズは重く、キャッシュしないと stage.update の
+      // たびに走る。経路の bbox(最大ストローク半幅 PP.R+2 と丸キャップぶんの余白付き)
+      // で一度 cache し、以後は drawCreep が描き直したときだけ updateCache する。
+      // キャッシュ済みビットマップにも alpha / lighter 合成は同じに掛かるので絵は同一。
+      var bx0 = Infinity, by0 = Infinity, bx1 = -Infinity, by1 = -Infinity;
+      for (var ci = 0; ci < creepPts.length; ci++) {
+        var cp = creepPts[ci];
+        if (cp.x < bx0) bx0 = cp.x;
+        if (cp.x > bx1) bx1 = cp.x;
+        if (cp.y < by0) by0 = cp.y;
+        if (cp.y > by1) by1 = cp.y;
+      }
+      var pad = PP.R + 6;
+      creep.cache(Math.floor(bx0 - pad), Math.floor(by0 - pad),
+        Math.ceil(bx1 - bx0 + pad * 2), Math.ceil(by1 - by0 + pad * 2));
       W.addChild(creep);
 
       var maw = new createjs.Shape();
@@ -134,7 +149,7 @@
     var g = part.creep.graphics;
     var pts = part.creepPts;
     g.clear();
-    if (count < 2) return;
+    if (count < 2) { part.creep.updateCache(); return; }
     function trace(len) {
       g.moveTo(pts[0].x, pts[0].y);
       for (var i = 1; i < len; i++) g.lineTo(pts[i].x, pts[i].y);
@@ -143,6 +158,7 @@
     trace(count); g.endStroke();
     g.setStrokeStyle(PP.R * 0.9, "round", "round").beginStroke("rgba(255,60,20,0.5)");
     trace(Math.max(2, Math.round(count * 0.45))); g.endStroke();
+    part.creep.updateCache();   // 描き直したフレームだけビットマップへ焼き直す
   }
 
   // 画面が血を流す。心拍の頭で滴らせる
@@ -334,6 +350,7 @@
       parts[pi].maw.alpha = 0;
       parts[pi].creep.alpha = 0;
       parts[pi].creep.graphics.clear();
+      parts[pi].creep.updateCache();
       parts[pi].creepDrawn = -1;
       parts[pi].announced = false;
       parts[pi].deep = 0;

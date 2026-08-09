@@ -174,6 +174,7 @@
         ["rgba(150,214,232,0.5)", "rgba(96,176,214,0.16)", "rgba(96,176,214,0)"],
         [0, 0.5, 1], 0, 0, 0, 0, 0, rad).drawCircle(0, 0, rad);
       s.cache(-rad, -rad, rad * 2, rad * 2);
+      s.scaleX = 2.4; s.scaleY = 0.8;   // 進行方向へ伸ばす楕円(定数なので一度だけ設定)
       PP.layers.railFlow.addChild(s);
       dots.push(s);
     }
@@ -192,7 +193,6 @@
         var dot = rf.dots[i];
         dot.x = p.x; dot.y = p.y;
         dot.rotation = Math.atan2(p.ty, p.tx) * 180 / Math.PI;   // 進行方向へ伸ばす
-        dot.scaleX = 2.4; dot.scaleY = 0.8;
         dot.alpha = 0.35 + 0.3 * Math.sin(fd * 0.02 + rf.phase * 0.08);
       }
     }

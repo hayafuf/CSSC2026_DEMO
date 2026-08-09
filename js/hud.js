@@ -41,6 +41,8 @@
 
   // 内部アニメ用
   var dispScore = 0, lastCombo = 0, animT = 0, lastNow = 0;
+  // 前フレームに描いた値(同じ値ならテキスト差し替え・チップ再描画を飛ばす)
+  var lastScoreDrawn = null, lastEffectsText = null;
 
   // 桁区切り
   function comma(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
@@ -184,7 +186,12 @@
     if (g.score < dispScore || Math.abs(g.score - dispScore) > 200000) dispScore = g.score;
     else dispScore += (g.score - dispScore) * Math.min(1, dt * 9);
     if (Math.abs(g.score - dispScore) < 0.6) dispScore = g.score;
-    hudScore.text = comma(Math.round(dispScore));
+    // 丸めた表示値が前フレームと同じなら、カンマ整形(正規表現)と差し替えを飛ばす
+    var rounded = Math.round(dispScore);
+    if (rounded !== lastScoreDrawn) {
+      lastScoreDrawn = rounded;
+      hudScore.text = comma(rounded);
+    }
 
     // パワーアップのチップ
     var parts = [];
@@ -195,15 +202,22 @@
       var spIcon = g.special === "missile" ? "🚀" : "💣";
       parts.unshift(spIcon + (g.specialLoaded ? " 装填" : " 待機"));
     }
-    hudEffects.text = parts.join("   ");
-    effectsChip.graphics.clear();
-    if (parts.length) {
-      var tw = hudEffects.getMeasuredWidth();
-      effectsChip.graphics
-        .beginFill("rgba(18,58,54,0.5)")
-        .drawRoundRect(hudEffects.x - 12, 15, tw + 24, 32, 16)
-        .beginStroke("rgba(142,240,208,0.5)").setStrokeStyle(1.2)
-        .drawRoundRect(hudEffects.x - 12, 15, tw + 24, 32, 16);
+    // 表示文字列(残り秒は Math.ceil なので約1秒に1回しか変わらない)が同じなら、
+    // 文字幅の計測(getMeasuredWidth はキャンバスでの実測=重い)とチップの
+    // 再描画を丸ごと飛ばす。チップの形は文字列の幅だけで決まるので絵は同一。
+    var effText = parts.join("   ");
+    if (effText !== lastEffectsText) {
+      lastEffectsText = effText;
+      hudEffects.text = effText;
+      effectsChip.graphics.clear();
+      if (parts.length) {
+        var tw = hudEffects.getMeasuredWidth();
+        effectsChip.graphics
+          .beginFill("rgba(18,58,54,0.5)")
+          .drawRoundRect(hudEffects.x - 12, 15, tw + 24, 32, 16)
+          .beginStroke("rgba(142,240,208,0.5)").setStrokeStyle(1.2)
+          .drawRoundRect(hudEffects.x - 12, 15, tw + 24, 32, 16);
+      }
     }
 
     // 生存ゲージ

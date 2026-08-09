@@ -527,6 +527,12 @@
   function syncColors() {
     var g = PP.game;
     if (g.state !== "playing") return;
+    // 盤面の玉と手札は毎フレームは変わらない。玉の増減(chain.js)と手札の変更
+    // (refreshBalls)が colorsDirty を立てたフレームだけ全レーン走査する。
+    // 同じ入力でこの関数を再実行しても結果は変わらない(色を引き直すのは
+    // 「装填色が盤面に無い」ときだけ)ので、スキップしても挙動は同一。
+    if (!g.colorsDirty) return;
+    g.colorsDirty = false;
     // 全レーンの盤面から実在色を集計する(手詰まり防止を全レーンで成立させる)
     var present = [], nPresent = 0, anyBalls = false, anyPending = false;
     g.eachLane(function (lane) {
@@ -564,6 +570,9 @@
 
   function refreshBalls() {
     var g = PP.game;
+    // 手札(装填色・次弾・特殊弾の装填状態)が変わる経路は必ずここを通るので、
+    // 装填色の見張り(syncColors)の再実行はここでまとめて予約する
+    g.colorsDirty = true;
     if (currentView) {
       if (currentView.spark) createjs.Tween.removeTweens(currentView.spark);
       currentView.parent.removeChild(currentView);
@@ -583,22 +592,33 @@
     refreshStock();
   }
 
-  // 照準ガイド(毎tick再描画)。望遠鏡が有効な間は着弾点まで伸びる
+  // 照準ガイドの前回描画時の入力。描く内容は (x, 望遠鏡, topY, 装填中の特殊弾) の
+  // 純関数なので、入力が同じフレームは clear()+再描画を丸ごと飛ばす。
+  // 比較は === の厳密一致(近似で飛ばすと1pxでも絵が変わりうる)。
+  var aimDrawn = false;   // いま照準線が描かれているか(非プレイ時のクリアを1回にする)
+  var aimX = null, aimSpy = null, aimTopY = null, aimSp = null;
+
+  // 照準ガイド(入力が変わった tick だけ再描画)。望遠鏡が有効な間は着弾点まで伸びる
   function updateAim() {
-    var g = aimLine.graphics;
-    g.clear();
-    if (PP.game.state !== "playing") return;
+    if (PP.game.state !== "playing") {
+      if (aimDrawn) { aimLine.graphics.clear(); aimDrawn = false; aimX = null; }
+      return;
+    }
     var x = PP.cannon.x;
     var spy = PP.game.effects.spyglass > 0;
     var topY;
     if (spy) {
-      topY = firstHitY(x);
+      topY = firstHitY(x);   // 玉は毎フレーム動くので着弾点の走査だけは毎回行う
       aimLine.alpha = 0.55;
     } else {
       topY = PP.cannon.y - MUZZLE_LEN - 90;
       aimLine.alpha = 0.25;
     }
     var sp = (PP.game.special && PP.game.specialLoaded) ? PP.game.special : null;
+    if (aimDrawn && x === aimX && spy === aimSpy && topY === aimTopY && sp === aimSp) return;
+    aimDrawn = true; aimX = x; aimSpy = spy; aimTopY = topY; aimSp = sp;
+    var g = aimLine.graphics;
+    g.clear();
     g.setStrokeStyle(2).beginStroke(
       sp === "missile" ? "#7ad9ff" : sp === "bomb" ? "#ff7a3c" : "#f5e8c8");
     // 装填した玉(砲口の -52 に原寸で乗る)の上端から引き始める。玉に食い込ませない。
@@ -626,33 +646,41 @@
     return best;
   }
 
+  // updateShots の玉座標キャッシュ。中身は毎フレーム書き直すが、配列やレーン毎の
+  // 入れ物はモジュールに置いて使い回す(弾が飛んでいる間の毎フレーム確保を無くす)。
+  var _cache = [], _cacheN = 0, _overPts = [], _overN = 0;
+
   // 発射玉の移動とチェーンへの命中判定(全レーン横断)
   function updateShots(dt) {
     var g = PP.game;
     var shots = g.shots;
+    if (shots.length === 0) return;   // 弾が無いフレームは何もしない
     var lanes = g.lanes;
     var R = PP.R, D = PP.D;
 
     // 玉の画面座標(と立体交差の上下・トンネルの内外)は d から一意に決まる。
     // 弾ごとに全玉ぶん引き直すと「弾数 × 玉数」になるので、盤面が変わらない限り
     // 玉あたり 1 回に集約する。割り込み/爆発で列が変わったら posDirty で作り直す。
-    var cache = [], overPts = [], posDirty = true;
+    var posDirty = true;
     function refreshBallPos() {
-      cache = [];
-      overPts = [];   // 橋(上の帯)に乗っている玉の画面座標。下の玉の遮蔽判定に使う
+      _overN = 0;   // 橋(上の帯)に乗っている玉の画面座標。下の玉の遮蔽判定に使う
       for (var li = 0; li < lanes.length; li++) {
         var lane = lanes[li];
         var balls = lane.balls;
-        var bx = [], by = [], bover = [], btun = [];
+        var c = _cache[li] ||
+          (_cache[li] = { lane: null, balls: null, n: 0, bx: [], by: [], bover: [], btun: [] });
+        c.lane = lane; c.balls = balls; c.n = balls.length;
         for (var k = 0; k < balls.length; k++) {
           var p = lane.rail.posAtInto(balls[k].d, _pos);
-          bx[k] = p.x; by[k] = p.y;
-          bover[k] = lane.rail.heightAt(balls[k].d) > 0;
-          btun[k] = lane.rail.tunnelAt(balls[k].d);
-          if (bover[k] && !btun[k] && balls[k].d >= PP.R) overPts.push(p.x, p.y);
+          c.bx[k] = p.x; c.by[k] = p.y;
+          c.bover[k] = lane.rail.heightAt(balls[k].d) > 0;
+          c.btun[k] = lane.rail.tunnelAt(balls[k].d);
+          if (c.bover[k] && !c.btun[k] && balls[k].d >= PP.R) {
+            _overPts[_overN++] = p.x; _overPts[_overN++] = p.y;
+          }
         }
-        cache[li] = { lane: lane, balls: balls, bx: bx, by: by, bover: bover, btun: btun };
       }
+      _cacheN = lanes.length;
       posDirty = false;
     }
 
@@ -665,8 +693,8 @@
     // 狙った弾がその手前で止まる。桁の幅を変えるときは必ずここも動かすこと。
     var OCCLUDE_R2 = (D * 0.85) * (D * 0.85);
     function occludedByDeck(x, y) {
-      for (var o = 0; o < overPts.length; o += 2) {
-        var dx = x - overPts[o], dy = y - overPts[o + 1];
+      for (var o = 0; o < _overN; o += 2) {
+        var dx = x - _overPts[o], dy = y - _overPts[o + 1];
         if (dx * dx + dy * dy < OCCLUDE_R2) return true;
       }
       return false;
@@ -730,25 +758,33 @@
       if (posDirty) refreshBallPos();
       var bestLane = -1, bestI = -1, bestScore = Infinity, bestDist = Infinity;
       var OVER_BIAS = (D * 0.6) * (D * 0.6);
-      for (var li = 0; li < cache.length; li++) {
-        var c = cache[li];
-        for (var i = 0; i < c.balls.length; i++) {
+      // 命中に必要な距離²(下の判定と同じ値)。score は最悪でも dist - OVER_BIAS
+      // なので、dist ≥ HIT_R2 + OVER_BIAS の玉は「命中し得る玉」(score < HIT_R2)
+      // に絶対勝てない = 飛ばしても結果は変わらない。まず dy だけで粗く弾く。
+      var HIT_R2 = (D * 0.92) * (D * 0.92);
+      var SKIP_R2 = HIT_R2 + OVER_BIAS;
+      for (var li = 0; li < _cacheN; li++) {
+        var c = _cache[li];
+        for (var i = 0; i < c.n; i++) {
+          var dy = sh.y - c.by[i];
+          if (dy * dy >= SKIP_R2) continue;   // 縦距離だけで既に候補外
           var b = c.balls[i];
           // 宝玉は割り込みの対象外。ただし爆弾は宝玉に当たっても起爆する
           if (b.treasure && sh.special !== "bomb") continue;
           if (b.d < R) continue;    // まだ洞窟の中
           if (c.btun[i]) continue;  // トンネル内=隠れていて撃てない
+          var dx = sh.x - c.bx[i];
+          var dist = dx * dx + dy * dy;
+          if (dist >= SKIP_R2) continue;      // 実距離でも候補外(遮蔽判定より先に安く弾く)
           // 下の帯の玉が橋の桁の下に隠れているなら撃てない(見えている上の帯を撃つ)
           if (!c.bover[i] && occludedByDeck(c.bx[i], c.by[i])) continue;
-          var dx = sh.x - c.bx[i], dy = sh.y - c.by[i];
-          var dist = dx * dx + dy * dy;
           var score = dist;
           if (c.bover[i]) score -= OVER_BIAS;
           if (score < bestScore) { bestScore = score; bestDist = dist; bestI = i; bestLane = li; }
         }
       }
-      if (bestI >= 0 && bestDist < (D * 0.92) * (D * 0.92)) {
-        var hitLane = cache[bestLane].lane;
+      if (bestI >= 0 && bestDist < HIT_R2) {
+        var hitLane = _cache[bestLane].lane;
         if (sh.special === "bomb") PP.chain.explodeAt(sh.x, sh.y);
         else PP.chain.insertShot(hitLane, sh, bestI);
         if (sh.view.spark) createjs.Tween.removeTweens(sh.view.spark);

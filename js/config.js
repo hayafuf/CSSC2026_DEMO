@@ -565,6 +565,7 @@
     lanes: [],
     hasOverpass: false,   // どこかのレーンに立体交差があるか(buildCourse でメモ)
     ballsDirty: true,     // 玉の増減があった=描画側が重なり順を積み直す(main.js renderChains)
+    colorsDirty: true,    // 盤面の色 or 手札が変わった=装填色の見張りを回す(cannon.js syncColors)
     shots: [],            // 飛行中の玉 {x, y, vx, vy, color, roll, view}(全レーン共通)
     finishing: false,     // 掃討フェーズ(ゲージが空。補給は止まり、全レーン消し切ればクリア)
     timeLeft: 0,          // 生存ゲージ残り秒
