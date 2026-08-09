@@ -187,6 +187,48 @@
     }
   }
 
+  /* ---------- 携帯用の操作ボタン ----------
+     タッチ端末だけに出す仮想ボタン。◀▶で大砲を移動、FIREで発射、⇄で玉を交換。
+     半透明にして、下を通る大砲やアイテムが完全には隠れないようにする。 */
+  #touchUI { display: none; }
+  @media (pointer: coarse) {
+    #touchUI { display: block; position: absolute; inset: 0; pointer-events: none; z-index: 6; }
+    .tbtn {
+      pointer-events: auto; position: absolute;
+      width: 72px; height: 72px; padding: 0; border-radius: 50%;
+      font-size: 28px; line-height: 1; color: #f4e2a0;
+      font-family: "Cinzel", "Meiryo", serif;
+      background: radial-gradient(circle at 50% 32%, rgba(60,44,18,.55), rgba(16,11,5,.55));
+      border: 2px solid rgba(210,168,96,.55);
+      box-shadow: 0 4px 14px rgba(0,0,0,.45), inset 0 1px 0 rgba(255,240,200,.14);
+      touch-action: none;
+      -webkit-tap-highlight-color: transparent;
+      -webkit-user-select: none; user-select: none;
+      -webkit-touch-callout: none;
+    }
+    .tbtn:active {
+      transform: scale(.92);
+      background: radial-gradient(circle at 50% 32%, rgba(90,64,24,.75), rgba(30,20,8,.75));
+      box-shadow: 0 2px 8px rgba(0,0,0,.5), 0 0 16px rgba(240,192,64,.3);
+    }
+    #tLeft  { left: calc(64px + env(safe-area-inset-left)); bottom: calc(12px + env(safe-area-inset-bottom)); }
+    #tRight { left: calc(152px + env(safe-area-inset-left)); bottom: calc(12px + env(safe-area-inset-bottom)); }
+    .tbtn-swap {
+      right: calc(122px + env(safe-area-inset-right)); bottom: calc(20px + env(safe-area-inset-bottom));
+      width: 60px; height: 60px; font-size: 24px;
+    }
+    .tbtn-fire {
+      right: calc(12px + env(safe-area-inset-right)); bottom: calc(12px + env(safe-area-inset-bottom));
+      width: 96px; height: 96px; font-size: 21px; font-weight: 800; letter-spacing: 1px;
+      border-color: rgba(240,160,96,.65);
+      background: radial-gradient(circle at 50% 32%, rgba(96,40,16,.6), rgba(28,10,5,.6));
+    }
+    .tbtn-fire:active {
+      background: radial-gradient(circle at 50% 32%, rgba(150,60,20,.8), rgba(50,18,8,.8));
+      box-shadow: 0 2px 8px rgba(0,0,0,.5), 0 0 20px rgba(255,140,60,.45);
+    }
+  }
+
   /* ---------- 縦向きの案内 ----------
      スマホを縦に持っているときは「横向きにしてね」と案内する(ゲームは止めない。
      回転するとメディアクエリが外れて自動的に消え、そのまま遊べる)。 */
@@ -208,6 +250,14 @@
   <div class="stage-wrap" id="stageWrap">
     <canvas id="gameCanvas" width="1300" height="700"></canvas>
     <button id="fsBtn" class="fs-btn" title="全画面表示 (F キー)" aria-label="全画面表示">⛶</button>
+    <!-- 携帯用の操作ボタン(タッチ端末のみ CSS で表示)。
+         DOM ボタンなので「◀ を押しながら FIRE」のような複数指の同時操作が自然に効く -->
+    <div id="touchUI" aria-hidden="true">
+      <button id="tLeft"  class="tbtn" tabindex="-1">◀</button>
+      <button id="tRight" class="tbtn" tabindex="-1">▶</button>
+      <button id="tSwap"  class="tbtn tbtn-swap" tabindex="-1">⇄</button>
+      <button id="tFire"  class="tbtn tbtn-fire" tabindex="-1">FIRE</button>
+    </div>
   </div>
   <!-- スマホ縦持ちのときだけ CSS(orientation: portrait)で表示される案内 -->
   <div id="rotateHint">📱 端末を横向きにしてください<br>この海賊船は横長の海でしか戦えません</div>

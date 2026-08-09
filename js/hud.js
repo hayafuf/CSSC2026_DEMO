@@ -25,9 +25,8 @@
   // 難易度ボタンと同じ「矩形当たり判定」方式(発射クリックと混ざらないため)
   var pauseBtn = null;
   var PAUSE_RECT = { x: W - 46, y: 74, w: 36, h: 36 };
-  // ⇄ 交換ボタン(タッチ端末だけに出す)。スマホには右クリックも Space も無いので、
-  // 玉の交換をこのボタンで行う。判定はポーズボタンと同じ矩形当たり判定方式。
-  // 位置は右下(左下の特殊弾ストックスロットと被らないところ)
+  // ⇄ 交換はタッチ端末では DOM の仮想ボタン(index.html の #tSwap)が担当する。
+  // キャンバス内ボタンは廃止したが、判定関数(hitSwapBtn)は互換のため残してある
   var swapBtn = null;
   var SWAP_RECT = { x: W - 116, y: PP.H - 104, w: 92, h: 80 };
   // タッチ端末では見た目はそのまま、当たり判定だけ指の太さぶん広げる
@@ -150,29 +149,6 @@
     pauseBtn.addChild(pb);
     pauseBtn.visible = false;
     L.addChild(pauseBtn);
-
-    // ---- ⇄ 交換ボタン(タッチ端末用。ポーズボタンと同じ真鍮の意匠) ----
-    if (PP.TOUCH) {
-      swapBtn = new createjs.Container();
-      var sb = new createjs.Shape();
-      var sr = SWAP_RECT;
-      sb.graphics
-        .beginLinearGradientFill(["rgba(40,30,14,0.72)", "rgba(16,11,5,0.72)"], [0, 1], sr.x, sr.y, sr.x, sr.y + sr.h)
-        .drawRoundRect(sr.x, sr.y, sr.w, sr.h, 12)
-        .setStrokeStyle(1).beginStroke("rgba(210,168,96,0.5)")
-        .drawRoundRect(sr.x, sr.y, sr.w, sr.h, 12);
-      swapBtn.addChild(sb);
-      var st = new createjs.Text("⇄", '700 34px "Segoe UI Symbol","Meiryo",sans-serif', "#f4e2a0");
-      st.x = sr.x + sr.w / 2; st.y = sr.y + 28;
-      st.textAlign = "center"; st.textBaseline = "middle";
-      swapBtn.addChild(st);
-      var sl = new createjs.Text("交換", 'bold 15px "Meiryo",sans-serif', "#caa96a");
-      sl.x = sr.x + sr.w / 2; sl.y = sr.y + sr.h - 17;
-      sl.textAlign = "center"; sl.textBaseline = "middle";
-      swapBtn.addChild(sl);
-      swapBtn.visible = false;
-      L.addChild(swapBtn);
-    }
 
     dispScore = PP.game.score;
   }

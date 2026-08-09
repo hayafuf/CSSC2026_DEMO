@@ -231,6 +231,8 @@
     var g = PP.game;
 
     if (g.state === "playing") {
+      // 携帯の ◀▶ ボタンが押されている間、大砲を等速で動かす
+      if (touchMoveDir) PP.cannon.setX(PP.cannon.x + touchMoveDir * TOUCH_MOVE_SPEED * dt);
       if (g.comboTimer > 0) {
         g.comboTimer -= dt;
         if (g.comboTimer <= 0) { g.combo = 0; PP.hud.update(); }
@@ -411,13 +413,16 @@
   PP.retryLevel = retryLevel;
 
   // ---------- 入力 ----------
-  // タッチ操作は「押した瞬間に発射」だと狙う余地が無いので、
-  //   指を置く/なぞる … 照準(大砲が指の X に追従)
-  //   指を離す       … 発射
-  //   大砲を(動かさず)ちょんとタップ … 玉の交換
-  // にする。マウスは従来どおり「クリックした瞬間に発射」。
-  var touchAiming = false;   // タッチで照準中(離したら発射する)か
+  // タッチ操作は画面の仮想ボタン(index.html の #touchUI)が主役:
+  //   ◀ ▶ ボタン(押しっぱなし) … 大砲の移動
+  //   FIRE ボタン               … 発射
+  //   ⇄ ボタン / 大砲をタップ  … 玉の交換
+  // 盤面を指でなぞった場合も「照準だけ」動く(発射はしない。誤射を防ぐ)。
+  // マウスは従来どおり「クリックした瞬間に発射」。
+  var touchAiming = false;   // タッチで盤面をなぞって照準中か
   var touchDownX = 0, touchDownT = 0, touchOnCannon = false;
+  var touchMoveDir = 0;               // ◀▶ ボタンで押されている方向(-1/0/+1)
+  var TOUCH_MOVE_SPEED = 1000;        // ◀▶ 移動の速さ px/s
   function isTouchEv(e) {
     var n = e && e.nativeEvent;
     return !!(n && n.type && n.type.indexOf("touch") === 0);
@@ -463,7 +468,7 @@
         return;
       }
       if (isTouchEv(e)) {
-        // タッチは照準だけ。発射(または大砲タップ=交換)は指を離したとき
+        // タッチは照準だけ(発射は FIRE ボタン)。大砲タップは交換の合図
         touchAiming = true;
         touchDownX = e.stageX; touchDownT = Date.now();
         // 「大砲の上から触り始めたか」は大砲を動かす前に測る
@@ -570,14 +575,14 @@
         PP.game.state = "title";
         PP.hud.showOverlay("🏴‍☠️ Are you ready?",
           PP.TOUCH
-            ? "タップで出航!\n指でなぞって大砲をねらい、はなすと発射\n大砲か ⇄ ボタンをタップで玉を交換\n特殊弾は左下のスロットをタップで交換"
+            ? "タップで出航!\n◀ ▶ ボタン(または画面をなぞる)で大砲を移動\nFIRE ボタンで発射、⇄ ボタンで玉を交換\n特殊弾は左下のスロットをタップで交換"
             : "クリックで出航!\nマウスで大砲を移動、クリックで発射\n右クリック / Space で玉を交換、M で消音\n特殊弾は左下のスロットをクリックで交換");
       }
     );
 
     stage.on("stagemousedown", onStageDown);
-    // タッチの発射は「指を離した瞬間」。ドラッグで狙いを調整してから離す。
-    // 大砲の上で「動かさず短く」タップしたときだけ、発射ではなく玉の交換
+    // 盤面のタッチは離しても発射しない(発射は FIRE ボタン)。
+    // 大砲の上で「動かさず短く」タップしたときだけ、玉の交換
     stage.on("stagemouseup", function (e) {
       if (!touchAiming) return;
       touchAiming = false;
@@ -585,16 +590,53 @@
       if (PP.pauseCtl && PP.pauseCtl.active) return;
       var moved = Math.abs(e.stageX - touchDownX) > 24;
       var quick = Date.now() - touchDownT < 350;
-      if (touchOnCannon && !moved && quick) {
-        PP.cannon.swap();
-        return;
-      }
-      PP.cannon.setX(e.stageX);
-      PP.cannon.fire();
+      if (touchOnCannon && !moved && quick) PP.cannon.swap();
     });
     // 音の解錠の保険: ブラウザの自動再生制限は「ユーザー操作の中」でしか
     // 解けない。タッチ変換が効かない環境でも最初の1タップで確実に解く
     document.addEventListener("pointerdown", function () { PP.audio.unlock(); }, { once: true });
+
+    // ---- 携帯用の操作ボタン(index.html の #touchUI)の配線 ----
+    // 表示/非表示は CSS(pointer: coarse)が決めるので、ここでは配線だけ行う
+    (function wireTouchButtons() {
+      function canPlay() {
+        return PP.game.state === "playing" && !(PP.pauseCtl && PP.pauseCtl.active);
+      }
+      // 押しっぱなしで効く移動ボタン。指が滑って外れても止まるように
+      // pointercancel / lostpointercapture でも解除する
+      function bindHold(id, dir) {
+        var el = document.getElementById(id);
+        if (!el) return;
+        el.addEventListener("pointerdown", function (ev) {
+          ev.preventDefault();
+          PP.audio.unlock();
+          if (el.setPointerCapture) { try { el.setPointerCapture(ev.pointerId); } catch (e2) {} }
+          touchMoveDir = dir;
+        });
+        function stop() { if (touchMoveDir === dir) touchMoveDir = 0; }
+        el.addEventListener("pointerup", stop);
+        el.addEventListener("pointercancel", stop);
+        el.addEventListener("lostpointercapture", stop);
+        el.addEventListener("contextmenu", function (ev) { ev.preventDefault(); });
+      }
+      // 押した瞬間に1回だけ効くボタン。ポーズ中は「再開」として働く
+      function bindTap(id, action) {
+        var el = document.getElementById(id);
+        if (!el) return;
+        el.addEventListener("pointerdown", function (ev) {
+          ev.preventDefault();
+          PP.audio.unlock();
+          if (PP.pauseCtl && PP.pauseCtl.active) { PP.pauseCtl.resume(); return; }
+          if (canPlay()) action();
+        });
+        el.addEventListener("contextmenu", function (ev) { ev.preventDefault(); });
+      }
+      bindHold("tLeft", -1);
+      bindHold("tRight", 1);
+      bindTap("tFire", function () { PP.cannon.fire(); });
+      bindTap("tSwap", function () { PP.cannon.swap(); });
+    })();
+
     stage.on("stagemousemove", function (e) {
       if (PP.pauseCtl && PP.pauseCtl.active) return;   // ポーズ中は大砲も動かさない
       PP.cannon.setX(e.stageX);
