@@ -120,8 +120,16 @@
     }
   }
 
+  // 携帯のバイブレーション。対応していない端末(iPhone など)では何も起きない
+  function vibrate(pattern) {
+    if (navigator.vibrate) { try { navigator.vibrate(pattern); } catch (e) {} }
+  }
+
   function collect(it) {
     PP.audio.catchItem();
+    // 爆弾・ミサイルは特大、それ以外のアイテムは中くらいの振動
+    var isBig = it.kind === "power" && (it.def.id === "bomb" || it.def.id === "missile");
+    vibrate(isBig ? [140, 60, 220] : 60);
     if (it.kind === "coin") {
       // 【課題5】コインをキャッチ。枚数を増やして、ライフ回復の判定へ
       PP.game.coins++;
