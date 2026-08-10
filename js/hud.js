@@ -244,6 +244,16 @@
     PP.POWERUPS.forEach(function (p) {
       if (p.dur > 0 && g.effects[p.id] > 0) parts.push(p.icon + Math.ceil(g.effects[p.id]));
     });
+    // 状態異常(骸骨玉の被弾・パワーダウン)のチップ。ボス戦は boss.js の
+    // updateChips が専用表示を持つので、こちらには出さない(二重表示防止)
+    if (!g.bossMode) {
+      var bfx = g.bossFx;
+      // freeze は ⛓(パワーアップ「錨⚓」のチップと同じ行に並ぶので記号を分ける)
+      if (bfx.freeze > 0) parts.push("⛓" + Math.ceil(bfx.freeze));
+      if (bfx.addle > 0) parts.push("🌀" + Math.ceil(bfx.addle));
+      if (bfx.ink > 0) parts.push("🦑" + Math.ceil(bfx.ink));
+      if (bfx.shotSlow > 0) parts.push("⏳" + Math.ceil(bfx.shotSlow));
+    }
     if (g.special) {
       var spIcon = g.special === "missile" ? "🚀" : "💣";
       parts.unshift(spIcon + (g.specialLoaded ? " 装填" : " 待機"));

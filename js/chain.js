@@ -111,6 +111,17 @@
       view.visible = false;
       PP.layers.ballUnder.addChild(view);   // 既定は下層。交差では描画側が上層へ移す
       balls.push({ d: d, color: color, wave: lane.wave, view: view, pull: 0, slide: 0 });
+      // 骸骨玉: 一定確率で「普通の色玉」に骸骨マークを重ねる(色はそのままなので
+      // マッチも磁石も通常どおり効く。弾幕の管理は skull.js)。ボス戦には出さない
+      if (!PP.game.bossMode && PP.skull && PP.SKULL &&
+          Math.random() < PP.SKULL.chance &&
+          PP.skull.countActive() < PP.SKULL.maxActive) {
+        var nb = balls[balls.length - 1];
+        nb.skull = true;
+        nb.skullCd = PP.SKULL.firstDelay;
+        nb.skullFx = PP.ball.makeSkullOverlay();
+        view.addChild(nb.skullFx);
+      }
       PP.game.ballsDirty = true;   // 玉の増減 → 描画側が重なり順を積み直す
       PP.game.colorsDirty = true;  // 盤面の色構成が変わった → 装填色の見張りを回す
       lane.pending--;
@@ -671,6 +682,16 @@
     removed.forEach(function (b, k) {
       var p = lane.rail.posAt(b.d + (b.slide || 0));
       b.view.x = p.x; b.view.y = p.y;
+      // 骸骨玉の撃破報酬: パワーアップ確定ドロップ+ボーナススコア。
+      // destroyRange は全撃破経路(マッチ・爆弾・ミサイル・カラーボム)の
+      // 唯一の通り道なので、ここ1か所で必ず報酬が出る
+      if (b.skull) {
+        PP.game.score += PP.SKULL.rewardScore;
+        PP.powerups.dropPower(p.x, p.y);
+        PP.fx.ring(p.x, p.y, "#ffd24a", 10, 80, 450);
+        PP.fx.floatText("☠ 撃破! +" + PP.SKULL.rewardScore, p.x, p.y - 34, "#ffd24a", 20);
+        PP.audio.beep(520, 0.12, "square", 0.09);
+      }
       PP.fx.particles(p.x, p.y, b.color, k * 15);
       createjs.Tween.get(b.view, { override: true })
         .wait(k * 15)

@@ -17,6 +17,10 @@
   // 4レーン同時防衛が忙しいぶん、道具を多めに配って捌かせる)
   function maybeDrop(x, y) {
     var g = PP.game;
+    // パワーダウン(取ってはいけない物)は独立の別ロール。
+    // コンボボーナスも dropMult も掛けない: 上手いプレイの報酬が罠では本末転倒だし、
+    // コース5(dropMult 2.5)が罠だらけになるのも防ぐ。ボス戦にも出さない
+    if (!g.bossMode && Math.random() < PP.ITEMS.downChance) dropDown(x, y);
     var chance = PP.ITEMS.dropChance + Math.min(g.combo, 5) * PP.ITEMS.comboBonus;
     chance *= (g.builtCourse && g.builtCourse.dropMult) || 1;
     if (Math.random() > chance) return;
@@ -48,6 +52,31 @@
     view.x = x; view.y = y;
     PP.layers.item.addChild(view);
     items.push({ x: x, y: y, vy: 20, kind: kind, def: def, color: color, view: view });
+  }
+
+  // パワーダウンアイテムの落下: 暗い紫の見た目で「避けるべき物」と分かる。
+  // 落下・キャッチの仕組みはパワーアップと共通(update のループがそのまま捌く)
+  function dropDown(x, y) {
+    var def = weightedPick(PP.POWERDOWNS);
+    var view = makeItemView(def.icon, null, true);
+    view.x = x; view.y = y;
+    PP.layers.item.addChild(view);
+    items.push({ x: x, y: y, vy: 20, kind: "down", def: def, color: null, view: view });
+  }
+
+  // 骸骨玉の撃破報酬: 確率もコインも罠も挟まず、パワーアップを確定で1個落とす
+  // (chain.js destroyRange から呼ばれる)。リスクに見合う確実なリターン
+  function dropPower(x, y) {
+    var pool = PP.POWERUPS;
+    if (PP.game.bossMode) {
+      pool = pool.filter(function (p) { return p.id !== "reverse"; });
+    }
+    var def = weightedPick(pool);
+    var color = (def.id === "colorbomb") ? pickBoardColor() : null;
+    var view = makeItemView(def.icon, color);
+    view.x = x; view.y = y;
+    PP.layers.item.addChild(view);
+    items.push({ x: x, y: y, vy: 20, kind: "power", def: def, color: color, view: view });
   }
 
   // 盤面(全レーン)に今ある色から1色選ぶ。玉が無ければ使用中の色数から選ぶ
@@ -90,14 +119,23 @@
 
   // colorIndex を渡すと、その色の玉として塗られる(カラーボム用)。
   // 「何色が消えるか」がアイテムの見た目だけで分かるようにする。
-  function makeItemView(icon, colorIndex) {
+  // dark=true はパワーダウン用: 暗い紫地+毒々しい縁で「取ってはいけない」を
+  // 見た目だけで伝える(パワーアップの金縁とはっきり区別できる)
+  function makeItemView(icon, colorIndex, dark) {
     var cont = new createjs.Container();
     var pal = (colorIndex !== null && colorIndex !== undefined) ? PP.PALETTE[colorIndex] : null;
     var bg = new createjs.Shape();
-    bg.graphics.beginFill(pal ? pal.main : "rgba(10,16,26,0.78)")
-      .beginStroke(pal ? pal.light : "#f0c040").setStrokeStyle(3)
+    bg.graphics.beginFill(pal ? pal.main : (dark ? "#1a0e26" : "rgba(10,16,26,0.78)"))
+      .beginStroke(pal ? pal.light : (dark ? "#8a20d8" : "#f0c040")).setStrokeStyle(3)
       .drawCircle(0, 0, 26);
     cont.addChild(bg);
+    if (dark) {
+      // ゆっくり明滅させて不穏さを出す(拾う前に気づけるように)
+      createjs.Tween.get(bg, { loop: true })
+        .to({ alpha: 0.55 }, 420, createjs.Ease.quadInOut)
+        .to({ alpha: 1 }, 420, createjs.Ease.quadInOut);
+      cont.pulse = bg;   // 後始末用(update が removeChild する前に止める)
+    }
     var t = new createjs.Text(icon, "30px serif", "#fff");
     t.textAlign = "center";
     t.textBaseline = "middle";
@@ -112,6 +150,13 @@
     for (var k in g.effects) {
       if (g.effects[k] > 0) g.effects[k] = Math.max(0, g.effects[k] - dt);
     }
+    // 状態異常(bossFx)タイマーの減算はここ1か所だけ。
+    // ボスの妖弾・骸骨玉の弾幕・パワーダウンアイテムの全員がここへ相乗りする
+    // (powerups.update は全コースで毎フレーム呼ばれるので、通常コースでも減る)
+    var bfx = g.bossFx;
+    for (var bk in bfx) {
+      if (bfx[bk] > 0) bfx[bk] = Math.max(0, bfx[bk] - dt);
+    }
     for (var i = items.length - 1; i >= 0; i--) {
       var it = items[i];
       it.vy += PP.ITEMS.fallGravity * dt;
@@ -123,6 +168,7 @@
         collect(it);
       }
       if (caught || it.y > PP.H + 24) {
+        if (it.view.pulse) createjs.Tween.removeTweens(it.view.pulse);   // 明滅の後始末
         PP.layers.item.removeChild(it.view);
         items.splice(i, 1);
       }
@@ -145,6 +191,22 @@
       PP.fx.floatText("🪙 " + PP.game.coins + " / " + PP.LIFE.coinsPerLife, it.x, it.y - 22, "#ffe08a", 18);
       checkCoinLife();
       PP.hud.update();
+    } else if (it.kind === "down") {
+      // パワーダウンを取ってしまった: 効果はどちらも「取らなければ無害」。
+      // 拾う位置取りのミスに対する、致命的でないペナルティに留める
+      var g = PP.game;
+      if (it.def.id === "ink") {
+        g.bossFx.ink = it.def.dur;
+        if (PP.skull) PP.skull.splatInk(3, it.def.dur);
+        PP.fx.screenFlash("rgba(20,10,30,0.4)", 0.4, 400);
+        PP.fx.floatText("🦑 墨をかぶった!", it.x, it.y - 22, "#c890f0", 18);
+      } else if (it.def.id === "shotSlow") {
+        g.bossFx.shotSlow = it.def.dur;
+        PP.fx.screenFlash("rgba(138,32,216,0.22)", 0.22, 600);
+        PP.fx.floatText("⏳ 弾が鈍い…", it.x, it.y - 22, "#c890f0", 18);
+      }
+      PP.audio.beep(120, 0.3, "sawtooth", 0.12);
+      vibrate([80, 40, 160]);
     } else if (it.kind === "treasure") {
       PP.game.score += it.def.value;
       PP.fx.floatText("+" + it.def.value, it.x, it.y - 22, "#ffe08a", 18);
@@ -264,7 +326,10 @@
 
   // レベル開始時のリセット
   function clear() {
-    items.forEach(function (it) { PP.layers.item.removeChild(it.view); });
+    items.forEach(function (it) {
+      if (it.view.pulse) createjs.Tween.removeTweens(it.view.pulse);
+      PP.layers.item.removeChild(it.view);
+    });
     items = [];
     var eff = PP.game.effects;
     for (var k in eff) eff[k] = 0;
@@ -272,6 +337,7 @@
 
   PP.powerups = {
     maybeDrop: maybeDrop,
+    dropPower: dropPower,
     dropTreasure: dropTreasure,
     colorBomb: colorBomb,
     update: update,

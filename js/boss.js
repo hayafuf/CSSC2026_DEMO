@@ -1300,13 +1300,9 @@
     // 予兆中は移動が遅くなる(撃ち込みの狙い目を作る)
     moveT += dt * (state === "telegraph" ? B.telegraphSlow : 1);
 
-    // 状態異常タイマーの減算はここ1か所だけ。0 で確実に平常へ戻る。
+    // 状態異常タイマー(bossFx)の減算は powerups.js の update に一本化した
+    // (骸骨玉・パワーダウンとの共用のため。二重に減らさないこと)。
     // 発生・解除の文字通知は出さない(HUD の状態異常チップに一本化)
-    var fx = g.bossFx;
-    if (fx.ink > 0) fx.ink = Math.max(0, fx.ink - dt);
-    if (fx.addle > 0) fx.addle = Math.max(0, fx.addle - dt);
-    if (fx.freeze > 0) fx.freeze = Math.max(0, fx.freeze - dt);
-    if (fx.shotSlow > 0) fx.shotSlow = Math.max(0, fx.shotSlow - dt);
     if (iFrames > 0) iFrames -= dt;
     if (guardFxCd > 0) guardFxCd -= dt;
     // シールドの残りと泡の明滅(無敵中だけ見える)

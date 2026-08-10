@@ -127,6 +127,12 @@
     g.specialLoaded = false;
     g.finishing = false;
     PP.powerups.clear();
+    // 骸骨玉の弾・墨と状態異常を仕切り直す(リトライ・再出航もここを通る)。
+    // ボス戦は boss.setActive → reset → clearStatusFx が別途ゼロ化するが、
+    // 通常コースはここが唯一のリセット地点になる
+    if (PP.skull) PP.skull.clear();
+    var bfx = g.bossFx;
+    for (var bk in bfx) bfx[bk] = 0;
 
     // Arcade 式: 生存ゲージが尽きるまで波が補給され続ける。
     // 難易度(【課題1】config.js の timeMult)で耐える秒数が伸縮する
@@ -171,6 +177,7 @@
     // 最終ステージ(自作コースのプレイ中は除く)ならゲームクリア
     var isFinal = !g.customCourse && g.level >= total;
     g.score += 1000;
+    if (PP.skull) PP.skull.clear();   // クリア画面に妖弾・墨を固めて残さない
     PP.crisis.stop();          // 警報と赤い帳を畳む
     PP.audio.setDanger(false);
     PP.audio.clear();
@@ -240,6 +247,7 @@
     // 飛んでいた玉は宙で消える(gameOver と同じ後始末)
     g.shots.forEach(function (s) { PP.layers.shot.removeChild(s.view); });
     g.shots = [];
+    if (PP.skull) PP.skull.clear();   // 骸骨玉の妖弾も宙に残さない
     PP.hud.update();   // 右上の ❤ をこの時点で減らす(暗転の文字と食い違わないように)
     buildRetryVeil();
     retryPhase = "freeze";
@@ -343,6 +351,7 @@
     // 飛んでいた玉は宙で消える(演出中は撃てないので置き去りにしない)
     g.shots.forEach(function (s) { PP.layers.shot.removeChild(s.view); });
     g.shots = [];
+    if (PP.skull) PP.skull.clear();   // 骸骨玉の妖弾も置き去りにしない
     // 残っている宝玉は道連れに砕ける(全レーン)
     PP.chain.treasureList().forEach(function (t) {
       var p = t.lane.rail.posAt(Math.max(t.ball.d, 0));
@@ -397,6 +406,8 @@
       PP.chain.update(dt);         // 全レーンのチェーンを更新
       PP.cannon.updateShots(dt);   // 命中時にその場でマッチ判定される
       PP.powerups.update(dt);
+      // 骸骨玉の弾幕(通常コースのみ。ボス戦は boss.js の弾幕があるので出さない)
+      if (!g.bossMode && PP.skull) PP.skull.update(dt);
       PP.hud.updateEffects();
 
       // ボス戦: クラーケンの移動・攻撃・状態異常タイマーを進め、

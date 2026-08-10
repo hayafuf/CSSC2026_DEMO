@@ -276,6 +276,36 @@
     return cont;
   }
 
+  // 骸骨玉のマーク(通常の色付き玉の上に重ねるオーバーレイ)。
+  // 玉そのものは普通の色玉なのでマッチも磁石もそのまま効く。回転レイヤー
+  // (view.spin)には載せない=玉が転がってもマークは正位置のまま。
+  // 予兆の明滅は skull.js が毎フレーム ring の alpha を書いて行う
+  // (Tween を使わない=撃破時の後始末が要らない)。
+  function makeSkullOverlay() {
+    var cont = new createjs.Container();
+
+    // 暗い脈動リング(通常時はうっすら、予兆中は skull.js が赤く強める)
+    var ring = new createjs.Shape();
+    ring.graphics
+      .beginRadialGradientFill(["rgba(20,8,16,0)", "rgba(120,20,40,0.55)"], [0.55, 1],
+        0, 0, 0, 0, 0, R + 6)
+      .drawCircle(0, 0, R + 6);
+    ring.alpha = 0.4;
+    cont.addChild(ring);
+
+    // ドクロマーク(絵文字グリフは焼いて再整形を避ける。宝玉の💎と同じ手法)
+    var mark = new createjs.Text("☠", Math.round(R * 1.15) + "px serif", "#f2ecdD");
+    mark.textAlign = "center";
+    mark.textBaseline = "middle";
+    mark.shadow = new createjs.Shadow("rgba(0,0,0,0.9)", 0, 1, 4);
+    mark.cache(-R, -R, R * 2, R * 2);
+    cont.addChild(mark);
+
+    cont.ring = ring;   // skull.js が予兆の明滅で触る
+    cont.mark = mark;
+    return cont;
+  }
+
   // 装填用: チェーンに残っている色から選ぶ。基本は「盤面に実在する色」を
   // 色ごと重み1で一様に引く(本家Zuma準拠。手詰まりは原理的に起きない)。
   // そのうえで、先頭(樽に一番近い玉 = 最初の非宝玉)の色だけ PICK_FRONT_GAIN 倍に
@@ -353,6 +383,7 @@
     makeBombView: makeBombView,
     makeMissileView: makeMissileView,
     makeTreasureView: makeTreasureView,
+    makeSkullOverlay: makeSkullOverlay,
     pickColor: pickColor,
     spawnColor: spawnColor
   };
