@@ -25,12 +25,15 @@
   // (ドロップ率は難易度で変えない。拾う気持ちよさは全難易度共通)。
   // コース定義の dropMult でコース単位の倍率を掛けられる(例: コース5は
   // 4レーン同時防衛が忙しいぶん、道具を多めに配って捌かせる)
+  var downCd = 0;   // パワーダウンのクールダウン残り秒(連発防止)
+
   function maybeDrop(x, y) {
     var g = PP.game;
     // パワーダウン(取ってはいけない物)は独立の別ロール。
     // コンボボーナスも dropMult も掛けない: 上手いプレイの報酬が罠では本末転倒だし、
-    // コース5(dropMult 2.5)が罠だらけになるのも防ぐ。ボス戦にも出さない
-    if (!g.bossMode && Math.random() < PP.ITEMS.downChance) dropDown(x, y);
+    // コース5(dropMult 2.5)が罠だらけになるのも防ぐ。ボス戦にも出さない。
+    // クールダウン中も出さない(連鎖のたびに罠が降ってくるのを防ぐ)
+    if (!g.bossMode && downCd <= 0 && Math.random() < PP.ITEMS.downChance) dropDown(x, y);
     var chance = PP.ITEMS.dropChance + Math.min(g.combo, 5) * PP.ITEMS.comboBonus;
     chance *= (g.builtCourse && g.builtCourse.dropMult) || 1;
     if (Math.random() > chance) return;
@@ -69,6 +72,7 @@
   // パワーダウンアイテムの落下: 暗い紫の見た目で「避けるべき物」と分かる。
   // 落下・キャッチの仕組みはパワーアップと共通(update のループがそのまま捌く)
   function dropDown(x, y) {
+    downCd = PP.ITEMS.downCooldown;
     var def = weightedPick(PP.POWERDOWNS);
     var view = makeItemView(def.icon, null, true);
     view.x = x; view.y = y;
@@ -180,6 +184,7 @@
   // アイテムの落下・キャッチ判定と、時間制エフェクトのタイマー更新
   function update(dt) {
     var g = PP.game;
+    if (downCd > 0) downCd -= dt;
     for (var k in g.effects) {
       if (g.effects[k] > 0) g.effects[k] = Math.max(0, g.effects[k] - dt);
     }
@@ -372,6 +377,7 @@
       PP.layers.item.removeChild(it.view);
     });
     items = [];
+    downCd = 0;
     var eff = PP.game.effects;
     for (var k in eff) eff[k] = 0;
   }
