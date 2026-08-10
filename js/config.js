@@ -47,7 +47,7 @@
     easy:     { name: "みならい海賊", entryMult: 0.85, holeMult: 0.95, curveMult: 1.15, timeMult: 0.85, colorAdd: 0, colorMin: 4, colorMax: 6, barrelBonus: 2,  useLives: true,  bgm: "BGM/Easy.mp3" },
     normal:   { name: "一人前の海賊", entryMult: 1.00, holeMult: 1.00, curveMult: 1.00, timeMult: 1.00, colorAdd: 0, colorMin: 4, colorMax: 6, barrelBonus: 0,  useLives: true,  bgm: "BGM/Game_music.mp3" },
     hard:     { name: "海賊船長",     entryMult: 1.10, holeMult: 1.02, curveMult: 0.95, timeMult: 1.00, colorAdd: 1, colorMin: 4, colorMax: 7, barrelBonus: 0,  useLives: true,  bgm: "BGM/Hard.mp3" },
-    hardcore: { name: "深海の悪魔",   entryMult: 1.12, holeMult: 1.02, curveMult: 0.90, timeMult: 1.10, colorAdd: 1, colorMin: 4, colorMax: 7, barrelBonus: 0, useLives: false, bgm: "BGM/HardCore.mp3" }
+    hardcore: { name: "深海の悪魔",   entryMult: 1.12, holeMult: 1.02, curveMult: 0.92, timeMult: 1.10, colorAdd: 1, colorMin: 4, colorMax: 7, barrelBonus: 0, useLives: false, bgm: "BGM/HardCore.mp3" }
   };
   // タイトル画面のボタンの並び順(1〜4 キーもこの順)
   PP.DIFFICULTY_ORDER = ["easy", "normal", "hard", "hardcore"];
