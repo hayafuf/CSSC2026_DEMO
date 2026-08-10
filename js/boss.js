@@ -1436,6 +1436,7 @@
       hpCont.visible = active;
     }
     reset();
+    if (!active) removeOpeningHint();   // 非ボス面へ戻ったらヒントも片付ける
     if (active) {
       showBanner("最終海域 ―― 深淵の主 クラーケン", "#ff5030", 3.2);
       PP.fx.screenFlash("rgba(160,20,16,0.3)", 0.3, 900);
@@ -1444,7 +1445,38 @@
       PP.audio.beep(55, 0.8, "sawtooth", 0.14);
       PP.audio.beep(82, 0.6, "sawtooth", 0.1);
       PP.audio.beep(110, 0.5, "sine", 0.08);
+      showOpeningHint();
     }
+  }
+
+  // 開幕の戦い方ヒント。決戦前のオーバーレイでも教えているが、
+  // URL 直接起動(?level=6)やリトライ直後はあれを見ないので、
+  // 戦闘画面でも最初の攻撃が来る前に一度だけ目に入るようにする。
+  // 最初の攻撃猶予(firstDelay 3秒)+数回の攻撃を見る間だけ出して消える
+  var hintTxt = null;
+  function removeOpeningHint() {
+    if (!hintTxt) return;
+    createjs.Tween.removeTweens(hintTxt);
+    if (hintTxt.parent) hintTxt.parent.removeChild(hintTxt);
+    hintTxt = null;
+  }
+  function showOpeningHint() {
+    removeOpeningHint();                  // リトライ時: 前のヒントを片付けてから
+    hintTxt = new createjs.Text(
+      "🎯 頭に玉を当てて HP を削れ!   ⚡ 予兆中に当てれば攻撃を阻止!   🛡 妖弾は自弾で迎撃できる",
+      'bold 15px "Meiryo", sans-serif', "#f5e8c8");
+    hintTxt.textAlign = "center";
+    hintTxt.x = PP.W / 2;
+    hintTxt.y = 168;                      // HP バーの下・最上段レーンより上
+    hintTxt.shadow = new createjs.Shadow("rgba(0,0,0,0.9)", 0, 2, 6);
+    PP.layers.hud.addChild(hintTxt);
+    createjs.Tween.get(hintTxt)
+      .wait(12000)
+      .to({ alpha: 0 }, 900)
+      .call(function () {
+        if (hintTxt && hintTxt.parent) hintTxt.parent.removeChild(hintTxt);
+        hintTxt = null;
+      });
   }
 
   // 勝利の受け渡し(1回だけ true)。main.js の tick が levelClear() に繋ぐ
