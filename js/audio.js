@@ -407,21 +407,33 @@
   // 最初のユーザー操作で呼ぶ。ブラウザの自動再生制限を解除するだけで、
   // ここでは BGM を鳴らさない(タイトル画面でのクリック/キー入力だけで
   // 曲が鳴り出さないように)。実際の再生はゲーム開始時の gameStart() が行う。
+  var primeIdx = 0;   // 携帯対応: 何番目の効果音まで解錠したか
   function unlock() {
-    if (unlocked) return;
-    unlocked = true;
-    ensureCtx();     // WebAudio(効果音)の解錠。BGM はここでは鳴らさない
-    // 携帯対応 その1: volume の変更が効く端末か調べる(iOS は無視される)
-    try {
-      var probe = new Audio();
-      probe.volume = 0.5;
-      canVolume = Math.abs(probe.volume - 0.5) < 0.01;
-    } catch (e) { /* 判定できなければ従来どおり */ }
-    // 携帯対応 その2: この「最初のユーザー操作」のうちに全音源を消音で解錠する。
-    // これをしないと iOS では、tick から切り替わる危機BGM・ゲームオーバーBGMや
-    // タップ以外のきっかけで鳴る効果音が一切鳴らない(聴こえる音は出さない)
-    sources.forEach(bless);
-    sfxAll.forEach(function (f) { f.prime(); });
+    if (!unlocked) {
+      unlocked = true;
+      ensureCtx();     // WebAudio(効果音)の解錠。BGM はここでは鳴らさない
+      // 携帯対応 その1: volume の変更が効く端末か調べる(iOS は無視される)
+      try {
+        var probe = new Audio();
+        probe.volume = 0.5;
+        canVolume = Math.abs(probe.volume - 0.5) < 0.01;
+      } catch (e) { /* 判定できなければ従来どおり */ }
+      // 携帯対応 その2: 最初のタップのうちに BGM と危機警報を消音で解錠する。
+      // これをしないと iOS では、tick から切り替わる危機BGM・ゲームオーバー
+      // BGM が鳴らない。PC はページ単位の許可なので不要(=従来と同じ動作)
+      if (PP.TOUCH) {
+        tracks.forEach(bless);
+        bless(loopCrisis);
+      }
+    }
+    // 携帯対応 その3: 効果音のクローンは「タップのたびに少しずつ」解錠する。
+    // 1回に全部やると BGM の出だしと読み込みを取り合って曲が遅れて聴こえる。
+    // unlock() は操作のたびに呼ばれるので、数タップで全部解錠し終わる
+    if (PP.TOUCH) {
+      for (var n = 0; n < 2 && primeIdx < sfxAll.length; n++) {
+        sfxAll[primeIdx++].prime();
+      }
+    }
   }
 
   function setDanger(on) {
