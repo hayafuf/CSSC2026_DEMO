@@ -87,6 +87,7 @@
   var tsuSafeX = 0, tsuDir = 1;          // 津波の安全地帯と進行方向
   var barrageLeft = 0, barrageT = 0;     // 流星雨の残りボレー数と次弾までの秒
   var sweepLeft = 0, sweepT = 0, sweepTotal = 0;   // 運命のルーレットの回転スイープ
+  var curtainLeft = 0, curtainT = 0, curtainTotal = 0;   // 時凪のカーテンの残り枚数
 
   // ランダマイズ(色ルーレット)は攻撃状態と独立に回す
   var rndSpinT = 0, rndStepT = 0, rndOrig = 0;
@@ -616,6 +617,7 @@
       if (k === "tsunami" && wave) continue;
       if (k === "barrage" && barrageLeft > 0) continue;
       if (k === "randomize" && (rndSpinT > 0 || sweepLeft > 0)) continue;
+      if (k === "shotSlow" && curtainLeft > 0) continue;
       pool.push(k);
     }
     if (pool.length === 0) pool = ATTACK_KEYS.slice();
@@ -782,21 +784,11 @@
                      ? [{ count: 12, speed: 240 * spdMul() }, { count: 16, speed: 180 * spdMul() }, { count: 20, speed: 140 * spdMul() }]
                      : [{ count: 10, speed: 230 * spdMul() }, { count: 14, speed: 165 * spdMul() }] } });
     } else if (key === "shotSlow") {
-      // 時凪の呪縛: 大弾のカーテンが五重(怒り時は六重)に降り注ぐ大技。
-      // 各層の隙間は互い違いで、速度差により層がすれ違うので
-      // 「安全な縦の通り道」が時間とともに移ろう=読み続けないと抜けられない
-      var rows = phase2 ? 6 : 5;
-      for (var row = 0; row < rows; row++) {
-        var nS = 7 - (row % 2);                     // 7発と6発を交互に
-        var vS = (235 - row * 25) * spdMul();       // 手前の層ほど速い(235/210/185/160/135/110)
-        var pitchS = PP.W / (nS + 1);
-        var offS = (row % 2) * pitchS * 0.5;        // 偶数層と奇数層で隙間を互い違いに
-        for (var c2 = 0; c2 < nS; c2++) {
-          var gxS = pitchS * (c2 + 1) + offS - pitchS * 0.25;
-          spawnBullet("shotSlow", gxS, sy - 20 - row * 55, 0, vS, 0, B.shotSlow.r,
-            { wave: { amp: 18, freq: 1.6, ph: row * 1.3 + c2 * 0.4 } });
-        }
-      }
+      // 時凪の呪縛: 大弾のカーテンを五重(怒り時は六重)、時間差で1枚ずつ落とす。
+      // 実際の発生は updateCurtain(奇数枚と偶数枚で隙間が互い違い)
+      curtainTotal = phase2 ? 6 : 5;
+      curtainLeft = curtainTotal;
+      curtainT = 0;                                 // 1枚目はすぐ
     } else if (key === "randomize") {
       // 運命のルーレット: 左右から交差する2本の「回転する腕」が
       // 弧を掃くように弾を置いていく(ルーレットの針の回転)
@@ -1018,6 +1010,31 @@
     PP.audio.beep(240 + barrageLeft * 40, 0.08, "square", 0.08);
   }
 
+  // ---------- 時凪の呪縛(時間差で降る互い違いのカーテン) ----------
+  // 0.55秒おきに1枚ずつ、全弾同速のカーテンを落とす。7発の段と6発の段を
+  // 交互に撃ち、共通のピッチ(W/8)で 6発の段は 7発の段のちょうど中間に置く。
+  // 降りてくる弾幕全体が綺麗な市松格子になり、「前の隙間を抜けたら
+  // 次の隙間へ半歩移動する」を繰り返させるリズム攻撃
+  function updateCurtain(dt) {
+    if (curtainLeft <= 0) return;
+    curtainT -= dt;
+    if (curtainT > 0) return;
+    curtainT = 0.55;
+    var row = curtainTotal - curtainLeft;
+    curtainLeft--;
+    var B = PP.BOSS;
+    var odd = row % 2;                          // 0=7発の段 / 1=6発の段
+    var nS = 7 - odd;
+    var vS = 235 * spdMul();                    // 全弾同速(層の間隔は時間差で作る)
+    var pitchS = PP.W / 8;                      // 両方の段で共通のピッチ
+    for (var c2 = 0; c2 < nS; c2++) {
+      var gxS = pitchS * (c2 + 1 + odd * 0.5);  // 6発の段は 7発の段の中間に
+      spawnBullet("shotSlow", gxS, body.y + 20, 0, vS, 0, B.shotSlow.r,
+        { wave: { amp: 12, freq: 1.6, ph: row * 1.3 + c2 * 0.4 } });
+    }
+    PP.audio.beep(180 + row * 30, 0.1, "sine", 0.07);
+  }
+
   // ---------- 運命のルーレット(左右から交差する回転スイープ) ----------
   // 針が回るように、左右の腕が弧を掃きながら弾を1発ずつ置いていく。
   // 2本の腕は中央で交差し、X字の美しい弾道が画面に残る
@@ -1180,6 +1197,7 @@
     rndSpinT = 0;
     barrageLeft = 0;
     sweepLeft = 0;
+    curtainLeft = 0;
     queuedAttack = null;
     removeInk();
     clearBullets();
@@ -1218,6 +1236,7 @@
     updateWave(dt);
     updateBarrage(dt);
     updateSweep(dt);
+    updateCurtain(dt);
     updateChips();
 
     if (state === "dead") return;
