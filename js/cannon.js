@@ -653,8 +653,18 @@
   // 入れ物はモジュールに置いて使い回す(弾が飛んでいる間の毎フレーム確保を無くす)。
   var _cache = [], _cacheN = 0, _overPts = [], _overN = 0;
 
-  // 発射玉の移動とチェーンへの命中判定(全レーン横断)
+  // 発射玉の移動とチェーンへの命中判定(全レーン横断)。
+  // 【課題6】倍速モードの補助: 2倍速にすると dt が大きくなり、弾が1フレームで
+  // 当たり判定の半径を超えて動いてチェーンをすり抜けることがある
+  // (config.js の SHOT_SPEED_MAX の注釈参照)。そこで dt が大きいときは
+  // 短い時間に等分して stepShots を複数回呼び、通常速度と同じ細かさで動かす。
+  // 通常速度(60fps で dt ≈ 0.0167 秒)では従来どおり 1 回だけ呼ばれる。
   function updateShots(dt) {
+    var steps = (dt > 0.02) ? Math.ceil(dt / 0.0167) : 1;
+    var h = dt / steps;
+    for (var i = 0; i < steps; i++) stepShots(h);
+  }
+  function stepShots(dt) {
     var g = PP.game;
     var shots = g.shots;
     if (shots.length === 0) return;   // 弾が無いフレームは何もしない
