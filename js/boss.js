@@ -569,6 +569,7 @@
     var g = PP.game;
     var B = PP.BOSS;
     var mul = durMul || 1;
+    PP.audio.debuff();   // 状態異常がかかった合図(妖弾直撃・触手の双方から来る)
     if (type === "addle") {
       g.bossFx.addle = B.addle.dur * mul;
       PP.fx.ring(PP.cannon.x, PP.cannon.y - 40, "#ff5d8f", 10, 90, 500);
@@ -590,6 +591,7 @@
     if (b.type === "ink") {
       splatInk(b.x, b.y, true);     // 直撃は大きな目つぶし
       g.bossFx.ink = B.ink.dur;
+      PP.audio.debuff();            // ink は applyDebuff を通らないのでここで鳴らす
     } else if (b.type === "addle" || b.type === "freeze" || b.type === "shotSlow") {
       applyDebuff(b.type, 1);
     } else if (b.type === "randomize" || b.type === "barrage") {
@@ -630,6 +632,7 @@
       inkBlobs.push({ sh: sh, bx: bx, by: by, ph: Math.random() * 6.28, life: B.dur });
     }
     PP.fx.burst(x, y, "rgba(20,14,26,0.9)", 14, 1.5);
+    PP.audio.inkSplat();
   }
 
   function removeInk() {
@@ -786,6 +789,7 @@
       tsuSafeX = 200 + Math.random() * (PP.W - 400);
       tsuDir = Math.random() < 0.5 ? 1 : -1;
       showSafePillar(tsuSafeX, S.gapW);
+      PP.audio.tsunamiCharge();   // 引き波の溜め(予兆の間ずっと不穏に響く)
     }
   }
 
@@ -818,6 +822,7 @@
       // 外環は時計回り、内環は反時計回りに「回転」しながら広がる(spin)。
       // 逆回転の二重渦=錨に繋がれた鎖が巻き付いてくるイメージ
       var F = B.freeze;
+      PP.audio.rings();   // 同心リング展開の専用SE
       var ringDefs = phase2
         ? [{ n: 14, v: F.speed, w: 0.55 }, { n: 10, v: F.speed * 0.7, w: -0.75 }, { n: 7, v: F.speed * 0.5, w: 0.95 }]
         : [{ n: 12, v: F.speed, w: 0.55 }, { n: 8, v: F.speed * 0.68, w: -0.75 }];
@@ -863,6 +868,7 @@
       PP.fx.shake(10, 0.25);
       PP.audio.beep(90, 0.4, "sawtooth", 0.14);
     } else if (key === "tsunami") {
+      PP.audio.tsunami();   // 水壁が走り出す轟音
       startWave();
     } else if (key === "barrage") {
       // 弾幕: ボレー発射は update 側のタイマーで刻む(1発目はすぐ)
@@ -1211,6 +1217,7 @@
     PP.fx.floatText("-" + dmg, x, y - 30, "#ff9a8a", 22);
     PP.fx.shake(6, 0.18);
     PP.audio.hit();
+    PP.audio.krakenDamage();   // クラーケンのうめき(被弾の専用SE)
     PP.audio.beep(160, 0.15, "sawtooth", 0.1);
     if (state === "telegraph") {
       // 攻撃の阻止! チャージ中に撃ち込めた読みへのご褒美。
@@ -1253,6 +1260,7 @@
     PP.fx.screenFlash("rgba(255,240,200,0.5)", 0.5, 600);
     PP.fx.floatText("クラーケン撃破!!", PP.W / 2, PP.H / 2 - 60, "#ffdf8a", 40);
     PP.audio.explode();
+    PP.audio.krakenDeath();    // 断末魔
   }
 
   function updateDying(dt) {
@@ -1268,6 +1276,7 @@
       cont.visible = false;
       hpCont.visible = false;
       victoryPending = true;
+      PP.audio.krakenDeath2();   // 海へ沈み切る最期の音
     }
   }
 

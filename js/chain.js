@@ -682,12 +682,12 @@
     removed.forEach(function (b, k) {
       var p = lane.rail.posAt(b.d + (b.slide || 0));
       b.view.x = p.x; b.view.y = p.y;
-      // 骸骨玉の撃破報酬: パワーアップ確定ドロップ+ボーナススコア。
+      // 骸骨玉の撃破報酬: ボーナススコア(確実)+高確率のパワーアップドロップ。
       // destroyRange は全撃破経路(マッチ・爆弾・ミサイル・カラーボム)の
-      // 唯一の通り道なので、ここ1か所で必ず報酬が出る
+      // 唯一の通り道なので、ここ1か所で必ず報酬判定が走る
       if (b.skull) {
         PP.game.score += PP.SKULL.rewardScore;
-        PP.powerups.dropPower(p.x, p.y);
+        if (Math.random() < PP.SKULL.dropChance) PP.powerups.dropPower(p.x, p.y);
         PP.fx.ring(p.x, p.y, "#ffd24a", 10, 80, 450);
         PP.fx.floatText("☠ 撃破! +" + PP.SKULL.rewardScore, p.x, p.y - 34, "#ffd24a", 20);
         PP.audio.beep(520, 0.12, "square", 0.09);

@@ -667,10 +667,10 @@
   var _cache = [], _cacheN = 0, _overPts = [], _overN = 0;
 
   // 発射玉の移動とチェーンへの命中判定(全レーン横断)。
-  // 【課題6】倍速モードの補助: 2倍速にすると dt が大きくなり、弾が1フレームで
-  // 当たり判定の半径を超えて動いてチェーンをすり抜けることがある
-  // (config.js の SHOT_SPEED_MAX の注釈参照)。そこで dt が大きいときは
-  // 短い時間に等分して stepShots を複数回呼び、通常速度と同じ細かさで動かす。
+  // dt が大きいフレーム(処理落ち等)では、弾が1フレームで当たり判定の半径を
+  // 超えて動いてチェーンをすり抜けることがある(config.js の SHOT_SPEED_MAX の
+  // 注釈参照)。そこで dt が大きいときは短い時間に等分して stepShots を複数回
+  // 呼び、通常速度と同じ細かさで動かす。
   // 通常速度(60fps で dt ≈ 0.0167 秒)では従来どおり 1 回だけ呼ばれる。
   function updateShots(dt) {
     var steps = (dt > 0.02) ? Math.ceil(dt / 0.0167) : 1;
@@ -681,9 +681,8 @@
     var g = PP.game;
     var shots = g.shots;
     if (shots.length === 0) return;   // 弾が無いフレームは何もしない
-    // ボスの「時間の滞留」: 発射玉の時間だけ極端に遅く流れる。
-    // ゲーム全体の dt(PP.game.timeScale =【課題6】)には触らず、弾の積分にだけ
-    // 倍率を掛ける(チェーンや演出は通常速度のまま)。
+    // 「時間の滞留」(ボスの妖弾・パワーダウン⏳): 発射玉の時間だけ極端に
+    // 遅く流れる。弾の積分にだけ倍率を掛ける(チェーンや演出は通常速度のまま)。
     if (g.bossFx.shotSlow > 0) dt *= PP.BOSS.shotSlow.factor;
     var lanes = g.lanes;
     var R = PP.R, D = PP.D;

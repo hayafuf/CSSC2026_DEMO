@@ -192,16 +192,31 @@
   var seNewChain = sfx("SE/new_chain2.mp3", 0.45);
   var seStop = sfx("SE/stop.mp3", 0.6);
   // ゲームオーバー: チェーンが樽へ吸い込まれていく音
-  var seSuck = sfx("SE/gameover_球が吸い込まれる_SE.mp3", 0.9);
+  var seSuck = sfx("SE/gameover_suck.mp3", 0.9);
   // 追加SE: コンボ(合成音に重ねて厚みを足す)/ 囚人の歩み(スロー)発動
   var seCombo = sfx("SE/Combo_SE.mp3", 0.6);
-  var seSlow = sfx("SE/囚人SE.mp3", 0.6);
+  var seSlow = sfx("SE/prisoner.mp3", 0.6);
   // 追加SE: 逆風(発動)/ 生存ゲージの時間切れ(掃討フェーズ移行)
-  var seWind = sfx("SE/風.mp3", 0.6);
+  var seWind = sfx("SE/wind.mp3", 0.6);
   var seTimeOver = sfx("SE/time_over.mp3", 0.7);
   // 追加SE: 爆弾の炸裂(合成音に重ねる)/ ミサイル発射
-  var seBombBoom = sfx("SE/ボム爆発.mp3", 0.85);
-  var seMissile = sfx("SE/ミサイル.mp3", 0.7);
+  var seBombBoom = sfx("SE/bomb_explosion.mp3", 0.85);
+  var seMissile = sfx("SE/missile.mp3", 0.7);
+  // 追加SE: 状態異常(骸骨玉の被弾・パワーダウン・ボスの妖弾直撃)
+  var seDebuff = sfx("SE/user_debuff.mp3", 0.7);
+  // 追加SE: クラーケン(被弾 / 撃破の断末魔 / 沈みゆく最期)
+  var seKrakenDamage = sfx("SE/kraken_damage.mp3", 0.55);
+  var seKrakenDeath = sfx("SE/kraken_death.mp3", 0.85);
+  var seKrakenDeath2 = sfx("SE/kraken_death2.mp3", 0.85);
+  // 追加SE: ステージクリアのファンファーレ(合成アルペジオに重ねる)
+  var seStageClear = sfx("SE/stage_clear.mp3", 0.7);
+  // 追加SE: ボスの攻撃(同心リング=深淵の錨鎖 / 津波の溜めと発射)
+  var seRings = sfx("SE/concentric_rings.mp3", 0.7);
+  var seTsunamiCharge = sfx("SE/tsunami_charge.mp3", 0.7);
+  var seTsunami = sfx("SE/tsunami.mp3", 0.8);
+  // 追加SE: 墨の着弾(ボスの墨獄・パワーダウン🦑)/ 骸骨玉の弾幕発射
+  var seInk = sfx("SE/ink.mp3", 0.7);
+  var seDarkMagic = sfx("SE/dark_magic.mp3", 0.65);
   // カラーボム発動: 選ばれた色が盤面から一掃されるときの炸裂音
   // ================================================================
   // TODO【課題4】カラーボムで再生するSEファイルを指定してみよう
@@ -588,7 +603,18 @@
       [523, 659, 784, 1047].forEach(function (f, i) {
         setTimeout(function () { beep(f, 0.25, "triangle", 0.1); }, i * 120);
       });
+      seStageClear();   // クリアのファンファーレを重ねる
     },
+    // ---- 状態異常・骸骨玉・ボス(boss.js / skull.js / powerups.js が呼ぶ) ----
+    debuff: seDebuff,             // 状態異常がかかった(被弾・パワーダウン取得)
+    krakenDamage: seKrakenDamage, // クラーケンに自弾が命中
+    krakenDeath: seKrakenDeath,   // クラーケン撃破(断末魔)
+    krakenDeath2: seKrakenDeath2, // クラーケンが海へ沈む最期
+    rings: seRings,               // 同心リング攻撃(深淵の錨鎖)の展開
+    tsunamiCharge: seTsunamiCharge, // 大津波の溜め(予兆)
+    tsunami: seTsunami,           // 大津波の発射
+    inkSplat: seInk,              // 墨の着弾(墨獄・パワーダウン🦑)
+    darkMagic: seDarkMagic,       // 骸骨玉の弾幕発射(暗黒魔法)
     // ---- 危機(crisis.js が毎フレーム呼ぶ) ----
     crisis: crisis,            // 0〜1 の深さで警報ループの音量/ピッチを決める
     swallowed: swallowed,      // 玉が1個ぶん樽に落ちた

@@ -379,12 +379,6 @@
       return;
     }
     var dt = Math.min(e.delta / 1000, 0.05);
-    // TODO【課題6】倍速モード: ゲームの時間の流れを変えてみよう。
-    // dt は「このフレームで進んだ時間(秒)」。玉の移動もタイマーも危機演出も、
-    // ゲームの中の動きはぜんぶ dt を使って進む。だから、この場所で dt に倍率
-    // (config.js の PP.game.timeScale)を掛けると、ゲーム全体がまとめて
-    // 速くなったり遅くなったりする。ここに掛け算を1行書いてみよう。
-    //   ヒント: dt = dt * 倍率;  は  dt *= 倍率;  とも書ける
     var g = PP.game;
 
     if (g.state === "playing") {
@@ -615,22 +609,6 @@
     return !!(n && n.type && n.type.indexOf("touch") === 0);
   }
 
-  // 【課題6】倍速モードの切り替え。画面の速度ボタン(⏸の左)と S キーから
-  // 呼ばれる。ボタンの表示(×1/×2/×0.5)は hud.js が PP.game.timeScale を見て
-  // 自動で描き替えるので、この関数では値を変えるだけでよい。
-  function cycleTimeScale() {
-    var g = PP.game;
-    // TODO【課題6】押すたびに 通常 → 2倍速 → 0.5倍速 → 通常 → … と一巡させよう。
-    // 今の g.timeScale の値を調べて、次の値を g.timeScale に代入する。
-    //   1) 今が通常速度(1.0)のとき  → 2倍速にする。どんな値を入れる?
-    //   2) 今が2倍速のとき          → 0.5倍速にする。どんな値を入れる?
-    //   3) それ以外(0.5倍速)のとき → 通常速度に戻す
-    // ヒント: if / else if / else で書ける(「今の値と等しいか」は === で調べる)
-
-    PP.fx.floatText("時間の流れ ×" + g.timeScale, PP.W / 2, 88, "#8ef0d0", 22);
-    PP.hud.setTimeScale();   // タイトル画面の選択ボタンのハイライトも追従させる
-  }
-
   // ボスの Addle!!(操作反転)中は、マウスの狙い位置を左右反転して返す。
   // cannon.setX の中ではなくマウス入力の入り口で反転する: ◀▶ ボタンは
   // 「今の位置 + 差分」で setX を呼ぶので、setX 内で反転すると毎フレーム
@@ -659,15 +637,6 @@
       PP.hud.setDifficulty(diffHit);
       return;
     }
-    // 時間の流れボタン(【課題6】難易度ボタンの下の段)。出航前に倍率を選べる。
-    // ボタンに当たったら倍率を変えるだけで、ゲームは始めない(難易度と同じ)。
-    // ※ 選んだ値が実際に効くのは、tick の【課題6】(dt への掛け算)を書いてから
-    var spdHit = PP.hud.hitSpeedSelect(e.stageX, e.stageY);
-    if (spdHit !== null) {
-      g.timeScale = spdHit;
-      PP.hud.setTimeScale();
-      return;
-    }
     if (g.state === "title") {
       PP.hud.hideOverlay();
       startLevel();
@@ -675,11 +644,6 @@
       // ⏸ ボタンへのクリックは発射ではなくポーズ
       if (PP.hud.hitPauseBtn(e.stageX, e.stageY)) {
         PP.pauseCtl.pause("manual");
-        return;
-      }
-      // 速度ボタン(【課題6】⏸の左)へのクリックは発射ではなく倍速切り替え
-      if (PP.hud.hitSpeedBtn(e.stageX, e.stageY)) {
-        cycleTimeScale();
         return;
       }
       // ⇄ 交換ボタン(タッチ端末用。右クリック/Space の代わり)は発射ではなく交換
@@ -913,9 +877,6 @@
       } else if (e.code === "KeyM") {
         PP.fx.floatText(PP.audio.toggleMute() ? "🔇 消音" : "🔊 音あり",
           PP.W / 2, 88, "#f0e6c8", 22);
-      } else if (e.code === "KeyS") {
-        // 【課題6】S キーでも倍速モードを切り替えられる(画面のボタンと同じ)
-        cycleTimeScale();
       } else if (/^Digit[1-4]$/.test(e.code)) {
         // 1〜4 キーでも難易度(【課題1】)を選べる。難易度ボタンが出ている画面
         // (タイトル/ゲームオーバー/全制覇後)だけ有効。ステージの合間は変えられない

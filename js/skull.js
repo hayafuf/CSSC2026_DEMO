@@ -81,7 +81,7 @@
       });
     }
     PP.fx.ring(x, y, "#ff4d4d", 10, 70, 400);
-    PP.audio.beep(220, 0.15, "sawtooth", 0.1);
+    PP.audio.darkMagic();   // 暗黒魔法の発射音
   }
 
   // 妖弾が大砲に命中: 停止か操作反転のどちらかがかかる(50/50)。
@@ -91,7 +91,7 @@
     var S = PP.SKULL;
     playerHitCd = S.hitIFrames;
     PP.fx.shake(8, 0.25);
-    PP.audio.beep(150, 0.25, "sawtooth", 0.12);
+    PP.audio.debuff();   // 状態異常がかかった合図
     if (Math.random() < 0.5) {
       g.bossFx.freeze = S.freezeDur;
       PP.fx.ring(PP.cannon.x, PP.cannon.y - 40, "#ffd24a", 10, 90, 500);
@@ -227,6 +227,7 @@
       inkBlobs.push({ sh: sh, bx: bx, by: by, ph: Math.random() * 6.28, life: dur });
     }
     PP.fx.burst(PP.cannon.x, PP.cannon.y - 30, "rgba(20,14,26,0.9)", 14, 1.5);
+    PP.audio.inkSplat();
   }
 
   function updateInk(dt) {

@@ -21,23 +21,10 @@
   // ステージクリア画面では出さない = キャンペーンの途中では変えられない。
   var diffCont, diffShapes = [], diffRects = [];
   var DIFF_BTN = { w: 172, h: 56, gap: 16 };
-  // 時間の流れ(【課題6】倍速モード)の選択ボタン。難易度ボタンと同じ方式で、
-  // 難易度ボタンの下の段に ×0.5 / ×1 / ×2 の3つを並べる。出る画面も難易度と同じ
-  var speedSelCont, speedSelShapes = [], speedSelRects = [];
-  var SPEED_SEL = { w: 96, h: 40, gap: 14 };
-  var SPEED_CHOICES = [
-    { value: 0.5, label: "×0.5", sub: "ゆっくり" },
-    { value: 1,   label: "×1",   sub: "ふつう" },
-    { value: 2,   label: "×2",   sub: "はやい" }
-  ];
   // ポーズボタン(⏸)。プレイ中だけバーの下・右端に出す。クリック判定は
   // 難易度ボタンと同じ「矩形当たり判定」方式(発射クリックと混ざらないため)
   var pauseBtn = null;
   var PAUSE_RECT = { x: W - 46, y: 74, w: 36, h: 36 };
-  // 速度ボタン(【課題6】倍速モード)。⏸の左隣に出す。ラベル(×1/×2/×0.5)は
-  // PP.game.timeScale の値を見て毎フレーム描き替える(updateEffects 参照)
-  var speedBtn = null, speedLabel = null, lastSpeedText = null;
-  var SPEED_RECT = { x: W - 92, y: 74, w: 36, h: 36 };
   // ⇄ 交換はタッチ端末では DOM の仮想ボタン(index.html の #tSwap)が担当する。
   // キャンバス内ボタンは廃止したが、判定関数(hitSwapBtn)は互換のため残してある
   var swapBtn = null;
@@ -163,23 +150,6 @@
     pauseBtn.visible = false;
     L.addChild(pauseBtn);
 
-    // ---- 速度ボタン(【課題6】倍速モード。⏸の左隣の真鍮の小ボタン) ----
-    speedBtn = new createjs.Container();
-    var sb = new createjs.Shape();
-    var sr = SPEED_RECT;
-    sb.graphics
-      .beginLinearGradientFill(["rgba(40,30,14,0.72)", "rgba(16,11,5,0.72)"], [0, 1], sr.x, sr.y, sr.x, sr.y + sr.h)
-      .drawRoundRect(sr.x, sr.y, sr.w, sr.h, 9)
-      .setStrokeStyle(1).beginStroke("rgba(210,168,96,0.5)")
-      .drawRoundRect(sr.x, sr.y, sr.w, sr.h, 9);
-    speedBtn.addChild(sb);
-    speedLabel = new createjs.Text("×1", 'bold 13px "Meiryo", sans-serif', "#f4e2a0");
-    speedLabel.x = sr.x + sr.w / 2; speedLabel.y = sr.y + sr.h / 2;
-    speedLabel.textAlign = "center"; speedLabel.textBaseline = "middle";
-    speedBtn.addChild(speedLabel);
-    speedBtn.visible = false;
-    L.addChild(speedBtn);
-
     dispScore = PP.game.score;
   }
 
@@ -219,14 +189,6 @@
     // (プレイ以外の画面では showOverlay() が隠す)
     if (pauseBtn) pauseBtn.visible = true;
     if (swapBtn) swapBtn.visible = true;
-    if (speedBtn) speedBtn.visible = true;
-    // 速度ボタンのラベルを倍率(【課題6】PP.game.timeScale)に追従させる。
-    // 1 なら「×1」、2 なら「×2」、0.5 なら「×0.5」と表示される
-    var spTxt = "×" + g.timeScale;
-    if (speedLabel && spTxt !== lastSpeedText) {
-      speedLabel.text = spTxt;
-      lastSpeedText = spTxt;
-    }
 
     // スコアのカウントアップ(急変・減少時は即反映)
     if (g.score < dispScore || Math.abs(g.score - dispScore) > 200000) dispScore = g.score;
@@ -355,7 +317,6 @@
     overlaySub.x = W / 2; overlaySub.y = panelBox().y + 108;
     O.addChild(overlaySub);
     buildDiffButtons(O);   // 難易度ボタン(【課題1】)はオーバーレイと一緒に表示される
-    buildSpeedSelButtons(O);   // 時間の流れボタン(【課題6】)は難易度ボタンの下の段
     O.visible = false;
     // 最下段(クリック促し等)をゆっくり明滅させる
     // (ignoreGlobalPause: ポーズ中も Ticker.paused に巻き込まれず明滅を続ける)
@@ -391,65 +352,6 @@
     O.addChild(diffCont);
     redrawDiffButtons();
   }
-
-  // ---------- 時間の流れボタン(【課題6】倍速モード) ----------
-  // 出航前に ×0.5 / ×1 / ×2 を選べるようにする。作りは難易度ボタンと同じ:
-  // 描画とハイライトはここ、クリック判定は main.js が hitSpeedSelect で行う。
-  // 選んだ値は PP.game.timeScale に入る(効かせる処理は【課題6】で自分で書く)
-  function buildSpeedSelButtons(O) {
-    speedSelCont = new createjs.Container();
-    var total = SPEED_CHOICES.length * SPEED_SEL.w + (SPEED_CHOICES.length - 1) * SPEED_SEL.gap;
-    var x0 = (W - total) / 2;
-    var y = panelBox().y + PANEL.h + 34 + DIFF_BTN.h + 30;
-    var cap = new createjs.Text("時間の流れをえらぶ(S キーでも切り替え)", '13px "Meiryo", sans-serif', C_LBL);
-    cap.textAlign = "center"; cap.x = W / 2; cap.y = y - 20;
-    speedSelCont.addChild(cap);
-    SPEED_CHOICES.forEach(function (ch, i) {
-      var bx = x0 + i * (SPEED_SEL.w + SPEED_SEL.gap);
-      var s = new createjs.Shape();
-      speedSelCont.addChild(s);
-      var t1 = new createjs.Text(ch.label, 'bold 16px "Meiryo", sans-serif', C_VAL);
-      t1.textAlign = "center"; t1.x = bx + SPEED_SEL.w / 2; t1.y = y + 4;
-      var t2 = new createjs.Text(ch.sub, '11px "Meiryo", sans-serif', C_LBL);
-      t2.textAlign = "center"; t2.x = bx + SPEED_SEL.w / 2; t2.y = y + 23;
-      speedSelCont.addChild(t1, t2);
-      speedSelShapes.push(s);
-      speedSelRects.push({ value: ch.value, x: bx, y: y, w: SPEED_SEL.w, h: SPEED_SEL.h });
-    });
-    O.addChild(speedSelCont);
-    redrawSpeedSelButtons();
-  }
-
-  // 今の PP.game.timeScale と同じ値のボタンだけ金縁で光らせる。
-  // config.js で 1.5 などボタンに無い値にした場合はどれも光らない(それも正しい)
-  function redrawSpeedSelButtons() {
-    var sel = PP.game.timeScale;
-    speedSelRects.forEach(function (r, i) {
-      var g = speedSelShapes[i].graphics;
-      var on = r.value === sel;
-      g.clear();
-      g.beginLinearGradientFill(
-        on ? ["#3a2c12", "#241806"] : ["rgba(20,28,40,0.85)", "rgba(8,12,20,0.85)"],
-        [0, 1], r.x, r.y, r.x, r.y + r.h)
-        .drawRoundRect(r.x, r.y, r.w, r.h, 10);
-      g.setStrokeStyle(on ? 2.5 : 1.2)
-        .beginStroke(on ? "#f0c040" : "rgba(202,169,106,0.5)")
-        .drawRoundRect(r.x, r.y, r.w, r.h, 10);
-    });
-  }
-
-  // (x, y) が時間の流れボタンの上なら、その倍率の値を返す(外れなら null)
-  function hitSpeedSelect(x, y) {
-    if (!PP.layers.overlay.visible || !speedSelCont || !speedSelCont.visible) return null;
-    for (var i = 0; i < speedSelRects.length; i++) {
-      var r = speedSelRects[i];
-      if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return r.value;
-    }
-    return null;
-  }
-
-  // 倍率が変わったのでボタンのハイライトを描き直す(main.js から呼ばれる)
-  function setTimeScale() { redrawSpeedSelButtons(); }
 
   // 難易度を選び直せる画面か(= ここから新しいランが始まる画面か)
   function canPickDifficulty() {
@@ -494,11 +396,6 @@
     var b = panelBox();
     // 難易度ボタンは新しいランが始まる画面だけ(呼び出し側で state を先に確定させている)
     if (diffCont) diffCont.visible = canPickDifficulty();
-    // 時間の流れボタン(【課題6】)も同じ画面に出す。表示のたびに今の倍率で光らせ直す
-    if (speedSelCont) {
-      speedSelCont.visible = canPickDifficulty();
-      redrawSpeedSelButtons();
-    }
 
     overlayBg.graphics.clear();
     overlayBg.graphics.beginFill(s.bg).drawRect(0, 0, W, PP.H);
@@ -538,7 +435,6 @@
     overlaySub.color = s.sub; overlaySub.text = sub;
 
     if (pauseBtn) pauseBtn.visible = false;   // 全画面パネルの上にボタンを残さない
-    if (speedBtn) speedBtn.visible = false;   // 速度ボタン(【課題6】)も同様に隠す
     if (swapBtn) swapBtn.visible = false;
 
     O.visible = true; O.alpha = 0;
@@ -573,13 +469,6 @@
     return x >= r.x - p && x <= r.x + r.w + p && y >= r.y - p && y <= r.y + r.h + p;
   }
 
-  // (x, y) が速度ボタン(【課題6】)の上か。プレイ中に出ているときだけ当たる
-  function hitSpeedBtn(x, y) {
-    if (!speedBtn || !speedBtn.visible || PP.game.state !== "playing") return false;
-    var r = SPEED_RECT, p = TOUCH_PAD;
-    return x >= r.x - p && x <= r.x + r.w + p && y >= r.y - p && y <= r.y + r.h + p;
-  }
-
   // (x, y) が ⇄ 交換ボタンの上か。タッチ端末のプレイ中だけ当たる
   function hitSwapBtn(x, y) {
     if (!swapBtn || !swapBtn.visible || PP.game.state !== "playing") return false;
@@ -591,8 +480,7 @@
     build: build, update: update, updateEffects: updateEffects,
     buildOverlay: buildOverlay, showOverlay: showOverlay, hideOverlay: hideOverlay,
     showPause: showPause, hidePause: hidePause, hitPauseBtn: hitPauseBtn,
-    hitSwapBtn: hitSwapBtn, hitSpeedBtn: hitSpeedBtn,
-    hitSpeedSelect: hitSpeedSelect, setTimeScale: setTimeScale,
+    hitSwapBtn: hitSwapBtn,
     hitDifficulty: hitDifficulty, setDifficulty: setDifficulty
   };
 })();

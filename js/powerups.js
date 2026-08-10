@@ -246,7 +246,7 @@
         PP.fx.screenFlash("rgba(138,32,216,0.22)", 0.22, 600);
         PP.fx.floatText("⏳ 弾が鈍い…", it.x, it.y - 22, "#c890f0", 18);
       }
-      PP.audio.beep(120, 0.3, "sawtooth", 0.12);
+      PP.audio.debuff();   // 状態異常がかかった合図(骸骨玉の被弾と同じ音)
       vibrate([80, 40, 160]);
     } else if (it.kind === "treasure") {
       PP.game.score += it.def.value;
