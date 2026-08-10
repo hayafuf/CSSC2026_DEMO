@@ -98,6 +98,7 @@
     // ボス本体の表示と状態(HP・攻撃タイマー・状態異常)を仕切り直す
     g.bossMode = !!(course && course.boss);
     if (PP.boss) PP.boss.setActive(g.bossMode);
+    if (PP.bg.setBossMode) PP.bg.setBossMode(g.bossMode);   // 背景も嵐の海へ切替
     PP.crisis.reset();           // 赤い帳・警報・ドクロを平常へ戻す
     PP.gameover.reset();         // 暗幕・渦・ドクロを片付ける
     PP.audio.gameStart();        // ゲームオーバー BGM から通常曲へ戻す

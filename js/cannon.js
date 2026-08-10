@@ -432,6 +432,13 @@
     root.x = PP.cannon.x;
   }
 
+  // 強制移動(ボスの大津波に押し流される)。freeze 中でも動かされる
+  function forceX(mx) {
+    var m = PP.CANNON_MARGIN;
+    PP.cannon.x = Math.max(m, Math.min(PP.W - m, mx));
+    root.x = PP.cannon.x;
+  }
+
   // 特殊弾(爆弾/ミサイル)をキャッチした: 自動で装填する(装填中の色玉は温存)。
   // 持てるのは1個まで。すでに持っていたら新しい方に置き換える。
   function loadSpecial(kind) {
@@ -843,6 +850,7 @@
     y: PP.CANNON_Y,
     build: build,
     setX: setX,
+    forceX: forceX,
     fire: fire,
     swap: swap,
     loadBomb: loadBomb,

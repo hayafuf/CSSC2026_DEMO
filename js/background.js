@@ -29,9 +29,18 @@
   var lightTimer = 6;             // 次の雷までの残り秒
   var T = 0;                      // 累積時間
 
+  // ボス戦(嵐の海)オーバーレイ。通常の夜景の上に重ね、alpha でクロスフェード
+  var bgCont = null;              // 背景全体の入れ物(通常+嵐)
+  var bossMode = false;
+  var bossCont = null;            // 嵐オーバーレイ(初回の setBossMode(true) で遅延構築)
+  var bossLightning = null;       // 血色の稲妻フラッシュ
+  var bossFogs = [];              // 嵐雲 {s, speed, phase, w}
+  var whirl = null;               // ボス足元の渦(回転)
+
   function build() {
     var stage = PP.stage;
     var bg = new createjs.Container();
+    bgCont = bg;
     bg.mouseEnabled = false;
 
     // ---- 静的な下地(深海グラデ + 水平線の霞 + 遠景のうねり + 月の反射) ----
@@ -231,6 +240,126 @@
     stage.addChildAt(bg, 0);
   }
 
+  // ---------- ボス戦の嵐の海(通常の夜景の上に重ねるオーバーレイ) ----------
+  // 通常背景はそのまま残し、上に「暗転した空・血色の月・嵐雲・渦」を重ねて
+  // alpha 0⇄1 のクロスフェードで切り替える。波頭や光の塵がうっすら透けるのは
+  // 「嵐でも海は動いている」表現としてそのまま活かす。
+  function buildBossScene() {
+    bossCont = new createjs.Container();
+    bossCont.mouseEnabled = false;
+    bossCont.alpha = 0;
+
+    // 暗転した空と海(血の気を帯びた闇で全体を沈める)
+    var sky = new createjs.Shape();
+    sky.graphics.beginLinearGradientFill(
+        ["rgba(26,15,22,0.92)", "rgba(18,10,18,0.84)", "rgba(7,10,16,0.72)", "rgba(3,5,10,0.66)"],
+        [0, 0.24, 0.6, 1], 0, 0, 0, H)
+      .drawRect(0, 0, W, H);
+    // 血色の月の海面反射(赤い光柱。通常の銀の反射を上書きする)
+    for (var ry = 130; ry < H; ry += 12 + (ry / H) * 22) {
+      var tt = ry / H;
+      var halfW = 24 + tt * tt * 140;
+      var alpha = (0.15 * (1 - tt * 0.6) * (0.5 + 0.5 * Math.sin(ry * 0.6))).toFixed(3);
+      if (alpha <= 0.01) continue;
+      var hh = 1.5 + tt * 4;
+      sky.graphics.beginRadialGradientFill(
+        ["rgba(214,60,44," + alpha + ")", "rgba(214,60,44,0)"], [0, 1],
+        MOON_X, ry, 2, MOON_X, ry, halfW)
+        .drawEllipse(MOON_X - halfW, ry - hh, halfW * 2, hh * 2);
+    }
+    sky.cache(0, 0, W, H);
+    bossCont.addChild(sky);
+
+    // 血色の月(通常の月を塗り替える。禍々しいハロー付き)
+    var moon = new createjs.Shape();
+    moon.graphics
+      .beginRadialGradientFill(["rgba(194,40,30,0.55)", "rgba(150,26,22,0.16)", "rgba(150,26,22,0)"],
+        [0, 0.4, 1], MOON_X, 46, 6, MOON_X, 46, 130).drawCircle(MOON_X, 46, 130)
+      .beginRadialGradientFill(["#ff6a50", "#c22820", "#5a0c0a"], [0, 0.6, 1],
+        MOON_X - 8, 40, 4, MOON_X, 46, 34).drawCircle(MOON_X, 46, 32)
+      // 月面の翳り(不吉な模様)
+      .beginFill("rgba(60,8,8,0.35)")
+      .drawCircle(MOON_X - 10, 38, 8).drawCircle(MOON_X + 9, 52, 6).drawCircle(MOON_X - 2, 58, 4);
+    moon.cache(MOON_X - 134, -90, 268, 268);
+    bossCont.addChild(moon);
+
+    // 嵐雲(低く速く流れる。血色の照り返し)
+    var cloudDefs = [
+      { y: H * 0.10, w: 720, h: 150, a: 0.11, speed: 34 },
+      { y: H * 0.20, w: 880, h: 180, a: 0.09, speed: 46 },
+      { y: H * 0.15, w: 620, h: 130, a: 0.10, speed: 40 }
+    ];
+    cloudDefs.forEach(function (d, i) {
+      var s = new createjs.Shape();
+      s.graphics.beginRadialGradientFill(
+        ["rgba(70,22,30," + d.a + ")", "rgba(40,14,22," + (d.a * 0.6).toFixed(3) + ")", "rgba(40,14,22,0)"],
+        [0, 0.55, 1], 0, 0, 0, 0, 0, d.w / 2)
+        .drawEllipse(-d.w / 2, -d.h / 2, d.w, d.h);
+      s.scaleY = d.h / d.w;
+      s.y = d.y;
+      s.x = (i * 0.37) * W;
+      s.cache(-d.w / 2 - 2, -d.w / 2 - 2, d.w + 4, d.w + 4);
+      bossCont.addChild(s);
+      bossFogs.push({ s: s, speed: d.speed, phase: Math.random() * 6.28, w: d.w });
+    });
+
+    // ボスの足元の渦(ボスとレーンの間の「開けた海」帯。update で回す)
+    whirl = new createjs.Container();
+    whirl.mouseEnabled = false;
+    whirl.x = W / 2; whirl.y = 190;
+    var spiral = new createjs.Shape();
+    var sg = spiral.graphics;
+    for (var arm = 0; arm < 3; arm++) {
+      sg.setStrokeStyle(2.5 - arm * 0.5, "round")
+        .beginStroke("rgba(120,160,180," + (0.22 - arm * 0.05).toFixed(2) + ")");
+      var a0 = arm * (Math.PI * 2 / 3);
+      sg.moveTo(Math.cos(a0) * 14, Math.sin(a0) * 5);
+      for (var st = 1; st <= 40; st++) {
+        var ang = a0 + st * 0.28;
+        var rad = 14 + st * 5.2;
+        sg.lineTo(Math.cos(ang) * rad, Math.sin(ang) * rad * 0.32);
+      }
+      sg.endStroke();
+    }
+    spiral.cache(-230, -80, 460, 160);
+    whirl.addChild(spiral);
+    bossCont.addChild(whirl);
+
+    // 渦の上の暗霧(ボスの足元を隠して距離感をぼかす)
+    var mist = new createjs.Shape();
+    mist.graphics.beginRadialGradientFill(
+        ["rgba(10,14,20,0.5)", "rgba(10,14,20,0.24)", "rgba(10,14,20,0)"], [0, 0.6, 1],
+        0, 0, 0, 0, 0, 420)
+      .drawEllipse(-420, -70, 840, 140);
+    mist.x = W / 2; mist.y = 195;
+    mist.cache(-424, -74, 848, 148);
+    bossCont.addChild(mist);
+
+    // 血色の稲妻(通常の冷色版とは別に持ち、ボス中はこちらだけ光る)
+    bossLightning = new createjs.Shape();
+    bossLightning.graphics.beginLinearGradientFill(
+        ["rgba(255,214,200,0.9)", "rgba(236,120,96,0.45)", "rgba(180,60,50,0.2)"],
+        [0, 0.5, 1], 0, 0, 0, H).drawRect(0, 0, W, H);
+    bossLightning.compositeOperation = "lighter";
+    bossLightning.alpha = 0;
+    bossLightning.cache(0, 0, W, H);
+    bossCont.addChild(bossLightning);
+
+    bgCont.addChild(bossCont);
+  }
+
+  // ボス戦モードの切替(main.js startLevel から)。1.2秒のクロスフェード。
+  // リトライで同じモードを再指定されても Tween が override で吸収する(冪等)
+  function setBossMode(on) {
+    on = !!on;
+    if (on && !bossCont) buildBossScene();
+    if (!bossCont || bossMode === on) return;
+    bossMode = on;
+    createjs.Tween.get(bossCont, { override: true })
+      .to({ alpha: on ? 1 : 0 }, 1200, createjs.Ease.quadInOut);
+    lightTimer = on ? 2 + Math.random() * 3 : 6;
+  }
+
   // --- コースティクス(月光柱上の瞬き) ---
   function resetGlint(m) {
     m.y = H * 0.34 + Math.random() * H * 0.60;
@@ -294,17 +423,29 @@
       var k = mo.life / mo.max;
       mo.s.alpha = Math.sin(k * Math.PI) * 0.7;   // 出て消える
     }
-    // 遠雷: たまに二連フラッシュ
+    // 嵐の海(ボス戦オーバーレイ)の動き
+    if (bossCont && bossCont.alpha > 0.01) {
+      if (whirl) whirl.rotation += dt * 26;   // 渦はゆっくり回り続ける
+      for (var bf = 0; bf < bossFogs.length; bf++) {
+        var bo = bossFogs[bf];
+        bo.s.x += bo.speed * dt;
+        if (bo.s.x > W + bo.w) bo.s.x = -bo.w;
+        bo.s.alpha = 0.75 + 0.25 * Math.sin(T * 0.5 + bo.phase);
+      }
+    }
+
+    // 遠雷: たまに二連フラッシュ(ボス中は血色の稲妻が3〜8秒間隔で暴れる)
     lightTimer -= dt;
-    if (lightTimer <= 0 && lightning && lightning.alpha < 0.01) {
-      lightTimer = 9 + Math.random() * 14;
-      createjs.Tween.get(lightning, { override: true })
-        .to({ alpha: 0.5 }, 60)
+    var bolt = bossMode ? bossLightning : lightning;
+    if (lightTimer <= 0 && bolt && bolt.alpha < 0.01) {
+      lightTimer = bossMode ? (3 + Math.random() * 5) : (9 + Math.random() * 14);
+      createjs.Tween.get(bolt, { override: true })
+        .to({ alpha: bossMode ? 0.6 : 0.5 }, 60)
         .to({ alpha: 0.06 }, 90)
-        .to({ alpha: 0.4 }, 55)
+        .to({ alpha: bossMode ? 0.5 : 0.4 }, 55)
         .to({ alpha: 0 }, 320, createjs.Ease.quadOut);
     }
   }
 
-  PP.bg = { build: build, update: update, MOON_X: MOON_X };
+  PP.bg = { build: build, update: update, setBossMode: setBossMode, MOON_X: MOON_X };
 })();

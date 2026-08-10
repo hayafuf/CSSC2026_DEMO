@@ -819,9 +819,38 @@
     lane.pendingMatches.push({ ball: newBall, t: PP.INSERT_TIME });
   }
 
+  // レーン上の全玉の色をランダムに差し替える(ボスの「ランダマイズ」)。
+  // 揃えかけの同色の並びが崩壊する、最も戦略的な妨害。宝玉は変えない。
+  // view は同じ親・同じ重なり位置で作り直し、座標と表示状態を引き継ぐ
+  function scrambleColors() {
+    var g = PP.game;
+    for (var li = 0; li < g.lanes.length; li++) {
+      var balls = g.lanes[li].balls;
+      for (var i = 0; i < balls.length; i++) {
+        var b = balls[i];
+        if (b.treasure || b.color === null || b.color === undefined) continue;
+        b.color = Math.floor(Math.random() * g.nColors);
+        var old = b.view;
+        var view = PP.ball.makeView(b.color);
+        view.x = old.x; view.y = old.y;
+        view.visible = old.visible;
+        if (old.parent) {
+          old.parent.addChildAt(view, old.parent.getChildIndex(old));
+          old.parent.removeChild(old);
+        } else {
+          PP.layers.ballUnder.addChild(view);
+        }
+        b.view = view;
+      }
+    }
+    g.ballsDirty = true;    // 重なり順を積み直す
+    g.colorsDirty = true;   // 盤面の色構成が変わった → 装填色の見張りを回す
+  }
+
   PP.chain = {
     update: update,
     startWave: startWave,
+    scrambleColors: scrambleColors,
     clearTreasures: clearTreasures,
     treasureList: treasureList,
     // 公開系はレーンを受け取り、そのまま内部処理へ渡す
