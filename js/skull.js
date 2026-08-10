@@ -36,10 +36,12 @@
     return n;
   }
 
-  // 骸骨玉が「撃ってよい」状態か: 洞窟から出ていて、樽に呑まれておらず、
+  // 骸骨玉が「撃ってよい」状態か: 洞窟から出ていて、樽際の発射禁止帯
+  // (レール終盤 quietZone 割合。至近距離の確定被弾を防ぐ)より手前で、
   // トンネルの中でもない(見えない場所からの弾は理不尽なので撃たせない)
   function canFire(b, lane) {
-    return b.d >= PP.R && b.d <= lane.rail.holeD &&
+    return b.d >= PP.R &&
+           b.d <= lane.rail.holeD * (1 - PP.SKULL.quietZone) &&
            !lane.rail.tunnelAt(b.d) && b.view.visible;
   }
 
@@ -62,6 +64,10 @@
     var aimX = PP.cannon.x, aimY = PP.cannon.y - 20;
     var base = Math.atan2(aimY - y, aimX - x);
     var spread = S.spreadDeg * Math.PI / 180;
+    // 弾速は距離から逆算: どこから撃たれても着弾までほぼ travelTime 秒。
+    // 近い骸骨の弾は遅く、遠い骸骨の弾は速くなり、回避猶予が一定になる
+    var dist = Math.sqrt((aimX - x) * (aimX - x) + (aimY - y) * (aimY - y));
+    var spd = Math.min(S.speedMax, Math.max(S.speedMin, dist / S.travelTime));
     for (var i = 0; i < S.fan; i++) {
       var ang = S.fan > 1 ? base - spread / 2 + spread * (i / (S.fan - 1)) : base;
       var view = makeBulletView();
@@ -69,8 +75,8 @@
       cont.addChild(view);
       bullets.push({
         x: x, y: y,
-        vx: Math.cos(ang) * S.bulletSpeed,
-        vy: Math.sin(ang) * S.bulletSpeed,
+        vx: Math.cos(ang) * spd,
+        vy: Math.sin(ang) * spd,
         r: S.orbR, view: view, t: Math.random() * 6.28
       });
     }
