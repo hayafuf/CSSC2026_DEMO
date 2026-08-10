@@ -259,14 +259,6 @@
 
     if (lane.balls.length > 0) {
       var starts = groupStarts(lane);
-      // ボスコース: 新しい隙間ができたら PP.BOSS.gapHold 秒だけ「等速」で隙間を
-      // 保ち(ボスへの射線のチャンス)、時間が過ぎたら従来どおり後方が詰めて埋める
-      if (PP.game.bossMode) {
-        var gc = starts.length;
-        if (gc > (lane.lastGroups || 1)) lane.gapHold = PP.BOSS.gapHold;
-        if (gc <= 1) lane.gapHold = 0;
-        lane.lastGroups = gc;
-      }
       // 分断された接合点を移動前に控えておく(移動・磁力で閉じたら合流とみなす)
       var joints = snapshotJoints(lane, starts);
 
@@ -316,22 +308,17 @@
         for (i = rs; i < re; i++) balls[i].d += net;
       }
     } else if (g.bossMode && starts.length > 1) {
-      // ボスコースの特例: 隙間が開いてから gapHold 秒の間は、全グループが
-      // 「先頭グループの位置の速度」で等速前進する(開けた射線のチャンス)。
-      // gapHold が切れたら、後方グループだけ先頭×gapCatchUp 倍の等速になり、
-      // じわっと詰めて隙間を埋める(通常則の洞窟寄り速度へ戻すと急加速で不自然)
-      if (lane.gapHold > 0) lane.gapHold -= dt;
+      // ボスコースの特例: 隙間が開いている間は「洞窟に繋がっている最後尾の
+      // 列群」だけが前進し、前方に切り離された断片はその場に静止する。
+      // 断片は樽へ進まない=隙間を開けた恩恵で、最後尾が等速で詰めて再接続する
+      // (速度は先頭位置基準 × gapCatchUp。洞窟寄りの通常則だと速すぎる)
       var base = speedAt(lane, balls[0].d);
-      for (var bi = 0; bi < starts.length; bi++) {
-        var bs = starts[bi];
-        var be = (bi + 1 < starts.length) ? starts[bi + 1] : balls.length;
-        var mul = (bi === 0 || lane.gapHold > 0) ? 1 : PP.BOSS.gapCatchUp;
-        var uStep = base * mul * dt;
-        for (i = bs; i < be; i++) {
-          balls[i].d += uStep;
-          balls[i].spdD = undefined;   // 基準を捨てる(隙間が閉じた後は自然復帰)
-          balls[i].spdHold = 0;
-        }
+      var lastStart = starts[starts.length - 1];
+      var uStep = base * PP.BOSS.gapCatchUp * dt;
+      for (i = 0; i < balls.length; i++) {
+        if (i >= lastStart) balls[i].d += uStep;
+        balls[i].spdD = undefined;   // 基準を捨てる(隙間が閉じた後は自然復帰)
+        balls[i].spdHold = 0;
       }
     } else {
       // 反動で押し戻されている最中のグループは、速度基準を動かさない
