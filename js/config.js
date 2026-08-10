@@ -618,7 +618,7 @@
     // levelStep: 0 でレベル補正を切り、テンポは PP.BOSS 側だけで調整できる。
     {
       name: "クラーケンの海域", boss: true, overpass: false, sharp: true, corner: 26,
-      speed: { entry: 1000, hole: 18, curve: 4.0, levelStep: 0 },
+      speed: { entry: 1000, hole: 22, curve: 4.0, levelStep: 0 },
       lanes: [ { ctrl: BOSS_CTRL } ]
     }
   ];
