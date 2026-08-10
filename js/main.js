@@ -420,15 +420,14 @@
   PP.retryLevel = retryLevel;
 
   // ---------- 入力 ----------
-  // タッチ操作は画面の仮想ボタン(index.html の #touchUI)が主役:
-  //   ◀ ▶ ボタン(押しっぱなし) … 大砲の移動
-  //   FIRE ボタン               … 発射
+  // タッチ操作は画面の仮想ボタン(index.html の #touchUI)に一本化:
+  //   ◀ ▶ ボタン(押しっぱなし) … 大砲の移動(押し続けると加速)
+  //   FIRE ボタン               … 発射(長押しで連射)
   //   ⇄ ボタン / 大砲をタップ  … 玉の交換
-  // 盤面を指でなぞった場合も「照準だけ」動く(発射はしない。誤射を防ぐ)。
-  // マウスは従来どおり「クリックした瞬間に発射」。
-  var touchAiming = false;   // タッチで盤面をなぞって照準中か
+  // 盤面を指で触っても大砲は動かない(誤操作防止。ボタンだけで遊ぶ)。
+  // マウスは従来どおり「動かして照準、クリックした瞬間に発射」。
+  var touchAiming = false;   // タッチで盤面に触れている最中か(大砲タップ交換の判定用)
   var touchDownX = 0, touchDownT = 0, touchOnCannon = false;
-  var touchGrabDX = 0;                // 大砲を掴んだ指と大砲中心のオフセット
   var touchMoveDir = 0;               // ◀▶ ボタンで押されている方向(-1/0/+1)
   var TOUCH_MOVE_V0 = 600;            // ◀▶ 押し始めの速さ px/s(微調整用)
   var TOUCH_MOVE_V1 = 1800;           // ◀▶ 押し続けたときの最高速 px/s
@@ -479,14 +478,11 @@
         return;
       }
       if (isTouchEv(e)) {
-        // タッチは照準だけ(発射は FIRE ボタン)。大砲タップは交換の合図
+        // タッチで盤面を触っても大砲は動かさない(操作は ◀▶/FIRE/⇄ ボタン)。
+        // 「大砲を動かさず短くタップ」だけは玉交換の合図として拾う(stagemouseup 側)
         touchAiming = true;
         touchDownX = e.stageX; touchDownT = Date.now();
-        // 「大砲の上から触り始めたか」は大砲を動かす前に測る。
-        // 大砲を掴んだときは指とのオフセットを保つ(吸い付きジャンプさせない)
         touchOnCannon = Math.abs(e.stageX - PP.cannon.x) < 80 && e.stageY > PP.cannon.y - 90;
-        touchGrabDX = touchOnCannon ? (PP.cannon.x - e.stageX) : 0;
-        if (!touchOnCannon) PP.cannon.setX(e.stageX);
       } else {
         PP.cannon.setX(e.stageX);
         PP.cannon.fire();
@@ -588,7 +584,7 @@
         PP.game.state = "title";
         PP.hud.showOverlay("🏴‍☠️ Are you ready?",
           PP.TOUCH
-            ? "タップで出航!\n◀ ▶ ボタン(または画面をなぞる)で大砲を移動\nFIRE ボタンで発射、⇄ ボタンで玉を交換\n特殊弾は左下のスロットをタップで交換"
+            ? "タップで出航!\n◀ ▶ ボタンで大砲を移動(押し続けると加速)\nFIRE ボタンで発射(長押しで連射)、⇄ ボタンで玉を交換\n特殊弾は左下のスロットをタップで交換"
             : "クリックで出航!\nマウスで大砲を移動、クリックで発射\n右クリック / Space で玉を交換、M で消音\n特殊弾は左下のスロットをクリックで交換");
       }
     );
@@ -676,12 +672,8 @@
 
     stage.on("stagemousemove", function (e) {
       if (PP.pauseCtl && PP.pauseCtl.active) return;   // ポーズ中は大砲も動かさない
-      if (isTouchEv(e)) {
-        if (!touchAiming) return;                // 盤面に触れていない指では動かさない
-        PP.cannon.setX(e.stageX + touchGrabDX);  // 掴んだ位置とのオフセットを維持
-      } else {
-        PP.cannon.setX(e.stageX);
-      }
+      if (isTouchEv(e)) return;   // タッチでは大砲を動かさない(◀▶ ボタンで移動)
+      PP.cannon.setX(e.stageX);
     });
     // 右クリックで玉を交換(メニューは出さない)
     document.getElementById("gameCanvas").addEventListener("contextmenu", function (e) {
