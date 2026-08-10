@@ -17,15 +17,21 @@
  * 状態異常の残り秒数 PP.game.bossFx の減算はこのファイルの update() ただ
  * 1か所でだけ行う。消費側(main.js / cannon.js)は「> 0 か」を読むだけなので、
  * タイマーが 0 になれば入力・弾速・視界は必ず通常へ戻る。
- *   ink      タコスミ     … 山なりの墨玉×5。着弾点に墨だまり、直撃なら大きく視界妨害
- *   addle    Addle!!      … 速い単発。被弾でマウス左右反転(main.js の aimStageX)
- *   freeze   停止!        … 7方向の扇弾。被弾で大砲の移動・発射不能(cannon.js)
- *   shotSlow 時間の滞留   … 大きく遅い弾。被弾で発射玉が極端に遅くなる(stepShots)
- *   randomize ランダマイズ … 被弾でチェーン全体の色がシャッフルされる(chain.js)
- *   tentacle 触手突き上げ … 大砲の高さに⚠予告 → 画面下から触手が突き上げ、
- *                           範囲内にいるとランダムなデバフ。予告中が最大の撃ち込み時
- *   tsunami  大津波       … 光の安全柱以外の低空を水壁が横断。柱の外だと押し流される
- *   barrage  妖弾の雨     … 下向きの扇弾幕を複数ボレー。隙間を縫うか撃ち落とす
+ *   ink      漆黒の墨獄       … 弧を描いて降り注ぐ墨玉のカーテン。着弾点に墨だまり
+ *   addle    惑乱の逆潮       … 大珠が盤面中央でホバリングし、二段のリングを展開。
+ *                               被弾でマウス左右反転(main.js の aimStageX)
+ *   freeze   深淵の錨鎖       … ボスを中心に広がる同心二重のリング。
+ *                               被弾で大砲の移動・発射不能(cannon.js)
+ *   shotSlow 時凪の呪縛       … 遅い大弾の二重カーテン(隙間が互い違い)。
+ *                               被弾で発射玉が極端に遅くなる(stepShots)
+ *   randomize 運命のルーレット … 左右から交差する回転スイープ弾。被弾でチェーンが
+ *                               ルーレット回転 → 補給と同じ塊生成ルールで色が並び直る
+ *   tentacle 海淵の大触腕     … 大砲の高さに⚠予告 → 画面下から触手が突き上げ、
+ *                               範囲内ならランダムなデバフ。突き上げ後も居座る触手に
+ *                               自弾を当てれば「斬り返し」でボスへダメージを返せる
+ *   tsunami  終焉の大海嘯     … 光の安全柱以外の低空を水壁が横断。柱の外だと
+ *                               画面の端まで一気に押し流される(樽防衛から引き剥がされる)
+ *   barrage  妖星の豪雨       … 下向きの扇弾幕を複数ボレー。隙間を縫うか撃ち落とす
  * 同種の重ね掛けは抽選時に「効果中の技」を候補から外して防ぐ。HP が半分を切ると
  * 怒りフェーズ: 攻撃間隔短縮・弾速アップ・発射後のコンボ追撃(短予兆の ink/freeze)。
  * 通知は「技名バナー(画面上部の帯)+HUD の状態異常チップ」の2系統に整理し、
@@ -79,21 +85,22 @@
   var queuedAttack = null;               // 怒りフェーズのコンボ追撃(recover 後に短予兆で撃つ)
   var curTeleTotal = 1;   // いまの予兆の全長(drawCharge の進行度用)
   var tsuSafeX = 0, tsuDir = 1;          // 津波の安全地帯と進行方向
-  var barrageLeft = 0, barrageT = 0;     // 弾幕の残りボレー数と次弾までの秒
+  var barrageLeft = 0, barrageT = 0;     // 流星雨の残りボレー数と次弾までの秒
+  var sweepLeft = 0, sweepT = 0, sweepTotal = 0;   // 運命のルーレットの回転スイープ
 
   // ランダマイズ(色ルーレット)は攻撃状態と独立に回す
   var rndSpinT = 0, rndStepT = 0, rndOrig = 0;
 
   // 攻撃の定義(色は予兆リング・妖弾・宣言バナーに使う)
   var ATTACKS = {
-    ink:       { name: "🦑 タコスミ!!",     color: "#8a97a8" },
-    addle:     { name: "🌀 Addle!!",         color: "#ff5d8f" },
-    freeze:    { name: "⚓ 停止!!",          color: "#ffd24a" },
-    shotSlow:  { name: "⏳ 時間の滞留",      color: "#c46ffb" },
-    randomize: { name: "🎲 ランダマイズ!!",  color: "#8ef0d0" },
-    tentacle:  { name: "🐙 触手突き上げ!!", color: "#ff5030" },
-    tsunami:   { name: "🌊 大津波!!",        color: "#4ac8e8" },
-    barrage:   { name: "☄️ 妖弾の雨!!",     color: "#ffa040" }
+    ink:       { name: "―― 漆黒の墨獄 ――",       color: "#8a97a8" },
+    addle:     { name: "―― 惑乱の逆潮 ――",       color: "#ff5d8f" },
+    freeze:    { name: "―― 深淵の錨鎖 ――",       color: "#ffd24a" },
+    shotSlow:  { name: "―― 時凪の呪縛 ――",       color: "#c46ffb" },
+    randomize: { name: "―― 運命のルーレット ――", color: "#8ef0d0" },
+    tentacle:  { name: "―― 海淵の大触腕 ――",     color: "#ff5030" },
+    tsunami:   { name: "―― 終焉の大海嘯 ――",     color: "#4ac8e8" },
+    barrage:   { name: "―― 妖星の豪雨 ――",       color: "#ffa040" }
   };
   var ATTACK_KEYS = ["ink", "addle", "freeze", "shotSlow", "randomize",
                      "tentacle", "tsunami", "barrage"];
@@ -376,12 +383,24 @@
     return sh;
   }
 
-  function spawnBullet(type, x, y, vx, vy, grav, r) {
+  // opts(省略可)で弾に「軌道の芸」を持たせる:
+  //   wave:  { amp, freq, ph } … 左右に蛇行しながら進む(snake 弾)
+  //   hover: { y, time, rings: [{ count, speed }, …] }
+  //          … 指定の高さまで降りたら停止してホバリングし、time 秒後に
+  //            全方位リングを段階的に展開(rings を順に 0.45 秒間隔で放つ)、
+  //            最後のリングと同時に自分は弾ける(ホバリング爆裂弾)
+  function spawnBullet(type, x, y, vx, vy, grav, r, opts) {
     var view = makeOrbView(type);
     view.x = x; view.y = y;
     bulletCont.addChild(view);
-    bullets.push({ type: type, x: x, y: y, vx: vx, vy: vy, grav: grav || 0,
-                   r: r, view: view, t: Math.random() * 6.28 });
+    var b = { type: type, x: x, y: y, vx: vx, vy: vy, grav: grav || 0,
+              r: r, view: view, t: Math.random() * 6.28 };
+    if (opts) {
+      if (opts.wave) b.wave = { amp: opts.wave.amp, freq: opts.wave.freq, ph: opts.wave.ph || 0 };
+      if (opts.hover) b.hover = { y: opts.hover.y, t: opts.hover.time,
+                                  rings: opts.hover.rings.slice(), done: false };
+    }
+    bullets.push(b);
   }
 
   function clearBullets() {
@@ -399,13 +418,48 @@
     var cx = PP.cannon.x, cy = PP.cannon.y;
     for (var i = bullets.length - 1; i >= 0; i--) {
       var b = bullets[i];
+      // ホバリング爆裂弾: 指定の高さで静止 → 溜め → 全方位リングを段階展開。
+      // リングごとに半歩ずらして放つので、二段目は一段目の隙間を通ってくる
+      if (b.hover && !b.hover.done && b.y >= b.hover.y) {
+        b.vx = 0; b.vy = 0;
+        b.hover.t -= dt;
+        if (Math.random() < dt * 30) {
+          PP.fx.burst(b.x + (Math.random() - 0.5) * 30, b.y + (Math.random() - 0.5) * 30,
+                      ATTACKS[b.type].color, 1, 0.6);
+        }
+        if (b.hover.t <= 0) {
+          var bc = b.hover.rings.shift();
+          var half = (b.hover.rings.length % 2) * (Math.PI / bc.count);   // 段ごとに半歩ずらす
+          for (var bk = 0; bk < bc.count; bk++) {
+            var bang = (Math.PI * 2 / bc.count) * bk + half;
+            spawnBullet(b.type, b.x, b.y,
+              Math.cos(bang) * bc.speed, Math.sin(bang) * bc.speed, 0, PP.BOSS.orb.r * 0.72);
+          }
+          PP.fx.ring(b.x, b.y, ATTACKS[b.type].color, 12, 110, 450);
+          PP.fx.burst(b.x, b.y, ATTACKS[b.type].color, 14, 1.6);
+          PP.audio.beep(340, 0.12, "square", 0.1);
+          if (b.hover.rings.length > 0) {
+            b.hover.t = 0.45;          // 次のリングまでの溜め
+          } else {
+            b.hover.done = true;
+            removeBullet(i);
+            continue;
+          }
+        }
+      }
       b.vy += b.grav * dt;
       b.x += b.vx * dt;
       b.y += b.vy * dt;
+      // 蛇行弾: 進行に左右の揺れを重ねる(網のような弾幕を作る)
+      if (b.wave) b.x += Math.sin(b.t * b.wave.freq + b.wave.ph) * b.wave.amp * dt;
       b.t += dt;
       b.view.x = b.x; b.view.y = b.y;
       var pulse = 1 + 0.12 * Math.sin(b.t * 10);
       b.view.scaleX = b.view.scaleY = pulse;
+      // 尾を引く残光(妖弾の軌道が線で読める=避けやすく、画面も華やぐ)
+      if (Math.random() < dt * 26) {
+        PP.fx.burst(b.x, b.y, ATTACKS[b.type].color, 1, 0.5);
+      }
 
       // 迎撃: 自分の弾(通常弾・爆弾)をぶつけると相殺して消せる。
       // ミサイルは貫通なので消費せずに薙ぎ払える
@@ -444,8 +498,8 @@
         removeBullet(i);
         continue;
       }
-      // 画面外
-      if (b.y > PP.H + 40 || b.x < -60 || b.x > PP.W + 60) removeBullet(i);
+      // 画面外(ホバリング爆裂の上向き小弾があるので上方向too)
+      if (b.y > PP.H + 40 || b.y < -60 || b.x < -60 || b.x > PP.W + 60) removeBullet(i);
     }
   }
 
@@ -561,7 +615,7 @@
       if ((k === "tentacle" || k === "tsunami" || k === "barrage") && attackCount < 1) continue;
       if (k === "tsunami" && wave) continue;
       if (k === "barrage" && barrageLeft > 0) continue;
-      if (k === "randomize" && rndSpinT > 0) continue;
+      if (k === "randomize" && (rndSpinT > 0 || sweepLeft > 0)) continue;
       pool.push(k);
     }
     if (pool.length === 0) pool = ATTACK_KEYS.slice();
@@ -690,28 +744,65 @@
     PP.audio.beep(200, 0.15, "square", 0.1);
     PP.fx.flash(sx, sy, "rgba(120,220,180,0.7)", 40);
     if (key === "ink") {
-      // 山なりの墨玉: 大砲狙い1発+左右にばら撒き
+      // 漆黒の墨獄: 等間隔の弧を描いて降り注ぐ墨玉のカーテン(中央は大砲狙い)
       var K = B.ink;
-      var targets = [tx];
-      for (var ti = 1; ti < K.lobs + (phase2 ? 2 : 0); ti++) {
-        var side = (ti % 2 === 0) ? 1 : -1;
-        targets.push(tx + side * (160 + Math.random() * 320));
-      }
-      for (var i = 0; i < targets.length; i++) {
+      var lobs = K.lobs + (phase2 ? 2 : 0);
+      for (var i = 0; i < lobs; i++) {
+        var lobT = tx + (i - (lobs - 1) / 2) * 190;
         // 放物線: vy0 で軽く浮かせ、grav で落とす。到達時間から vx を逆算
         var fallT = (Math.sqrt(K.vy0 * K.vy0 + 2 * K.grav * (ty - sy)) - K.vy0) / K.grav;
-        spawnBullet("ink", sx, sy, (targets[i] - sx) / fallT * spdMul(), K.vy0, K.grav, 18);
+        spawnBullet("ink", sx, sy, (lobT - sx) / fallT * spdMul(), K.vy0, K.grav, 18);
       }
     } else if (key === "freeze") {
-      // 扇状の弾幕: 中央は大砲狙い、左右は spread ぶんずらす
+      // 深淵の錨鎖: ボスを中心に広がる同心二重の錨のリング。
+      // 外環(速・12発)と内環(遅・8発、半歩ずれ)が時間差で押し寄せる
       var F = B.freeze;
-      var fan = F.fan + (phase2 ? 2 : 0);
-      for (var f = 0; f < fan; f++) {
-        var off = (f - (fan - 1) / 2) * F.spread;
-        var dx = (tx + off) - sx, dy = ty - sy;
-        var len = Math.sqrt(dx * dx + dy * dy) || 1;
-        spawnBullet("freeze", sx, sy, dx / len * F.speed * spdMul(), dy / len * F.speed * spdMul(), 0, B.orb.r);
+      var ringDefs = phase2
+        ? [{ n: 14, v: F.speed }, { n: 10, v: F.speed * 0.7 }, { n: 7, v: F.speed * 0.5 }]
+        : [{ n: 12, v: F.speed }, { n: 8, v: F.speed * 0.68 }];
+      for (var rl = 0; rl < ringDefs.length; rl++) {
+        var rd = ringDefs[rl];
+        var shift = rl * (Math.PI / rd.n);         // 環ごとに半歩ずらす
+        for (var f = 0; f < rd.n; f++) {
+          var angF = (Math.PI * 2 / rd.n) * f + shift;
+          spawnBullet("freeze", sx, sy,
+            Math.cos(angF) * rd.v * spdMul(), Math.sin(angF) * rd.v * spdMul(), 0, B.orb.r);
+        }
       }
+    } else if (key === "addle") {
+      // 惑乱の逆潮: 惑わしの大珠が盤面中央まで降りてホバリングし、
+      // 二段のリング(段ごとに半歩ずれる)を展開する。一段目の隙間を
+      // 抜けた先に二段目が来る=渦に呑まれるような弾幕
+      var ddxA = tx - sx, ddyA = ty - sy;
+      var dlenA = Math.sqrt(ddxA * ddxA + ddyA * ddyA) || 1;
+      spawnBullet("addle", sx, sy,
+        ddxA / dlenA * 260 * spdMul(), Math.abs(ddyA) / dlenA * 260 * spdMul(), 0, B.shotSlow.r,
+        { hover: { y: 380, time: 1.0,
+                   rings: phase2
+                     ? [{ count: 12, speed: 240 * spdMul() }, { count: 16, speed: 180 * spdMul() }, { count: 20, speed: 140 * spdMul() }]
+                     : [{ count: 10, speed: 230 * spdMul() }, { count: 14, speed: 165 * spdMul() }] } });
+    } else if (key === "shotSlow") {
+      // 時凪の呪縛: 大弾のカーテンが五重(怒り時は六重)に降り注ぐ大技。
+      // 各層の隙間は互い違いで、速度差により層がすれ違うので
+      // 「安全な縦の通り道」が時間とともに移ろう=読み続けないと抜けられない
+      var rows = phase2 ? 6 : 5;
+      for (var row = 0; row < rows; row++) {
+        var nS = 7 - (row % 2);                     // 7発と6発を交互に
+        var vS = (235 - row * 25) * spdMul();       // 手前の層ほど速い(235/210/185/160/135/110)
+        var pitchS = PP.W / (nS + 1);
+        var offS = (row % 2) * pitchS * 0.5;        // 偶数層と奇数層で隙間を互い違いに
+        for (var c2 = 0; c2 < nS; c2++) {
+          var gxS = pitchS * (c2 + 1) + offS - pitchS * 0.25;
+          spawnBullet("shotSlow", gxS, sy - 20 - row * 55, 0, vS, 0, B.shotSlow.r,
+            { wave: { amp: 18, freq: 1.6, ph: row * 1.3 + c2 * 0.4 } });
+        }
+      }
+    } else if (key === "randomize") {
+      // 運命のルーレット: 左右から交差する2本の「回転する腕」が
+      // 弧を掃くように弾を置いていく(ルーレットの針の回転)
+      sweepTotal = 16 + (phase2 ? 6 : 0);
+      sweepLeft = sweepTotal;
+      sweepT = 0;
     } else if (key === "tentacle") {
       // ⚠地点へ画面下から触手が突き上げる(範囲内ならランダムなデバフ)
       for (var z = 0; z < pendingZones.length; z++) spawnStrike(pendingZones[z]);
@@ -752,6 +843,7 @@
 
   function updateStrikes(dt) {
     var K = PP.BOSS.tentacle;
+    var g2 = PP.game;
     for (var i = strikes.length - 1; i >= 0; i--) {
       var s = strikes[i];
       s.timer -= dt;
@@ -779,17 +871,40 @@
         var dy = PP.H - (PP.H - topY - 40) * (d / 4);
         g.drawCircle(s.x + sway * (d / 4), dy, 5 - d * 0.7);
       }
-      // 命中判定は伸び切った瞬間に1回だけ
+      // 命中判定は伸び切った瞬間に1回だけ。水柱+衝撃波で「海を割った」感を出す
       if (!s.hitDone && k >= 1) {
         s.hitDone = true;
         PP.fx.burst(s.x, PP.CANNON_Y - 60, "#ff5030", 14, 1.6);
+        PP.fx.burst(s.x, PP.H - 20, "rgba(200,230,246,0.9)", 18, 2.0);   // 突き破った水しぶき
         PP.fx.ring(s.x, PP.CANNON_Y - 40, "#ff5030", 20, 120, 400);
+        PP.fx.ring(s.x, PP.H - 30, "rgba(190,230,246,0.8)", 10, 90, 450);
         PP.fx.shake(14, 0.3);
         PP.audio.beep(70, 0.3, "sawtooth", 0.16);
         if (Math.abs(PP.cannon.x - s.x) < K.r + 25) {
           var pool = ["freeze", "addle", "shotSlow"];
           applyDebuff(pool[Math.floor(Math.random() * pool.length)], 0.7);
           PP.fx.shake(10, 0.3);
+        }
+      }
+      // リスクリターンの後段: 突き上げ後も holdTime の間は触手が居座る。
+      // その間に自弾を当てれば「斬り返し」= ボス本体へダメージ+触手は即退散。
+      // 避けるだけでなく、あえて近くで撃ち返す択が生まれる
+      if (s.hitDone && s.timer > 0.18) {
+        for (var si = g2.shots.length - 1; si >= 0; si--) {
+          var sh2 = g2.shots[si];
+          if (Math.abs(sh2.x - s.x) < 32 && sh2.y > topY - 10) {
+            if (sh2.special !== "missile") {
+              if (sh2.view.spark) createjs.Tween.removeTweens(sh2.view.spark);
+              PP.layers.shot.removeChild(sh2.view);
+              g2.shots.splice(si, 1);
+            }
+            s.timer = 0.18;                 // 斬られた触手は即退散
+            PP.fx.burst(s.x, sh2.y, "#8ef0d0", 12, 1.4);
+            PP.fx.floatText("触手を斬り払った!", s.x, sh2.y - 30, "#8ef0d0", 20);
+            PP.audio.beep(660, 0.12, "square", 0.09);
+            onHit(1, s.x, sh2.y);           // 本体まで痛みが走る(HP-1)
+            break;
+          }
         }
       }
     }
@@ -852,12 +967,14 @@
       PP.fx.burst(wave.x + (Math.random() - 0.5) * 100, PP.CANNON_Y - 70,
                   "rgba(190,230,246,0.8)", 3, 0.9);
     }
-    // 大砲の x を通過した瞬間に判定(安全柱の中なら無事)
+    // 大砲の x を通過した瞬間に判定(安全柱の中なら無事)。
+    // 柱の外にいたら波に呑まれ、進行方向の「画面の端」まで一気に押し流される
+    // (中央の樽・危機レーンから最も遠い位置へ追いやられるのがペナルティの本体)
     if (!wave.hitDone &&
         ((wave.dir > 0 && wave.x >= PP.cannon.x) || (wave.dir < 0 && wave.x <= PP.cannon.x))) {
       wave.hitDone = true;
       if (Math.abs(PP.cannon.x - tsuSafeX) > S.gapW / 2 - 10) {
-        PP.cannon.forceX(PP.cannon.x + S.push * wave.dir);
+        wave.carried = true;   // 波と一緒に端まで流されていく(updateWave が運ぶ)
         PP.game.bossFx.freeze = Math.max(PP.game.bossFx.freeze, S.stun);
         PP.fx.shake(16, 0.35);
         PP.fx.burst(PP.cannon.x, PP.CANNON_Y - 40, "#4ac8e8", 16, 1.8);
@@ -867,10 +984,21 @@
         PP.audio.beep(880, 0.12, "triangle", 0.08);
       }
     }
-    if (wave.x < -100 || wave.x > PP.W + 100) clearWave();
+    // 呑まれた大砲は水壁の面に張り付いたまま端へ(泡を吐きながら流されていく)
+    if (wave.carried) {
+      PP.cannon.forceX(wave.x - wave.dir * 40);
+      PP.game.bossFx.freeze = Math.max(PP.game.bossFx.freeze, 0.3);   // 流されている間は操作不能
+      if (Math.random() < dt * 24) {
+        PP.fx.burst(PP.cannon.x, PP.CANNON_Y - 30 - Math.random() * 40, "rgba(210,236,248,0.85)", 3, 1.0);
+      }
+    }
+    if (wave.x < -100 || wave.x > PP.W + 100) {
+      if (wave.carried) PP.game.bossFx.freeze = Math.max(PP.game.bossFx.freeze, S.stun);
+      clearWave();
+    }
   }
 
-  // ---------- 弾幕(下向きの扇弾を複数ボレー) ----------
+  // ---------- 妖星の豪雨(画面上端から降り注ぐ流星の雨) ----------
   function updateBarrage(dt) {
     if (barrageLeft <= 0) return;
     barrageT -= dt;
@@ -878,41 +1006,64 @@
     var Q = PP.BOSS.barrage;
     barrageT = Q.interval;
     barrageLeft--;
-    var sx = body.x, sy = body.y + 38;
     var n = Q.perVolley + (phase2 ? 2 : 0);
-    // 扇の中心を「いまの大砲の方向」へ向ける(追い込み)。広がりは±65度
-    var aimAng = Math.atan2((PP.CANNON_Y - 20) - sy, PP.cannon.x - sx);
     for (var i = 0; i < n; i++) {
-      var ang = aimAng + (i - (n - 1) / 2) * (2.26 / (n - 1));
-      // 下向き以外へ飛ばさない(横〜下の135度に収める)
-      ang = Math.max(Math.PI * 0.25, Math.min(Math.PI * 0.75, ang));
-      spawnBullet("barrage", sx, sy,
-        Math.cos(ang) * Q.speed * spdMul(), Math.sin(ang) * Q.speed * spdMul(), 0, PP.BOSS.orb.r * 0.8);
+      // 画面幅いっぱいのランダムな位置から、大砲の方へ緩く傾いて落ちる流星。
+      // 重力で加速するので「上はまばら、下は速い」雨の密度勾配ができる
+      var mx = 80 + Math.random() * (PP.W - 160);
+      var mvx = Math.max(-90, Math.min(90, (PP.cannon.x - mx) * 0.12));
+      spawnBullet("barrage", mx, -30 - Math.random() * 60,
+        mvx * spdMul(), 140 * spdMul(), 240, PP.BOSS.orb.r * 0.8);
     }
     PP.audio.beep(240 + barrageLeft * 40, 0.08, "square", 0.08);
-    PP.fx.flash(sx, sy, "rgba(255,160,64,0.6)", 36);
   }
 
-  // ランダマイズの進行(被弾したときだけ回り始める)。ルーレットの高速音の後、
-  // レーン上のチェーン全体の色をシャッフルする(chain.js scrambleColors)。
-  // 狙って揃えていた同色の並びが崩壊する=最も戦略的な妨害。装填玉は変えない。
+  // ---------- 運命のルーレット(左右から交差する回転スイープ) ----------
+  // 針が回るように、左右の腕が弧を掃きながら弾を1発ずつ置いていく。
+  // 2本の腕は中央で交差し、X字の美しい弾道が画面に残る
+  function updateSweep(dt) {
+    if (sweepLeft <= 0) return;
+    sweepT -= dt;
+    if (sweepT > 0) return;
+    sweepT = 0.06;
+    sweepLeft--;
+    var sx = body.x, sy = body.y + 38;
+    var k = 1 - sweepLeft / sweepTotal;                    // 0→1 で掃引
+    var ang = Math.PI * (0.12 + 0.76 * k);                 // 左→右へ掃く腕
+    var v = 300 * spdMul();
+    spawnBullet("randomize", sx, sy, Math.cos(ang) * v, Math.sin(ang) * v, 0, PP.BOSS.orb.r,
+      { wave: { amp: 30, freq: 2.5, ph: k * 6 } });
+    var ang2 = Math.PI - ang;                              // 右→左へ掃く腕(鏡像)
+    spawnBullet("randomize", sx, sy, Math.cos(ang2) * v, Math.sin(ang2) * v, 0, PP.BOSS.orb.r,
+      { wave: { amp: 30, freq: 2.5, ph: 3 + k * 6 } });
+    PP.audio.beep(500 + k * 500, 0.04, "square", 0.05);
+  }
+
+  // 運命のルーレットの進行(被弾したときだけ回り始める)。回転中はチェーンの
+  // 全玉がルーレットのように目まぐるしく色を入れ替え、確定の瞬間に「補給と同じ
+  // 塊生成ルール」で並び直す(chain.js scrambleColors)。理不尽な完全ランダムに
+  // ならず、シャッフル後も同色の塊を狙うゲームがそのまま成立する。装填玉は不変。
   function updateRandomize(dt) {
     if (rndSpinT <= 0) return;
     rndSpinT -= dt;
     rndStepT -= dt;
     if (rndSpinT <= 0) {
-      PP.chain.scrambleColors();
+      PP.chain.scrambleColors("final");
       PP.fx.screenFlash("rgba(142,240,208,0.25)", 0.25, 500);
       PP.audio.beep(1175, 0.16, "triangle", 0.1);
+      PP.audio.beep(1568, 0.2, "triangle", 0.08);
       return;
     }
     if (rndStepT <= 0) {
       rndStepT = PP.BOSS.randomize.step;
+      PP.chain.scrambleColors("spin");    // 回転中: 盤面全体が色を替え続ける
       PP.audio.beep(600 + Math.random() * 600, 0.03, "square", 0.03);
     }
   }
 
-  // 予兆のチャージリング(telegraph 中だけ、本体の後ろで脈打つ)
+  // 予兆のチャージ(telegraph 中だけ、本体の後ろで渦を巻く)。
+  // 互い違いに回る2重の魔法陣アーク+中心へ吸い込まれる光の粒で
+  // 「力を練り上げている」感を出す。収束しきる=発射の瞬間
   function drawCharge() {
     var g = charge.graphics;
     g.clear();
@@ -921,8 +1072,30 @@
     var k = 1 - stateT / curTeleTotal;                // 0→1 で収束
     var r = 140 - 64 * k + Math.sin(t * 18) * 6;
     charge.x = body.x; charge.y = body.y - 20;
-    g.setStrokeStyle(5).beginStroke(a.color).drawCircle(0, 0, r);
-    g.setStrokeStyle(2).beginStroke("rgba(255,255,255,0.5)").drawCircle(0, 0, r * 0.7);
+    // 外周: 3分割アークが時計回りに回転
+    var a0 = t * 3.2;
+    for (var i = 0; i < 3; i++) {
+      var s0 = a0 + i * (Math.PI * 2 / 3);
+      g.setStrokeStyle(5, "round").beginStroke(a.color)
+        .arc(0, 0, r, s0, s0 + 1.5).endStroke();
+    }
+    // 内周: 反時計回りの細アーク(交差する魔法陣)
+    var b0 = -t * 4.6;
+    for (var j = 0; j < 3; j++) {
+      var s1 = b0 + j * (Math.PI * 2 / 3);
+      g.setStrokeStyle(2, "round").beginStroke("rgba(255,255,255,0.6)")
+        .arc(0, 0, r * 0.68, s1, s1 + 1.1).endStroke();
+    }
+    // 中心へ吸い込まれる光の粒(収束が進むほど中心に近く・明るく)
+    g.beginFill(a.color);
+    for (var p = 0; p < 6; p++) {
+      var ang = t * 2.4 + p * 1.05;
+      var pr = r * (1.15 - 0.5 * ((t * 0.9 + p * 0.37) % 1));
+      g.drawCircle(Math.cos(ang) * pr, Math.sin(ang) * pr * 0.9, 2.5 + k * 2);
+    }
+    // 口元に灯る収束光(発射位置の予告)
+    g.beginFill("rgba(255,255,255," + (0.15 + 0.45 * k).toFixed(2) + ")")
+      .drawCircle(0, 58, 6 + 10 * k);
   }
 
   // ---------- 被弾・撃破 ----------
@@ -1006,6 +1179,7 @@
     fx.ink = 0; fx.addle = 0; fx.freeze = 0; fx.shotSlow = 0;
     rndSpinT = 0;
     barrageLeft = 0;
+    sweepLeft = 0;
     queuedAttack = null;
     removeInk();
     clearBullets();
@@ -1043,6 +1217,7 @@
     updateStrikes(dt);
     updateWave(dt);
     updateBarrage(dt);
+    updateSweep(dt);
     updateChips();
 
     if (state === "dead") return;
@@ -1135,7 +1310,8 @@
     }
   }
 
-  // ボス戦の開始/終了(main.js startLevel から)。開始時は状態も仕切り直す
+  // ボス戦の開始/終了(main.js startLevel から)。開始時は状態も仕切り直し、
+  // 最終決戦の開幕を宣言する(1〜5面の静かな始まりとは別物にする)
   function setActive(on) {
     active = !!on;
     if (active && !built) build();
@@ -1144,6 +1320,15 @@
       hpCont.visible = active;
     }
     reset();
+    if (active) {
+      showBanner("最終海域 ―― 深淵の主 クラーケン", "#ff5030", 3.2);
+      PP.fx.screenFlash("rgba(160,20,16,0.3)", 0.3, 900);
+      PP.fx.shake(12, 0.5);
+      PP.fx.floatText("討ち取って海に平穏を!", PP.W / 2, PP.H / 2 + 10, "#e6d3b8", 22);
+      PP.audio.beep(55, 0.8, "sawtooth", 0.14);
+      PP.audio.beep(82, 0.6, "sawtooth", 0.1);
+      PP.audio.beep(110, 0.5, "sine", 0.08);
+    }
   }
 
   // 勝利の受け渡し(1回だけ true)。main.js の tick が levelClear() に繋ぐ
@@ -1163,6 +1348,13 @@
     // デバッグ・動作確認用
     getHp: function () { return hp; },
     getState: function () { return state; },
-    getBulletCount: function () { return bullets.length; }
+    getBulletCount: function () { return bullets.length; },
+    // 指定した技を即座に予兆から始める(バランス調整・動作確認用)
+    forceAttack: function (key) {
+      if (!active || !built || !ATTACKS[key]) return false;
+      if (state !== "idle" && state !== "recover") return false;
+      startTelegraph(key);
+      return true;
+    }
   };
 })();

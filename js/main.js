@@ -185,8 +185,17 @@
     }
     g.state = "clear";
     PP.hud.update();
-    PP.hud.showOverlay("⚓ ステージ " + g.level + "/" + total + " 制覇!",
-      "耐え切って残りも掃討した! 生存ボーナス +1000\nスコア " + g.score + " 点\n" + PP.TAP + "で次のステージへ");
+    // 次がボス海域なら、ただの「次のステージへ」ではなく最終決戦の前口上にする
+    var next = PP.COURSES[courseForLevel(g.level + 1)];
+    if (next && next.boss) {
+      PP.hud.showOverlay("⚓ ステージ " + g.level + "/" + total + " 制覇!",
+        "耐え切って残りも掃討した! 生存ボーナス +1000\nスコア " + g.score + " 点\n" +
+        "――だが海が不気味に鳴いている。深淵の主が目を覚ました…\n" +
+        PP.TAP + "で最終決戦へ");
+    } else {
+      PP.hud.showOverlay("⚓ ステージ " + g.level + "/" + total + " 制覇!",
+        "耐え切って残りも掃討した! 生存ボーナス +1000\nスコア " + g.score + " 点\n" + PP.TAP + "で次のステージへ");
+    }
   }
 
   // ---------- 【課題5-3】(模範解答つき)リトライの画面切り替え ----------

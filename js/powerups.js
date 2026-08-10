@@ -30,8 +30,14 @@
       def = { icon: "🪙" };
     } else {
       kind = "power";
-      // 種類は重み付き抽選(config.js の PP.POWERUPS の w。大きいほど出やすい)
-      def = weightedPick(PP.POWERUPS);
+      // 種類は重み付き抽選(config.js の PP.POWERUPS の w。大きいほど出やすい)。
+      // ボス戦では逆風(🌬️)を出さない: 短い2段コースでは風が強すぎて
+      // チェーンが洞窟まで戻り切り、緊張感が消えてしまうため
+      var pool = PP.POWERUPS;
+      if (PP.game.bossMode) {
+        pool = pool.filter(function (p) { return p.id !== "reverse"; });
+      }
+      def = weightedPick(pool);
       // カラーボムは「色」を持って落ちる。盤面に今ある色から選ぶので拾い損が無い
       if (def.id === "colorbomb") color = pickBoardColor();
     }

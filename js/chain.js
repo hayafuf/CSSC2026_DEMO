@@ -259,6 +259,14 @@
 
     if (lane.balls.length > 0) {
       var starts = groupStarts(lane);
+      // ボスコース: 新しい隙間ができたら PP.BOSS.gapHold 秒だけ「等速」で隙間を
+      // 保ち(ボスへの射線のチャンス)、時間が過ぎたら従来どおり後方が詰めて埋める
+      if (PP.game.bossMode) {
+        var gc = starts.length;
+        if (gc > (lane.lastGroups || 1)) lane.gapHold = PP.BOSS.gapHold;
+        if (gc <= 1) lane.gapHold = 0;
+        lane.lastGroups = gc;
+      }
       // 分断された接合点を移動前に控えておく(移動・磁力で閉じたら合流とみなす)
       var joints = snapshotJoints(lane, starts);
 
@@ -306,6 +314,24 @@
         var net = Math.min(0, speedAt(lane, balls[rs].d) - reverseV) * dt;  // 負なら後退
         if (net === 0) continue;
         for (i = rs; i < re; i++) balls[i].d += net;
+      }
+    } else if (g.bossMode && starts.length > 1) {
+      // ボスコースの特例: 隙間が開いてから gapHold 秒の間は、全グループが
+      // 「先頭グループの位置の速度」で等速前進する(開けた射線のチャンス)。
+      // gapHold が切れたら、後方グループだけ先頭×gapCatchUp 倍の等速になり、
+      // じわっと詰めて隙間を埋める(通常則の洞窟寄り速度へ戻すと急加速で不自然)
+      if (lane.gapHold > 0) lane.gapHold -= dt;
+      var base = speedAt(lane, balls[0].d);
+      for (var bi = 0; bi < starts.length; bi++) {
+        var bs = starts[bi];
+        var be = (bi + 1 < starts.length) ? starts[bi + 1] : balls.length;
+        var mul = (bi === 0 || lane.gapHold > 0) ? 1 : PP.BOSS.gapCatchUp;
+        var uStep = base * mul * dt;
+        for (i = bs; i < be; i++) {
+          balls[i].d += uStep;
+          balls[i].spdD = undefined;   // 基準を捨てる(隙間が閉じた後は自然復帰)
+          balls[i].spdHold = 0;
+        }
       }
     } else {
       // 反動で押し戻されている最中のグループは、速度基準を動かさない
@@ -819,19 +845,34 @@
     lane.pendingMatches.push({ ball: newBall, t: PP.INSERT_TIME });
   }
 
-  // レーン上の全玉の色をランダムに差し替える(ボスの「ランダマイズ」)。
-  // 揃えかけの同色の並びが崩壊する、最も戦略的な妨害。宝玉は変えない。
+  // レーン上の全玉の色を差し替える(ボスの「運命のルーレット」)。宝玉は変えない。
+  //   mode "spin"  … ルーレットの回転中。完全ランダムで目まぐるしく色が入れ替わる
+  //                  (見た目だけの中間状態。すぐ次のステップで上書きされる)
+  //   mode "final" … 確定。補給と同じ「塊生成ルール」(SPAWN_CLUSTER で直前の色を
+  //                  引き継ぎ、SPAWN_RUN_MAX で塊を打ち切る)で並べ直すので、
+  //                  シャッフル後も「同色の塊を狙って消す」ゲームがそのまま成立する。
   // view は同じ親・同じ重なり位置で作り直し、座標と表示状態を引き継ぐ
-  function scrambleColors() {
+  function scrambleColors(mode) {
     var g = PP.game;
+    var finalize = mode !== "spin";
     for (var li = 0; li < g.lanes.length; li++) {
       var balls = g.lanes[li].balls;
+      var prev = -1, run = 0;
       for (var i = 0; i < balls.length; i++) {
         var b = balls[i];
-        if (b.treasure || b.color === null || b.color === undefined) continue;
-        b.color = Math.floor(Math.random() * g.nColors);
+        if (b.treasure || b.color === null || b.color === undefined) { prev = -1; run = 0; continue; }
+        var c;
+        if (finalize && prev >= 0 && run < PP.SPAWN_RUN_MAX && Math.random() < PP.SPAWN_CLUSTER) {
+          c = prev;              // 補給と同じ確率で塊を続ける
+        } else {
+          c = Math.floor(Math.random() * g.nColors);
+        }
+        run = (c === prev) ? run + 1 : 1;
+        prev = c;
+        if (c === b.color) continue;   // 同色なら view の作り直しを省く
+        b.color = c;
         var old = b.view;
-        var view = PP.ball.makeView(b.color);
+        var view = PP.ball.makeView(c);
         view.x = old.x; view.y = old.y;
         view.visible = old.visible;
         if (old.parent) {
