@@ -334,8 +334,11 @@
     var g = PP.game;
     var balls = lane.balls;
     var n = balls.length;
+    // 塊率はコース定義の spawnCluster で上書きできる(例: コース5は4レーンに
+    // 注意が割れるぶん、塊を濃くして1レーンあたりの消しやすさを上げる)
+    var cluster = (g.builtCourse && g.builtCourse.spawnCluster) || PP.SPAWN_CLUSTER;
     // 直前が宝玉(= 前の波の末尾)なら塊は引き継がない
-    if (n > 0 && !balls[n - 1].treasure && Math.random() < PP.SPAWN_CLUSTER) {
+    if (n > 0 && !balls[n - 1].treasure && Math.random() < cluster) {
       var last = balls[n - 1].color;
       var run = 1;
       while (run < PP.SPAWN_RUN_MAX && n - run - 1 >= 0 &&

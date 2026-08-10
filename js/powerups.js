@@ -12,10 +12,13 @@
   var items = []; // {x, y, vy, kind, def, view}
 
   // 玉が消えたときに呼ばれる。コンボ中はドロップ率が上がる
-  // (ドロップ率は難易度で変えない。拾う気持ちよさは全難易度共通)
+  // (ドロップ率は難易度で変えない。拾う気持ちよさは全難易度共通)。
+  // コース定義の dropMult でコース単位の倍率を掛けられる(例: コース5は
+  // 4レーン同時防衛が忙しいぶん、道具を多めに配って捌かせる)
   function maybeDrop(x, y) {
     var g = PP.game;
     var chance = PP.ITEMS.dropChance + Math.min(g.combo, 5) * PP.ITEMS.comboBonus;
+    chance *= (g.builtCourse && g.builtCourse.dropMult) || 1;
     if (Math.random() > chance) return;
     drop(x, y);
   }

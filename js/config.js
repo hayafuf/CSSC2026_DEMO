@@ -44,10 +44,10 @@
   //   (危機のとき Denger.mp3、ゲームオーバー時 gameover_BGM.mp3 に切り替わるのは
   //    全難易度共通。仕組みは js/audio.js の gameStart / setDanger を読んでみよう)
   PP.DIFFICULTY = {
-    easy:     { name: "みならい海賊", entryMult: 0.85, holeMult: 0.75, curveMult: 1.15, timeMult: 0.85, colorAdd: 0, colorMin: 4, colorMax: 6, barrelBonus: 2,  useLives: true,  bgm: "BGM/Easy.mp3" },
+    easy:     { name: "みならい海賊", entryMult: 0.85, holeMult: 0.95, curveMult: 1.15, timeMult: 0.85, colorAdd: 0, colorMin: 4, colorMax: 6, barrelBonus: 2,  useLives: true,  bgm: "BGM/Easy.mp3" },
     normal:   { name: "一人前の海賊", entryMult: 1.00, holeMult: 1.00, curveMult: 1.00, timeMult: 1.00, colorAdd: 0, colorMin: 4, colorMax: 6, barrelBonus: 0,  useLives: true,  bgm: "BGM/Game_music.mp3" },
-    hard:     { name: "海賊船長",     entryMult: 1.10, holeMult: 1.12, curveMult: 0.95, timeMult: 1.00, colorAdd: 1, colorMin: 4, colorMax: 7, barrelBonus: 0,  useLives: true,  bgm: "BGM/Hard.mp3" },
-    hardcore: { name: "深海の悪魔",   entryMult: 1.20, holeMult: 1.13, curveMult: 0.93, timeMult: 1.10, colorAdd: 1, colorMin: 4, colorMax: 7, barrelBonus: -1, useLives: false, bgm: "BGM/HardCore.mp3" }
+    hard:     { name: "海賊船長",     entryMult: 1.10, holeMult: 1.02, curveMult: 0.95, timeMult: 1.00, colorAdd: 1, colorMin: 4, colorMax: 7, barrelBonus: 0,  useLives: true,  bgm: "BGM/Hard.mp3" },
+    hardcore: { name: "深海の悪魔",   entryMult: 1.12, holeMult: 1.02, curveMult: 0.90, timeMult: 1.10, colorAdd: 1, colorMin: 4, colorMax: 7, barrelBonus: 0, useLives: false, bgm: "BGM/HardCore.mp3" }
   };
   // タイトル画面のボタンの並び順(1〜4 キーもこの順)
   PP.DIFFICULTY_ORDER = ["easy", "normal", "hard", "hardcore"];
@@ -107,7 +107,7 @@
   PP.SPEED = {
     entry:800,        // 洞窟付近の速度 px/s
     hole: 22,          // 樽の直前の速度 px/s
-    curve: 1.8,        // 減速カーブの指数(大きいほど早めに減速する。小さいほど樽の奥まで速度を保つ)
+    curve: 1.3,        // 減速カーブの指数(大きいほど早めに減速する。小さいほど樽の奥まで速度を保つ)
     levelStep: 0.06,   // レベルごとの速度倍率の加算
     rollout: 2.2,      // レベル開始時のなだれ込み加算倍率(減衰する)
     rolloutDecay: 0.5  // なだれ込み倍率の減衰時定数(秒)
@@ -550,7 +550,7 @@
     // 分散(交差はレーン1の raised で A が上=橋、レーン2は下をくぐる)。樽は互い違い(右上1250,450/左下50,550)。
     {
       name: "エディタのコース", overpass: true, sharp: false, corner: 24,
-      speed: { entry: 500, hole: 18, curve: 2.0},   // 2レーンとも 2570px。洞窟→樽 約59秒
+      speed: { entry: 400, hole: 16, curve: 2.2},   // 2レーンとも 2570px。洞窟→樽 約59秒
       lanes: [
         // レーン1(洞窟=左 → 左上ループ → 右の樽 y=450 へ)。中央交差では A が橋(上)。
         { ctrl: [ [-120, 450], [350, 450, 0], [350, 100, 0], [100, 100, 0], [100, 250, 0],
@@ -574,19 +574,15 @@
     //     橋を登って画面中段へ戻ってきた列が再び隠れる。左下のトンネル②と
     //     合わせて「橋の前後で二度見えなくなる」流れを作る。橋の桁(x=433/867)
     //     とは重ねない。
-    //   トンネル④: 右下、橋②を渡り終えた後の最終直線 y=548 の一部(x≈900〜1080)。
-    //     樽へのラストスパートが短く隠れる。樽の口とは重ねない(危機の押し戻しは
-    //     見えるまま残す)。
     // 速度はコース2より hole を1段落とす(14→13)。レベル補正(+6%/Lv ×3)と
     // 6色化で既に跳ねるので、このステージの難しさは「速さ」でなく「先読み」に寄せる。
     {
       name: "洞窟の橋道", overpass: true, sharp: true, corner: 20,
-      speed: { entry: 500, hole: 18 },   // 全長 4670px。洞窟→樽 約78秒
+      speed: { entry: 500, hole: 16, curve: 2.1},   // 全長 4670px。洞窟→樽 約78秒
       lanes: [ { ctrl: BRIDGE_CTRL,
                  tunnels: [ { from: 0.15, to: 0.24 },     // 上辺 y=110 の中央部
                             { from: 0.65, to: 0.70 },     // 左下 y=548、橋①の手前
-                            { from: 0.79, to: 0.85 },     // 橋①の後、y=255 の真ん中
-                            { from: 0.945, to: 0.97 } ] } ]// 右下、樽への最終直線の一部(短め)
+                            { from: 0.79, to: 0.85 } ] } ] // 橋①の後、y=255 の真ん中
     },
 
     // コース5: 四叉の激流(最終ステージ・「左右2対の関門」設計)。制御点は QUAD
@@ -597,6 +593,12 @@
     {
       name: "四叉の激流", overpass: false, sharp: true, corner: 26,
       speed: { entry: 560, hole: 14, curve: 2.8 },   // 全長 1550-1930px。最短レーンで洞窟→樽 約55秒
+      // 4レーンに注意が割れる+7色化で消しにくいので、このコースだけ同色の塊を
+      // 濃くして補給する(既定 PP.SPAWN_CLUSTER=0.35 → 0.55。ball.js spawnColor)
+      spawnCluster: 0.75,
+      // アイテムのドロップ率もこのコースだけ 1.5 倍(powerups.js maybeDrop)。
+      // 基本 15% → 22.5%(+コンボボーナスにも同率で掛かる)
+      dropMult: 2.5,
       lanes: [
         { ctrl: QUAD[0], raisedOver: [1, 3] },   // y=186 の直線が L1・L3 の縦棒を跨ぐ
         { ctrl: QUAD[1], raisedOver: [3] },      // y=272 の直線が L3 の大縦断を跨ぐ
