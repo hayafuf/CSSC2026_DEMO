@@ -112,9 +112,12 @@
       PP.layers.ballUnder.addChild(view);   // 既定は下層。交差では描画側が上層へ移す
       balls.push({ d: d, color: color, wave: lane.wave, view: view, pull: 0, slide: 0 });
       // 骸骨玉: 一定確率で「普通の色玉」に骸骨マークを重ねる(色はそのままなので
-      // マッチも磁石も通常どおり効く。弾幕の管理は skull.js)。ボス戦には出さない
+      // マッチも磁石も通常どおり効く。弾幕の管理は skull.js)。ボス戦には出さない。
+      // コース定義の skullMult で出現率をコース単位で増減できる(コース5は 0.5)
+      var skullChance = PP.SKULL.chance *
+        ((PP.game.builtCourse && PP.game.builtCourse.skullMult) || 1);
       if (!PP.game.bossMode && PP.skull && PP.SKULL &&
-          Math.random() < PP.SKULL.chance &&
+          Math.random() < skullChance &&
           PP.skull.countActive() < PP.SKULL.maxActive) {
         var nb = balls[balls.length - 1];
         nb.skull = true;
