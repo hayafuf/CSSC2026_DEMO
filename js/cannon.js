@@ -426,6 +426,7 @@
 
   // マウス追従の横移動(縦は固定)
   function setX(mx) {
+    if (PP.game.bossFx.freeze > 0) return;   // ボスの「停止!」中は動けない
     var m = PP.CANNON_MARGIN;
     PP.cannon.x = Math.max(m, Math.min(PP.W - m, mx));
     root.x = PP.cannon.x;
@@ -459,6 +460,11 @@
 
   function fire() {
     var g = PP.game;
+    // ボスの「停止!」中は発射も受け付けない(交換 swap だけは許す)
+    if (g.bossFx.freeze > 0) {
+      PP.audio.beep(120, 0.06, "square", 0.05);   // 空撃ちのカチッという手応え
+      return;
+    }
     var mx = PP.cannon.x;
     var my = PP.cannon.y - MUZZLE_LEN;
     var special = (g.special && g.specialLoaded) ? g.special : null;
@@ -668,6 +674,10 @@
     var g = PP.game;
     var shots = g.shots;
     if (shots.length === 0) return;   // 弾が無いフレームは何もしない
+    // ボスの「時間の滞留」: 発射玉の時間だけ極端に遅く流れる。
+    // ゲーム全体の dt(PP.game.timeScale =【課題6】)には触らず、弾の積分にだけ
+    // 倍率を掛ける(チェーンや演出は通常速度のまま)。
+    if (g.bossFx.shotSlow > 0) dt *= PP.BOSS.shotSlow.factor;
     var lanes = g.lanes;
     var R = PP.R, D = PP.D;
 
@@ -735,6 +745,12 @@
           // 貫通のたびにボム級へ迫る強い揺れ(ボムの 80 は超えない)
           PP.fx.shake(Math.min(60, 12 + hits * 8), 0.5);
         }
+        // ボス戦: ミサイルはボスも貫く(1発ぶんの無敵時間で多段ヒットは防ぐ)。
+        // 高速なので今フレームの移動区間の中点でも判定してすり抜けを防ぐ
+        if (g.bossMode &&
+            (PP.boss.hitTest(sh.x, sh.y) || PP.boss.hitTest(sh.x, (sh.y + yPrev) / 2))) {
+          PP.boss.onHit(PP.BOSS.dmg.missile, sh.x, sh.y);
+        }
         if (sh.y < -R * 3) {
           if (sh.view.spark) createjs.Tween.removeTweens(sh.view.spark);
           PP.layers.shot.removeChild(sh.view);
@@ -756,6 +772,20 @@
       sh.roll += sp * dt;   // 転がりも実速度に追従させる
       sh.view.x = sh.x; sh.view.y = sh.y;
       sh.view.spin.rotation = -sh.roll * PP.SPIN_K;
+      // ボス戦: 玉列の隙間を抜けて上まで届いた弾がクラーケンに当たる。
+      // ボスの当たり判定はレーンよりほぼ上にあるので、チェーン判定より先で良い
+      if (g.bossMode && PP.boss.hitTest(sh.x, sh.y)) {
+        var bdmg = sh.special === "bomb" ? PP.BOSS.dmg.bomb : PP.BOSS.dmg.shot;
+        if (sh.special === "bomb") {
+          PP.chain.explodeAt(sh.x, sh.y);   // 爆風の演出ごと炸裂
+          posDirty = true;                  // 爆風で列が変わったかもしれない
+        }
+        PP.boss.onHit(bdmg, sh.x, sh.y);
+        if (sh.view.spark) createjs.Tween.removeTweens(sh.view.spark);
+        PP.layers.shot.removeChild(sh.view);
+        shots.splice(s, 1);
+        continue;
+      }
       // 画面外
       if (sh.x < -R * 2 || sh.x > PP.W + R * 2 || sh.y < -R * 2 || sh.y > PP.H + R * 2) {
         // 外した爆弾は不発のまま画面外へ

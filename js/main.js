@@ -94,6 +94,10 @@
     // レベルに応じてコースを切り替える(玉を並べ直す前にレールを確定させる)。
     var course = g.customCourse || PP.COURSES[courseForLevel(g.level)];
     if (course !== g.builtCourse) { g.builtCourse = course; buildCourse(course); }
+    // ボス戦(クラーケンの海域)か。フラグを立てて各所のボス分岐を有効にし、
+    // ボス本体の表示と状態(HP・攻撃タイマー・状態異常)を仕切り直す
+    g.bossMode = !!(course && course.boss);
+    if (PP.boss) PP.boss.setActive(g.bossMode);
     PP.crisis.reset();           // 赤い帳・警報・ドクロを平常へ戻す
     PP.gameover.reset();         // 暗幕・渦・ドクロを片付ける
     PP.audio.gameStart();        // ゲームオーバー BGM から通常曲へ戻す
@@ -173,7 +177,7 @@
       g.state = "gameclear";
       g.score += 5000;         // 全海域制覇ボーナス
       PP.hud.update();
-      PP.hud.showOverlay("🏆 全海域制覇!",
+      PP.hud.showOverlay(g.bossMode ? "🏆 クラーケン討伐! 全海域制覇!" : "🏆 全海域制覇!",
         "全 " + total + " ステージを生き延びた! 秘宝は我らのものだ!\n" +
         "制覇ボーナス +5000\n最終スコア " + g.score + " 点\n" + PP.TAP + "で最初の海へ");
       return;
@@ -370,7 +374,9 @@
         touchMoveHeld += dt;
         var mv = TOUCH_MOVE_V0 + (TOUCH_MOVE_V1 - TOUCH_MOVE_V0) *
                  Math.min(1, touchMoveHeld / TOUCH_MOVE_RAMP);
-        PP.cannon.setX(PP.cannon.x + touchMoveDir * mv * dt);
+        // ボスの Addle!!(操作反転)中は ◀▶ ボタンの向きも反転する
+        var tDir = g.bossFx.addle > 0 ? -touchMoveDir : touchMoveDir;
+        PP.cannon.setX(PP.cannon.x + tDir * mv * dt);
       } else {
         touchMoveHeld = 0;
       }
@@ -383,8 +389,16 @@
       PP.powerups.update(dt);
       PP.hud.updateEffects();
 
+      // ボス戦: クラーケンの移動・攻撃・状態異常タイマーを進め、
+      // 撃破演出が終わっていたらクリアへ(生存ゲージの代わりの勝利条件)
+      if (g.bossMode) {
+        PP.boss.update(dt);
+        if (PP.boss.consumeVictory()) levelClear();
+      }
+
       // ゲームオーバー判定: いずれかのレーンで樽の許容個数を超えたら。
       // 許容個数は難易度で変わる(【課題1】config.js の barrelBonus → PP.barrelCap)
+      // ボス戦も同じ: 補給が絶え間ない代わりに、樽を守れなければ負け
       var deadLane = null;
       g.eachLane(function (lane) {
         if (lane.balls.length > 0 &&
@@ -411,7 +425,8 @@
       }
 
       // 生存ゲージ(ロールアウト完了後から減る)。空になったら掃討フェーズへ。
-      if (g.state === "playing" && g.rolloutDone && !g.finishing) {
+      // ボス戦にはゲージが無い(勝利条件はボスの HP)ので減らさない
+      if (g.state === "playing" && !g.bossMode && g.rolloutDone && !g.finishing) {
         g.timeLeft -= dt;
         if (g.timeLeft <= 0) {
           g.timeLeft = 0;
@@ -595,6 +610,14 @@
     PP.hud.setTimeScale();   // タイトル画面の選択ボタンのハイライトも追従させる
   }
 
+  // ボスの Addle!!(操作反転)中は、マウスの狙い位置を左右反転して返す。
+  // cannon.setX の中ではなくマウス入力の入り口で反転する: ◀▶ ボタンは
+  // 「今の位置 + 差分」で setX を呼ぶので、setX 内で反転すると毎フレーム
+  // 鏡写しに往復するフィードバックになってしまう(あちらは tick 側で反転)。
+  function aimStageX(sx) {
+    return PP.game.bossFx.addle > 0 ? PP.W - sx : sx;
+  }
+
   function onStageDown(e) {
     if (PP.editor && PP.editor.active) return;
     if (e.nativeEvent && e.nativeEvent.button === 2) return;   // 右ボタンは交換専用
@@ -655,7 +678,7 @@
         touchDownX = e.stageX; touchDownT = Date.now();
         touchOnCannon = Math.abs(e.stageX - PP.cannon.x) < 80 && e.stageY > PP.cannon.y - 90;
       } else {
-        PP.cannon.setX(e.stageX);
+        PP.cannon.setX(aimStageX(e.stageX));
         PP.cannon.fire();
       }
     } else if (g.state === "clear") {
@@ -844,7 +867,7 @@
     stage.on("stagemousemove", function (e) {
       if (PP.pauseCtl && PP.pauseCtl.active) return;   // ポーズ中は大砲も動かさない
       if (isTouchEv(e)) return;   // タッチでは大砲を動かさない(◀▶ ボタンで移動)
-      PP.cannon.setX(e.stageX);
+      PP.cannon.setX(aimStageX(e.stageX));
     });
     // 右クリックで玉を交換(メニューは出さない)
     document.getElementById("gameCanvas").addEventListener("contextmenu", function (e) {

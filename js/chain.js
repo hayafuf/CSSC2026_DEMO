@@ -42,8 +42,10 @@
   // 毎フレーム全玉の座標を引くので、座標オブジェクトの確保を無くす(cannon.js と同じ手)。
   var _pos = { x: 0, y: 0, tx: 0, ty: 0 };
 
-  // 次の波までの間隔(秒)。レベルが上がるほど短くなる
+  // 次の波までの間隔(秒)。レベルが上がるほど短くなる。
+  // ボス戦は「玉列が途切れず流れ続ける」演出なので、専用の短い間隔を使う
   function waveInterval() {
+    if (PP.game.bossMode) return PP.BOSS.waveInterval;
     var w = PP.WAVE_INTERVAL;
     return Math.max(w.min, w.base - (PP.game.level - 1) * w.perLevel);
   }
@@ -58,12 +60,17 @@
     // 溢れないように、基準長(コース1)より短ければ同じ密度になるまで減らす。
     var scale = Math.max(0.35, Math.min(1, lane.rail.length / PP.WAVE_REF_LEN));
     lane.pending = Math.max(6, Math.round(raw * scale));
-    lane.needTreasure = true;
+    // ボス戦: 波間隔を詰めて絶え間なく補給する(玉列は洞窟から先頭まで連続)。
+    // 宝玉は付けない(宝の解放で列が途切れる構造にしない)。穴を開けるのは
+    // プレイヤーのマッチ消しだけで、その穴がボスへの射線になる
+    if (PP.game.bossMode) lane.pending = PP.BOSS.waveSize;
+    lane.needTreasure = !PP.game.bossMode;
     lane.waveFresh = true;
     lane.waveTimer = waveInterval();
     PP.game.colorsDirty = true;   // 補給が再開した → 装填色の見張りの前提が変わる
-    // 波の効果音は、近接タイミングで湧いた複数レーンぶんをまとめて1回だけ鳴らす
-    if (g.state === "playing") {
+    // 波の効果音は、近接タイミングで湧いた複数レーンぶんをまとめて1回だけ鳴らす。
+    // ボス戦は補給が絶え間ない(数秒おきに波が始まる)ので、いちいち鳴らさない
+    if (g.state === "playing" && !g.bossMode) {
       var now = Date.now();
       if (now - lastWaveSoundT > WAVE_SOUND_GAP) {
         PP.audio.newWave();

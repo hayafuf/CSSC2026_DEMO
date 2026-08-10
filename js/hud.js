@@ -189,7 +189,8 @@
     // 波番号はレーンごとに進むので、一番進んでいるレーンの波数を表示する
     var wave = 0;
     for (var wi = 0; wi < g.lanes.length; wi++) if (g.lanes[wi].wave > wave) wave = g.lanes[wi].wave;
-    hudWave.text = String(wave);
+    // ボス戦は補給が絶え間ない(波の番号に意味がない)ので「∞」を出す
+    hudWave.text = g.bossMode ? "∞" : String(wave);
     hudCombo.text = g.combo >= 2 ? "x" + g.combo : "-";
     // コンボの色段階(2→黄 / 4→橙 / 6→ピンク / 8+→赤)
     hudCombo.color = g.combo < 2 ? C_VAL
@@ -270,6 +271,17 @@
     var glow = gaugeGlow.graphics; glow.clear();
     // 枠(暗ガラス + 真鍮縁)
     gg.beginFill("rgba(4,8,12,0.7)").drawRoundRect(0, 0, GAUGE_W, GAUGE_H, 7);
+
+    // ボス戦: 生存ゲージの代わりに討伐の合図を出す(ボスの HP バーは boss.js が
+    // HUD 直下に描く)。深紅で満たして「時間切れ待ちではない」ことを示す
+    if (g.bossMode) {
+      gg.beginLinearGradientFill(["#ff9a8a", "#e04848", "#7a1420"], [0, 0.5, 1], 0, 0, 0, GAUGE_H)
+        .drawRoundRect(1.5, 1.5, GAUGE_W - 3, GAUGE_H - 3, 5.5);
+      gg.setStrokeStyle(1.5).beginStroke("#ff6a5a").drawRoundRect(0, 0, GAUGE_W, GAUGE_H, 7);
+      gaugeText.text = "討伐せよ!";
+      gaugeText.color = "#ffb0a0";
+      return;
+    }
 
     if (g.finishing) {
       gg.beginLinearGradientFill(["#b6ffe6", "#8ef0d0", "#3fbfa0"], [0, 0.5, 1], 0, 0, 0, GAUGE_H)

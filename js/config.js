@@ -47,7 +47,7 @@
     easy:     { name: "みならい海賊", entryMult: 0.85, holeMult: 0.75, curveMult: 1.15, timeMult: 0.85, colorAdd: 0, colorMin: 4, colorMax: 6, barrelBonus: 2,  useLives: true,  bgm: "BGM/Easy.mp3" },
     normal:   { name: "一人前の海賊", entryMult: 1.00, holeMult: 1.00, curveMult: 1.00, timeMult: 1.00, colorAdd: 0, colorMin: 4, colorMax: 6, barrelBonus: 0,  useLives: true,  bgm: "BGM/Game_music.mp3" },
     hard:     { name: "海賊船長",     entryMult: 1.10, holeMult: 1.12, curveMult: 0.95, timeMult: 1.00, colorAdd: 1, colorMin: 4, colorMax: 7, barrelBonus: 0,  useLives: true,  bgm: "BGM/Hard.mp3" },
-    hardcore: { name: "深海の悪魔",   entryMult: 1.20, holeMult: 1.13, curveMult: 0.80, timeMult: 1.10, colorAdd: 1, colorMin: 4, colorMax: 7, barrelBonus: -1, useLives: false, bgm: "BGM/HardCore.mp3" }
+    hardcore: { name: "深海の悪魔",   entryMult: 1.20, holeMult: 1.13, curveMult: 0.93, timeMult: 1.10, colorAdd: 1, colorMin: 4, colorMax: 7, barrelBonus: -1, useLives: false, bgm: "BGM/HardCore.mp3" }
   };
   // タイトル画面のボタンの並び順(1〜4 キーもこの順)
   PP.DIFFICULTY_ORDER = ["easy", "normal", "hard", "hardcore"];
@@ -284,6 +284,46 @@
     veil: 0.86      // 暗転の暗さ(0=透明 〜 1=真っ暗)
   };
 
+  // ---------- ボス戦(クラーケン)の設計表 ----------
+  // ボス戦の難易度・テンポはこの一枚で調整する(実装は js/boss.js)。
+  //
+  // 駆け引きの設計(弾幕シューティング式):
+  //   ・状態異常は「勝手にかかる」のではなく、ボスが撃つ妖弾(オーブ)に
+  //     大砲が被弾したときだけかかる。妖弾は見てから横移動で回避できる。
+  //   ・自分の弾を妖弾にぶつけると迎撃して消せる(1発と交換。防衛の弾を
+  //     割くかどうかの判断)。ミサイルは貫通なので消費せず薙ぎ払える。
+  //   ・予兆(チャージリング)中にボスへダメージを与えると攻撃をキャンセル
+  //     できる。予兆中はボスの移動が遅くなる=撃ち込みの狙い目。
+  //   ・クールダウン > 状態異常の最長持続なので、強い妨害は重ならない。
+  PP.BOSS = {
+    hp: 15,             // 必要ヒット数(通常弾=1)。まずはここを動かして調整する
+    y: 112,             // ボスの基準高さ(HUD の下・最上段レーンの上)
+    moveAmp: 420,       // 左右往復の振幅 px
+    moveSpeed: 0.35,    // 左右往復の角速度 rad/s
+    telegraphSlow: 0.2, // 予兆中の移動速度倍率(遅くなる=狙い目を作る)
+    hitRX: 95,          // 当たり判定(頭部中心の楕円)の横半径
+    hitRY: 55,          // 同・縦半径
+    // 弾種ごとのダメージ。ミサイルは貫通で確実に当たるので 1(お手軽大ダメージ禁止)。
+    // 爆弾は不貫通=列の隙間を通し切らないと届かないので、通せたご褒美に 2
+    dmg: { shot: 1, bomb: 2, missile: 1 },
+    waveInterval: 3,    // ボス戦の波間隔(秒)。絶え間なく補給→玉列は常に連続
+    waveSize: 40,       // ボス戦の1波の玉数(洞窟が空くまで次波は待つので溢れない)
+    cooldownMin: 4.5,   // 攻撃間隔の最小(秒)
+    cooldownMax: 7,     // 攻撃間隔の最大(秒)
+    firstDelay: 3.5,    // 開戦から最初の攻撃までの猶予(秒)
+    recover: 0.5,       // 攻撃後の隙(秒)
+    iFrames: 0.08,      // 被弾後の無敵時間(1発のサブステップ多重ヒット防止)
+    // 妖弾の共通判定: 大砲へのヒット箱(powerups のキャッチ箱と同じ寸法感)
+    orb: { catchW: 50, catchTop: 40, catchBottom: 20, r: 16 },
+    // 各攻撃: telegraph=予兆秒数 / dur=被弾時の効果秒数 / speed=妖弾の速さ px/s
+    ink:       { telegraph: 1.0, dur: 5.0, lobs: 3, grav: 420, vy0: -60,
+                 rMin: 110, rMax: 170 },     // タコスミ: 山なりの墨玉×3。着弾点に墨だまり、直撃で大visual妨害
+    addle:     { telegraph: 1.0, dur: 4.0, speed: 430 },              // Addle!!: 速い単発。被弾で左右反転
+    freeze:    { telegraph: 1.2, dur: 2.5, fan: 3, spread: 170, speed: 300 }, // 停止!: 3方向の扇。被弾で操作不能
+    shotSlow:  { telegraph: 1.0, dur: 4.0, factor: 0.12, speed: 250, r: 26 }, // 時間の滞留: 大きく遅い弾。被弾で弾速低下
+    randomize: { telegraph: 0.7, spin: 0.9, step: 0.06, speed: 360 }  // ランダマイズ: 被弾で色ルーレット
+  };
+
   // ---------- 割り込みの演出 ----------
   PP.INSERT_TIME = 0.14;  // 着弾点から列の枠へ滑り込む時間(秒)
   PP.SLIDE_DECAY = 0.05;  // 押し広げ表示のずれが戻る時定数(秒)
@@ -439,6 +479,19 @@
     [1210, 548]                // 右へ 右端 → 手前(下)の樽
   ];
 
+  // ---------- ボス戦(クラーケンの海域)の制御点 ----------
+  // コース1「航路」と同じ一筆書きの蛇行を「3段」にしたもの。折り返しカーブは
+  // すべて画面外(x=-120 / x=1420。レールの縁 ±35px を足しても画面 0..1300 の外)。
+  // 玉列は「画面の外から流れてきて、外で折り返してまた戻ってくる」ように見え、
+  // 画面内には水平の帯が3本並ぶ。上=ボス、中=3本の帯、下=大砲と手前の樽1つ。
+  // 樽あふれ=ゲームオーバー。段間は150pxと広めで、帯の隙間からボスを狙う
+  // 射線が通しやすい(3段ぶんの穴を揃えれば届く)。
+  var BOSS_CTRL = [
+    [1450, 220], [-120, 220],   // 1段目(洞窟=右外 → 左へ)。左外で折り返し
+    [-120, 370], [1420, 370],   // 2段目(右へ)。右外で折り返し
+    [1420, 520], [160, 520]     // 3段目(左へ、手前の樽まで)
+  ];
+
   // ---------- コース定義 ----------
   // レール(1本以上のレーン)と、そのコース固有の演出情報をまとめたもの。
   // 5ステージ・1周のキャンペーン: レベル N = コース N(main.js courseForLevel)。
@@ -531,6 +584,23 @@
         { ctrl: QUAD[2], raisedOver: [0, 1] },   // y=358 の直線が L0・L1 の縦棒を跨ぐ(桁は連結して見える)
         { ctrl: QUAD[3] }                        // 最長レーン。x=940 の縦断で2本の橋の下をくぐる
       ]
+    },
+
+    // コース6: クラーケンの海域(ボス戦)。Stage5 クリア後に始まる最終決戦。
+    // 上部=クラーケン(boss.js)、中央=折り返しが画面外の蛇行(BOSS_CTRL)、
+    // 下部=大砲と、手前に1つの樽。
+    // boss: true を見て main.js / chain.js / cannon.js / hud.js がボス分岐に入る:
+    //   ・宝玉なし・波は絶え間なく補給され、玉列は洞窟から先頭まで途切れない
+    //   ・樽あふれ=ゲームオーバー(通常ステージと同じ)。生存ゲージだけ無い
+    //   ・勝利条件は「ボスの HP(PP.BOSS.hp)を撃ち切る」こと
+    // → 「防衛(消して樽を守る)」と「攻撃(開けた穴からボスを撃つ)」が同じ弾で
+    //   競合するのがこのステージのリスクとリターン。
+    // 全長は約 4700px(コース2「橋を渡る道」と同程度)なので速度も同程度に。
+    // levelStep: 0 でレベル補正を切り、テンポは PP.BOSS 側だけで調整できる。
+    {
+      name: "クラーケンの海域", boss: true, overpass: false, sharp: true, corner: 26,
+      speed: { entry: 600, hole: 18, curve: 2.0, levelStep: 0 },
+      lanes: [ { ctrl: BOSS_CTRL } ]
     }
   ];
 
@@ -607,6 +677,11 @@
     special: null,        // 所持中の特殊弾 null | "bomb" | "missile"(1個まで。新規取得で置き換え)
     specialLoaded: false, // true=砲身に装填中(次の発射は特殊弾)/ false=左下スロットで待機
     effects: { slow: 0, reverse: 0, stop: 0, spyglass: 0 }, // 残り秒数(全レーンに効く)
+    bossMode: false,      // ボス戦中か(startLevel がコースの boss フラグから設定)
+    // ボスの状態異常の残り秒数。減算は boss.js の update ただ1か所で行い、
+    // 消費側(main.js / cannon.js)は「> 0 か」を読むだけ。終了・リセット時に
+    // 必ず 0 へ戻るので、入力・弾速・視界は確実に通常状態へ復帰する。
+    bossFx: { ink: 0, addle: 0, freeze: 0, shotSlow: 0 },
 
     // ★★ TODO【課題6】倍速モード ★★
     // ゲームの中で流れる時間の「倍率」。1.0 が通常の速さ。
