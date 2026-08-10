@@ -205,15 +205,24 @@
   var retryPhase = "";     // "freeze"(拍1) → "veil"(拍2)
   var retryT = 0;          // いまの拍の残り秒
 
-  // 拍1: 樽が溢れた衝撃。時を止めて、揺れと重い音でミスを体に伝える
+  // 拍1: 樽が溢れた衝撃。時を止めて、揺れと重い音でミスを体に伝える。
+  // 警報はここで「ぶつ切り」にするが、危機の赤い帳はあえて残す
+  // (赤いままの静止画面 = 「まずいことが起きた」がひと目で伝わる)
   function retryLevel() {
     var g = PP.game;
     g.state = "retrying";
-    PP.crisis.stop();          // 警報と赤い帳を畳む(直後の静けさも「間」のうち)
+    PP.audio.crisis(0);        // 警報だけ即切る。直後の静けさが「まずい」を語る
     PP.audio.setDanger(false);
     PP.audio.swallowed(1);     // 腹に来る重い衝撃音
-    PP.fx.shake(48, 0.6);
-    PP.fx.screenFlash("rgba(255,40,40,0.4)", 0.4, 380);   // 赤の明滅で「まずい」を体に伝える
+    PP.fx.shake(60, 0.7);
+    // 赤の二連明滅。1回だと瞬きで見逃すので、警報灯のように2度打つ
+    PP.fx.screenFlash("rgba(255,46,46,0.5)", 0.5, 300);
+    var pulse = new createjs.Shape();
+    PP.layers.fx.addChild(pulse);
+    createjs.Tween.get(pulse).wait(220).call(function () {
+      PP.layers.fx.removeChild(pulse);
+      PP.fx.screenFlash("rgba(255,46,46,0.35)", 0.35, 340);
+    });
     // 飛んでいた玉は宙で消える(gameOver と同じ後始末)
     g.shots.forEach(function (s) { PP.layers.shot.removeChild(s.view); });
     g.shots = [];
@@ -223,33 +232,59 @@
     retryT = PP.RETRY.freeze;
   }
 
-  // 暗転の幕と「❤ 残りライフ」の1行を用意する。最初は透明で、拍2で現れる
+  // 暗転の幕と「❤ 残りライフ」を用意する。最初は透明で、拍2で現れる
   function buildRetryVeil() {
     removeRetryVeil();
     var c = new createjs.Container();
     c.mouseEnabled = false;
     var veil = new createjs.Shape();
+    // 中央がわずかに明るい放射グラデーション(平坦な黒塗りより舞台の暗幕らしくなる)。
     // 画面が揺れている最中でも端がのぞかないように、一回り大きく塗る
-    veil.graphics.beginFill("#0c0a08").drawRect(-140, -140, PP.W + 280, PP.H + 280);
+    veil.graphics.beginRadialGradientFill(
+      ["rgba(16,10,12,1)", "rgba(4,2,3,1)"], [0, 1],
+      PP.W / 2, PP.H / 2, 120, PP.W / 2, PP.H / 2, PP.W * 0.72)
+      .drawRect(-140, -140, PP.W + 280, PP.H + 280);
     veil.alpha = 0;
     c.addChild(veil);
-    var t = new createjs.Text(
-      "❤ 残りライフ " + PP.game.lives + " ― 同じ海域の最初から",
-      '800 24px "Cinzel","Hiragino Kaku Gothic ProN","Meiryo",serif', "#f0d9c8");
-    t.textAlign = "center"; t.textBaseline = "middle";
-    t.x = PP.W / 2; t.y = PP.H / 2;
-    t.shadow = new createjs.Shadow("rgba(0,0,0,0.9)", 0, 3, 8);
-    t.alpha = 0;
-    c.addChild(t);
+    var texts = [];
+    function line(str, dy, size, color) {
+      var t = new createjs.Text(str,
+        '800 ' + size + 'px "Cinzel","Hiragino Kaku Gothic ProN","Meiryo",serif', color);
+      t.textAlign = "center"; t.textBaseline = "middle";
+      t.x = PP.W / 2; t.y = PP.H / 2 + dy;
+      t.shadow = new createjs.Shadow("rgba(0,0,0,0.9)", 0, 3, 8);
+      t.alpha = 0;
+      c.addChild(t);
+      texts.push(t);
+    }
+    // 主役は「残りライフ」。案内文はその下に小さく(読む順番を大きさで作る)
+    line("❤ 残りライフ " + PP.game.lives, -22, 34, "#ff5d8f");
+    line("同じ海域の最初から再挑戦", 30, 18, "#e6d3b8");
+    // 2行のあいだの細い金の飾り線(オーバーレイのディバイダと同じ意匠)
+    var div = new createjs.Shape();
+    div.graphics.beginStroke("rgba(202,169,106,0.7)").setStrokeStyle(1.2)
+      .moveTo(-90, 0).lineTo(90, 0);
+    div.x = PP.W / 2; div.y = PP.H / 2 + 4;   // 拡大ポップしても中央からずれないよう原点基準で描く
+    div.alpha = 0;
+    c.addChild(div);
+    texts.push(div);
     PP.stage.addChild(c);   // どのレイヤーよりも手前(HUDの上)に置く
-    retryFx = { cont: c, veil: veil, text: t };
+    retryFx = { cont: c, veil: veil, texts: texts };
   }
 
-  // 拍2: 暗転。残りライフを確認する「間」を作る
+  // 拍2: 暗転。危機の赤い帳はこの暗幕の下でこっそり畳み、
+  // 「どくん」という一拍とともに残りライフを確認する「間」を作る
   function showRetryVeil() {
     if (!retryFx) return;
-    createjs.Tween.get(retryFx.veil).to({ alpha: PP.RETRY.veil }, 320);
-    createjs.Tween.get(retryFx.text).wait(180).to({ alpha: 1 }, 240);
+    PP.crisis.stop();          // stop() は即座に消えるので、暗転に隠れてから呼ぶ
+    PP.audio.heartbeat();
+    createjs.Tween.get(retryFx.veil).to({ alpha: PP.RETRY.veil }, 340);
+    retryFx.texts.forEach(function (t, i) {
+      t.scaleX = t.scaleY = 0.72;
+      createjs.Tween.get(t).wait(160 + i * 130)
+        .to({ alpha: 1, scaleX: 1.05, scaleY: 1.05 }, 200, createjs.Ease.backOut)
+        .to({ scaleX: 1, scaleY: 1 }, 90);
+    });
   }
 
   // 拍3: 暗転の裏で盤面を組み直してから明転する。
