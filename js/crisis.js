@@ -391,6 +391,9 @@
     update: update,
     stop: stop,
     reset: reset,
-    relocate: relocate
+    relocate: relocate,
+    // 今の危機の深さ(0=平常 〜 2=樽あふれ寸前。滑らかに追従する内部値)。
+    // 骸骨玉が「危機中は撃たない」判定に使う(skull.js)
+    level: function () { return st.level; }
   };
 })();

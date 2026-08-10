@@ -113,11 +113,16 @@
   // 予兆中に消された・トンネルに入った等は黙ってキャンセル(次の機会へ)
   function updateSkullBalls(dt) {
     var S = PP.SKULL;
+    // 危機(赤い帳)の最中は全骸骨が沈黙する: チェーンが樽に迫っている間は
+    // 「列との勝負」に集中させ、弾幕とのリスク二重取りを起こさない(樽際の
+    // 発射禁止帯と同じ思想の全体版)。クールダウンも凍結するので、危機が
+    // 明けた瞬間に溜まった骸骨が一斉発射することもない
+    var crisisNow = PP.crisis && PP.crisis.level && PP.crisis.level() > 0.05;
     PP.game.eachLaneBall(function (b, lane) {
       if (!b.skull) return;
       var fx = b.skullFx;   // ball.js makeSkullOverlay(chain.js が付ける)
 
-      if (!canFire(b, lane)) {
+      if (crisisNow || !canFire(b, lane)) {
         b.skullTele = 0;    // 隠れたら予兆は仕切り直し
         if (fx) fx.ring.alpha = 0.4;
         return;
