@@ -184,13 +184,106 @@
       "耐え切って残りも掃討した! 生存ボーナス +1000\nスコア " + g.score + " 点\n" + PP.TAP + "で次のステージへ");
   }
 
+  // ---------- 【課題5-3】(模範解答つき)リトライの画面切り替え ----------
   // 【課題5】ライフを使った復帰: いまのステージを「最初から」やり直す。
-  // 樽ギリギリの状態から続行するのではなく、レベル・スコア・コインはそのままで
-  // チェーンだけ仕切り直しになる(main.js の TODO【課題5-2】から呼ばれる)。
+  // レベル・スコア・コインはそのままで、チェーンだけ仕切り直しになる。
+  //
+  // 最初の実装は「startLevel() を呼ぶだけ」だった。それだと樽が溢れた次の
+  // フレームには新しい盤面が出ていて、切り替わりが急すぎる。プレイヤーは
+  // 「何が起きた? ライフは減った?」を確認する間がない。
+  // そこで、切り替えを3拍子に分ける:
+  //   拍1: その場で時が止まる(衝撃 + 静止。ミスした盤面を一瞬見せる)
+  //   拍2: 暗転して「❤ 残りライフ」を確認させる
+  //   拍3: 暗転の裏で盤面を組み直し、明転して再開
+  // 各拍の長さは config.js の PP.RETRY で調整できる(TODO【課題5-3】)。
+  //
+  // 進行は「dt で減っていくタイマー + 状態(state)」の小さな仕組み。
+  // state を "retrying" にすると、tick のプレイ処理(玉の移動・タイマー・危機)が
+  // まるごと素通りになるので、拍1の間は盤面がその場で固まって見える。
+  // これは課題5-2 の if/else と同じ「state で分岐する」考え方の応用。
+  var retryFx = null;      // 暗転の幕とライフ表示(切り替え中だけ存在する)
+  var retryPhase = "";     // "freeze"(拍1) → "veil"(拍2)
+  var retryT = 0;          // いまの拍の残り秒
+
+  // 拍1: 樽が溢れた衝撃。時を止めて、揺れと重い音でミスを体に伝える
   function retryLevel() {
-    startLevel();   // 同じレベルを組み直す(g.level は変えない)
-    PP.fx.floatText("❤ ライフを使ってステージ最初から再挑戦!", PP.W / 2, 96, "#ff5d8f", 24);
+    var g = PP.game;
+    g.state = "retrying";
+    PP.crisis.stop();          // 警報と赤い帳を畳む(直後の静けさも「間」のうち)
+    PP.audio.setDanger(false);
+    PP.audio.swallowed(1);     // 腹に来る重い衝撃音
+    PP.fx.shake(48, 0.6);
+    PP.fx.screenFlash("rgba(255,40,40,0.4)", 0.4, 380);   // 赤の明滅で「まずい」を体に伝える
+    // 飛んでいた玉は宙で消える(gameOver と同じ後始末)
+    g.shots.forEach(function (s) { PP.layers.shot.removeChild(s.view); });
+    g.shots = [];
+    PP.hud.update();   // 右上の ❤ をこの時点で減らす(暗転の文字と食い違わないように)
+    buildRetryVeil();
+    retryPhase = "freeze";
+    retryT = PP.RETRY.freeze;
+  }
+
+  // 暗転の幕と「❤ 残りライフ」の1行を用意する。最初は透明で、拍2で現れる
+  function buildRetryVeil() {
+    removeRetryVeil();
+    var c = new createjs.Container();
+    c.mouseEnabled = false;
+    var veil = new createjs.Shape();
+    // 画面が揺れている最中でも端がのぞかないように、一回り大きく塗る
+    veil.graphics.beginFill("#0c0a08").drawRect(-140, -140, PP.W + 280, PP.H + 280);
+    veil.alpha = 0;
+    c.addChild(veil);
+    var t = new createjs.Text(
+      "❤ 残りライフ " + PP.game.lives + " ― 同じ海域の最初から",
+      '800 24px "Cinzel","Hiragino Kaku Gothic ProN","Meiryo",serif', "#f0d9c8");
+    t.textAlign = "center"; t.textBaseline = "middle";
+    t.x = PP.W / 2; t.y = PP.H / 2;
+    t.shadow = new createjs.Shadow("rgba(0,0,0,0.9)", 0, 3, 8);
+    t.alpha = 0;
+    c.addChild(t);
+    PP.stage.addChild(c);   // どのレイヤーよりも手前(HUDの上)に置く
+    retryFx = { cont: c, veil: veil, text: t };
+  }
+
+  // 拍2: 暗転。残りライフを確認する「間」を作る
+  function showRetryVeil() {
+    if (!retryFx) return;
+    createjs.Tween.get(retryFx.veil).to({ alpha: PP.RETRY.veil }, 320);
+    createjs.Tween.get(retryFx.text).wait(180).to({ alpha: 1 }, 240);
+  }
+
+  // 拍3: 暗転の裏で盤面を組み直してから明転する。
+  // 組み直し(startLevel)を幕が開く前にやるのがポイント
+  // (幕が透明なうちに組み直すと、玉が一瞬で消し替わるところが丸見えになる)
+  function finishRetry() {
+    startLevel();       // state はこの中で "playing" に戻る
     PP.hud.update();
+    var f = retryFx;
+    retryFx = null;
+    if (f) {
+      createjs.Tween.get(f.cont)
+        .to({ alpha: 0 }, PP.RETRY.fade * 1000)
+        .call(function () { PP.stage.removeChild(f.cont); });
+    }
+    PP.fx.floatText("❤ ライフを使って再挑戦!", PP.W / 2, 96, "#ff5d8f", 24);
+  }
+
+  // 切り替えの進行役。tick から state === "retrying" の間だけ呼ばれ、
+  // タイマー(retryT)が切れるたびに次の拍へ進む
+  function updateRetry(dt) {
+    retryT -= dt;
+    if (retryT > 0) return;
+    if (retryPhase === "freeze") {
+      retryPhase = "veil";
+      retryT = PP.RETRY.veilTime;
+      showRetryVeil();
+    } else {
+      finishRetry();
+    }
+  }
+
+  function removeRetryVeil() {
+    if (retryFx) { PP.stage.removeChild(retryFx.cont); retryFx = null; }
   }
 
   // 樽が溢れた。ここから先は gameover.js の演出に進行を預ける
@@ -234,7 +327,6 @@
     // (config.js の PP.game.timeScale)を掛けると、ゲーム全体がまとめて
     // 速くなったり遅くなったりする。ここに掛け算を1行書いてみよう。
     //   ヒント: dt = dt * 倍率;  は  dt *= 倍率;  とも書ける
-    dt *= PP.game.timeScale;   // ___VERIFY_ANSWER___
     var g = PP.game;
 
     if (g.state === "playing") {
@@ -266,10 +358,15 @@
         }
       });
       if (deadLane) {
-        // 【課題5-2】ライフが残っていればゲームオーバーの代わりに、ライフを1つ
-        // 使ってこのステージの最初からやり直す(スコアとコインはそのまま残る)。
+        // 【課題5-2】(模範解答つき) ライフが残っていればゲームオーバーの代わりに、
+        // ライフを1つ使ってこのステージの最初からやり直す(スコアとコインは残る)。
         // 難易度「深海の悪魔」(useLives: false)は救済のない1発ゲームオーバー。
-        // (コインでライフを増やす処理は powerups.js の【課題5-1】)
+        // この if/else は完成品として入れてある。読み解いたら、次の問いを
+        // 「予想 → 実際に書き換えて試す → 元に戻す」で確かめよう(答えはガイド 5-3):
+        //   Q1. && の左右(useLives の条件と g.lives > 0)を入れ替えても同じ動き?
+        //   Q2. g.lives > 0 を g.lives >= 0 にすると、何が壊れる?
+        //   Q3. g.lives-- を retryLevel() の「後」に動かすと、画面のどこがおかしくなる?
+        // (コインでライフを増やす処理は powerups.js の【課題5-1】= あちらは自分で書く)
         if (PP.diff().useLives !== false && g.lives > 0) {
           g.lives--;
           retryLevel();
@@ -295,6 +392,8 @@
         PP.crisis.update(dt);
         PP.cannon.syncColors();
       }
+    } else if (g.state === "retrying") {
+      updateRetry(dt);   // リトライの画面切り替え(【課題5-3】)。終わると playing に戻る
     } else if (g.state === "draining" || g.state === "over") {
       PP.gameover.update(dt);
     }
@@ -456,11 +555,6 @@
     //   2) 今が2倍速のとき          → 0.5倍速にする。どんな値を入れる?
     //   3) それ以外(0.5倍速)のとき → 通常速度に戻す
     // ヒント: if / else if / else で書ける(「今の値と等しいか」は === で調べる)
-    // ___VERIFY_ANSWER_BEGIN___
-    if (g.timeScale === 1) { g.timeScale = 2; }
-    else if (g.timeScale === 2) { g.timeScale = 0.5; }
-    else { g.timeScale = 1; }
-    // ___VERIFY_ANSWER_END___
 
     PP.fx.floatText("時間の流れ ×" + g.timeScale, PP.W / 2, 88, "#8ef0d0", 22);
     PP.hud.setTimeScale();   // タイトル画面の選択ボタンのハイライトも追従させる

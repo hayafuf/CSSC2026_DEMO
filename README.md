@@ -15,7 +15,7 @@ CreateJS(EaselJS + TweenJS)で実装しています。
 - 課題2: 7色目「黒玉」を完成させる — `js/config.js`
 - 課題3: エディタで作ったコースを JSON でゲームに登録 — `js/my-course.js`
 - 課題4: SE・BGM・エフェクトのカスタマイズ — `js/audio.js` / `js/fx.js` / `js/config.js`
-- 課題5: コインを集めてライフ回復(1発ゲームオーバーの緩和) — `js/powerups.js` / `js/main.js`
+- 課題5: ライフのしくみ(コインで回復を書く / 樽あふれの分岐を読む / リトライの「間」を調整) — `js/powerups.js` / `js/main.js` / `js/config.js`
 - 課題6: 倍速モード(2倍速・0.5倍速)でゲーム全体の時間を変える — `js/config.js` / `js/main.js`
 
 ## 遊び方
