@@ -104,6 +104,27 @@
 
   // ---------- 効果音(mp3) ----------
   var sources = [];   // preload() で読み込み完了を待つ音源
+  var sfxAll = [];    // sfx() が作った再生関数(携帯対応の解錠で使う)
+  // 携帯対応: iOS(iPhone/iPad の Safari)は audio.volume の変更を無視する。
+  // unlock() で実端末を調べて、効かない場合はクロスフェードを即時切替に落とす
+  var canVolume = true;
+
+  // 携帯対応: iOS は「ユーザー操作の中で一度 play した要素」しか、あとから
+  // (tick やタイマーから)鳴らせない。最初のタップのうちに消音で一瞬
+  // play → pause して、以後どこからでも鳴らせるように解錠しておく
+  function bless(a) {
+    try {
+      a.muted = true;
+      var p = a.play();
+      var fin = function () {
+        // 解錠中に本再生が始まった要素(選択難易度のBGM)は止めない
+        if (a !== current) { try { a.pause(); a.currentTime = 0; } catch (e) {} }
+        a.muted = false;
+      };
+      if (p && p.then) p.then(fin).catch(function () { a.muted = false; });
+      else fin();
+    } catch (e) { try { a.muted = false; } catch (e2) {} }
+  }
 
   // 同じ音が重なっても切れないよう、複製した実体をプールして鳴らす。
   // 再生中(= ended でも paused でもない)の実体は絶対に奪わないので、
@@ -143,6 +164,18 @@
       try { last.pause(); last.currentTime = 0; } catch (e) { /* 無視 */ }
       last = null;
     };
+    // 携帯対応: 最初のタップの中で解錠済みのクローンを1つ用意しておく。
+    // iOS では解錠済みの実体しか tick からの再生ができないため、これが無いと
+    // 「タップ以外のきっかけで鳴る音」(波の補給音など)が鳴らない
+    f.prime = function () {
+      if (pool.length) return;
+      var a = proto.cloneNode();
+      a.volume = vol;
+      routeSE(a, true);
+      pool.push(a);
+      bless(a);
+    };
+    sfxAll.push(f);
     return f;
   }
 
@@ -269,6 +302,15 @@
   // current へクロスフェード(他の曲は 0 まで下げて停止)
   function fade(ms) {
     fadeMs = ms || 500;
+    // 携帯対応: iOS など volume の変更が効かない端末ではクロスフェードが
+    // 成立しない(全曲が最大音量のまま重なる)ので、即時切り替えで代用する
+    if (!canVolume) {
+      tracks.forEach(function (a) {
+        if (!muted && a === current) { if (a.paused) play(a); }
+        else if (!a.paused) a.pause();
+      });
+      return;
+    }
     if (fadeTimer) return;
     fadeTimer = setInterval(function () {
       var done = true;
@@ -369,6 +411,17 @@
     if (unlocked) return;
     unlocked = true;
     ensureCtx();     // WebAudio(効果音)の解錠。BGM はここでは鳴らさない
+    // 携帯対応 その1: volume の変更が効く端末か調べる(iOS は無視される)
+    try {
+      var probe = new Audio();
+      probe.volume = 0.5;
+      canVolume = Math.abs(probe.volume - 0.5) < 0.01;
+    } catch (e) { /* 判定できなければ従来どおり */ }
+    // 携帯対応 その2: この「最初のユーザー操作」のうちに全音源を消音で解錠する。
+    // これをしないと iOS では、tick から切り替わる危機BGM・ゲームオーバーBGMや
+    // タップ以外のきっかけで鳴る効果音が一切鳴らない(聴こえる音は出さない)
+    sources.forEach(bless);
+    sfxAll.forEach(function (f) { f.prime(); });
   }
 
   function setDanger(on) {
