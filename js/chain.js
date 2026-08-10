@@ -371,6 +371,13 @@
   function applyMagnet(lane, dt, starts) {
     var balls = lane.balls;
     var i;
+    // ボスの「運命のルーレット」の回転中は磁力を止める。色が毎ステップ
+    // 入れ替わるため、偶然同色になった隙間が吸着してしまう誤発動を防ぐ
+    // (確定した瞬間から通常どおり働く)
+    if (PP.game.rouletteSpin) {
+      for (i = 0; i < balls.length; i++) balls[i].pull = 0;
+      return;
+    }
     for (var gi = 0; gi < starts.length - 1; gi++) {
       var tail = starts[gi + 1] - 1;   // 前グループの最後尾の玉
       var head = starts[gi + 1];       // 後グループの先頭の玉

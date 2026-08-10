@@ -74,6 +74,10 @@
   var moveT = 0;          // 移動用の時計(予兆中は telegraphSlow 倍で遅く進む)
   var hp = 0;
   var iFrames = 0;        // 被弾後の無敵(1発のサブステップ多重ヒット防止)
+  var hitStreak = 0;      // シールドが張られるまでの被弾カウント(3発で発動)
+  var guardT = 0;         // シールド(無敵)の残り秒
+  var guardFxCd = 0;      // シールドに弾かれた演出の連打防止
+  var shield = null;      // シールドの泡(body に重ねる。無敵中だけ光る)
   var hurtT = 0;          // 被弾フラッシュの残り
   var state = "idle";     // idle → telegraph → recover → idle / dying → dead
   var stateT = 0;         // いまの状態の残り秒
@@ -230,6 +234,18 @@
       .moveTo(5, 29).lineTo(3, 22).lineTo(0, 28).closePath();
     body.addChild(beak);
 
+    // シールドの泡(3発被弾ごとの無敵中だけ光る。普段は透明)
+    shield = new createjs.Shape();
+    shield.graphics
+      .beginRadialGradientFill(["rgba(120,200,255,0)", "rgba(120,200,255,0.10)", "rgba(160,220,255,0.30)"],
+        [0, 0.8, 1], 0, -20, 20, 0, -20, 108)
+      .drawEllipse(-108, -128, 216, 216)
+      .setStrokeStyle(2.5).beginStroke("rgba(180,230,255,0.8)")
+      .drawEllipse(-108, -128, 216, 216);
+    shield.compositeOperation = "lighter";
+    shield.alpha = 0;
+    body.addChild(shield);
+
     // 被弾の白フラッシュ(普段は透明)
     hurt = new createjs.Shape();
     hurt.graphics.beginFill("#ffffff")
@@ -358,6 +374,7 @@
     if (fx.freeze > 0) parts.push("⚓" + Math.ceil(fx.freeze));
     if (fx.shotSlow > 0) parts.push("⏳" + Math.ceil(fx.shotSlow));
     if (rndSpinT > 0) parts.push("🎲");
+    if (guardT > 0) parts.push("🛡" + Math.ceil(guardT));   // ボスのシールド残り秒
     var s = parts.join(" ");
     if (s !== lastChipText) { lastChipText = s; fxChips.text = s; }
   }
@@ -408,6 +425,7 @@
       }
       if (opts.hover) b.hover = { y: opts.hover.y, t: opts.hover.time,
                                   rings: opts.hover.rings.slice(), done: false };
+      if (opts.hp) b.hitsLeft = opts.hp;   // 迎撃に複数発が必要な大玉(耐久値)
     }
     bullets.push(b);
   }
@@ -480,13 +498,31 @@
       }
 
       // 迎撃: 自分の弾(通常弾・爆弾)をぶつけると相殺して消せる。
-      // ミサイルは貫通なので消費せずに薙ぎ払える
+      // ミサイルは貫通なので消費せずに薙ぎ払える。
+      // 耐久値(hitsLeft)を持つ大玉は削り切るまで消えない(残り数を表示)
       var blocked = false;
+      if (b.hitCd > 0) b.hitCd -= dt;
       for (var s = g.shots.length - 1; s >= 0; s--) {
         var sh = g.shots[s];
         var dx = sh.x - b.x, dy = sh.y - b.y;
         var rr = b.r + PP.R * 0.9;
         if (dx * dx + dy * dy < rr * rr) {
+          if (b.hitsLeft > 1) {
+            // まだ耐える: 1発ぶん削って怯ませる(ミサイルは多段ヒット防止の間を置く)
+            if (!(b.hitCd > 0)) {
+              b.hitCd = 0.12;
+              b.hitsLeft--;
+              PP.fx.burst(b.x, b.y, ATTACKS[b.type].color, 6, 0.9);
+              PP.fx.floatText("あと" + b.hitsLeft, b.x, b.y - 30, "#a0dcff", 16);
+              PP.audio.beep(500, 0.06, "square", 0.07);
+            }
+            if (sh.special !== "missile") {   // 通常弾は1発と交換
+              if (sh.view.spark) createjs.Tween.removeTweens(sh.view.spark);
+              PP.layers.shot.removeChild(sh.view);
+              g.shots.splice(s, 1);
+            }
+            continue;                          // 大玉は消えない
+          }
           PP.fx.burst(b.x, b.y, ATTACKS[b.type].color, 10, 1.2);
           PP.fx.flash(b.x, b.y, "rgba(255,255,255,0.8)", 34);
           PP.fx.floatText("迎撃!", b.x, b.y - 26, "#8ef0d0", 18);
@@ -561,6 +597,7 @@
       rndSpinT = B.randomize.spin;
       rndStepT = 0;
       rndOrig = g.currentColor;
+      g.rouletteSpin = true;   // 回転中は磁石を止める(chain.js applyMagnet)
       PP.fx.ring(PP.cannon.x, PP.cannon.y - 40, "#8ef0d0", 10, 70, 400);
     }
   }
@@ -799,7 +836,8 @@
       var dlenA = Math.sqrt(ddxA * ddxA + ddyA * ddyA) || 1;
       spawnBullet("addle", sx, sy,
         ddxA / dlenA * 360 * spdMul(), Math.abs(ddyA) / dlenA * 360 * spdMul(), 0, B.shotSlow.r,
-        { hover: { y: 380, time: 0.8,
+        { hp: 5,   // 大玉は5発当てないと消せない(リング展開前に削り切るかの判断)
+          hover: { y: 380, time: 0.8,
                    rings: phase2
                      ? [{ count: 12, speed: 310 * spdMul(), spin: 0.5 }, { count: 16, speed: 240 * spdMul(), spin: -0.5 }, { count: 20, speed: 185 * spdMul(), spin: 0.5 }]
                      : [{ count: 10, speed: 300 * spdMul(), spin: 0.5 }, { count: 14, speed: 220 * spdMul(), spin: -0.5 }] } });
@@ -1086,6 +1124,7 @@
     rndStepT -= dt;
     if (rndSpinT <= 0) {
       PP.chain.scrambleColors("final");
+      PP.game.rouletteSpin = false;   // 確定 → 磁石を通常に戻す
       PP.fx.screenFlash("rgba(142,240,208,0.25)", 0.25, 500);
       PP.audio.beep(1175, 0.16, "triangle", 0.1);
       PP.audio.beep(1568, 0.2, "triangle", 0.08);
@@ -1141,8 +1180,27 @@
   function onHit(dmg, x, y) {
     if (!active || state === "dying" || state === "dead") return false;
     if (iFrames > 0) return false;
+    // シールド中はダメージ無効。弾かれた火花で「今は通らない」ことを見せる
+    if (guardT > 0) {
+      if (guardFxCd <= 0) {
+        guardFxCd = 0.12;
+        PP.fx.ring(x, y, "#78c8ff", 8, 60, 300);
+        PP.fx.burst(x, y, "#a0dcff", 6, 1.0);
+        PP.audio.beep(1040, 0.06, "triangle", 0.07);
+      }
+      return false;
+    }
     iFrames = PP.BOSS.iFrames;
     hp = Math.max(0, hp - dmg);
+    // 3発入るたびにシールド展開(次のチャンスまで撃ち込みは通らない)
+    hitStreak += 1;
+    if (hp > 0 && hitStreak >= PP.BOSS.guard.hitsPerGuard) {
+      hitStreak = 0;
+      guardT = PP.BOSS.guard.duration;
+      PP.fx.ring(body.x, body.y - 20, "#78c8ff", 30, 130, 500);
+      PP.audio.beep(880, 0.15, "sine", 0.09);
+      PP.audio.beep(1320, 0.2, "sine", 0.07);
+    }
     hurtT = 0.16;
     drawHpBar();
     PP.fx.burst(x, y, "#39d8b8", 10, 1.2);
@@ -1215,6 +1273,7 @@
     var fx = PP.game.bossFx;
     fx.ink = 0; fx.addle = 0; fx.freeze = 0; fx.shotSlow = 0;
     rndSpinT = 0;
+    PP.game.rouletteSpin = false;
     barrageLeft = 0;
     sweepLeft = 0;
     curtainLeft = 0;
@@ -1247,6 +1306,14 @@
     if (fx.freeze > 0) fx.freeze = Math.max(0, fx.freeze - dt);
     if (fx.shotSlow > 0) fx.shotSlow = Math.max(0, fx.shotSlow - dt);
     if (iFrames > 0) iFrames -= dt;
+    if (guardFxCd > 0) guardFxCd -= dt;
+    // シールドの残りと泡の明滅(無敵中だけ見える)
+    if (guardT > 0) {
+      guardT = Math.max(0, guardT - dt);
+      if (shield) shield.alpha = 0.55 + 0.25 * Math.sin(t * 10)
+        * (guardT < 0.6 ? guardT / 0.6 : 1);   // 終わり際は瞬いて消える
+      if (shield && guardT === 0) shield.alpha = 0;
+    } else if (shield && shield.alpha !== 0) shield.alpha = 0;
 
     updateInk(dt);
     updateBullets(dt);
@@ -1337,6 +1404,7 @@
     stateT = PP.BOSS.firstDelay;
     curAttack = null; lastAttack = null;
     iFrames = 0; hurtT = 0; t = 0; moveT = 0;
+    hitStreak = 0; guardT = 0; guardFxCd = 0;
     victoryPending = false; victoryConsumed = false;
     phase2 = false; attackCount = 0;
     clearStatusFx();
@@ -1345,6 +1413,7 @@
       body.x = PP.W / 2; body.y = PP.BOSS.y;
       hurt.alpha = 0;
       if (rageRim) { createjs.Tween.removeTweens(rageRim); rageRim.alpha = 0; }
+      if (shield) shield.alpha = 0;
       drawHpBar();
     }
   }

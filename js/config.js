@@ -318,6 +318,9 @@
     firstDelay: 3.0,    // 開戦から最初の攻撃までの猶予(秒)
     recover: 0.5,       // 攻撃後の隙(秒)
     iFrames: 0.08,      // 被弾後の無敵時間(1発のサブステップ多重ヒット防止)
+    // 連続ヒットのシールド: hitsPerGuard 発当てるたびに duration 秒の無敵。
+    // 連打のゴリ押しを防ぎ、「3発入れたら次のチャンスを待つ」リズムを作る
+    guard: { hitsPerGuard: 3, duration: 2.5 },
     // 妖弾の共通判定: 大砲へのヒット箱(powerups のキャッチ箱と同じ寸法感)
     orb: { catchW: 50, catchTop: 40, catchBottom: 20, r: 16 },
     // 各攻撃: telegraph=予兆秒数 / dur=被弾時の効果秒数 / speed=妖弾の速さ px/s
