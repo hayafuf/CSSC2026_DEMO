@@ -324,7 +324,7 @@
     orb: { catchW: 50, catchTop: 40, catchBottom: 20, r: 16 },
     // 各攻撃: telegraph=予兆秒数 / dur=被弾時の効果秒数 / speed=妖弾の速さ px/s
     ink:       { telegraph: 1.0, dur: 7.0, lobs: 5, grav: 560, vy0: -40,
-                 rMin: 110, rMax: 200 },     // 漆黒の墨獄: 弧を描く墨玉のカーテン。着弾点に墨だまり
+                 rMin: 170, rMax: 280 },     // 漆黒の墨獄: 弧を描く墨玉のカーテン。着弾点に墨だまり
     addle:     { telegraph: 1.0, dur: 6.0, speed: 430 },              // 惑乱の逆潮: ホバリング多段リング。被弾で左右反転
     freeze:    { telegraph: 1.2, dur: 3.5, fan: 7, spread: 130, speed: 380 }, // 深淵の錨鎖: 逆回転する同心リング。被弾で操作不能
     shotSlow:  { telegraph: 1.0, dur: 6.5, factor: 0.15, speed: 250, r: 26 }, // 時間の滞留: 大きく遅い弾。被弾で弾速低下

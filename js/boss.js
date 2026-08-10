@@ -603,22 +603,24 @@
   }
 
   // ---------- 墨だまり(タコスミの着弾跡) ----------
-  // direct=true(大砲に直撃)は大きな墨が視界の中心も覆う。外れた墨玉も
-  // 着弾点に墨だまりを残す(避けても足元の視界は少し悪くなる)
+  // direct=true(大砲に直撃)は大量の濃い墨が画面のほぼ全域を覆う本気の目つぶし。
+  // 外れた墨玉も着弾点に墨だまりを残す(避けても足元の視界は少し悪くなる)
   function splatInk(x, y, direct) {
     var B = PP.BOSS.ink;
-    var n = direct ? 3 : 1;
+    var n = direct ? 6 : 1;
     for (var i = 0; i < n; i++) {
       var r = B.rMin + Math.random() * (B.rMax - B.rMin);
       var bx = x, by = y;
-      if (direct && i > 0) {        // 直撃は追加の墨が盤面中央へ飛び散る
-        bx = 250 + Math.random() * (PP.W - 500);
-        by = 220 + Math.random() * 260;
-        r *= 1.15;
+      if (direct && i > 0) {        // 直撃は追加の墨が画面全域へ飛び散る
+        bx = 120 + Math.random() * (PP.W - 240);
+        by = 140 + Math.random() * (PP.H - 260);
+        r *= 1.3;
       }
       var sh = new createjs.Shape();
+      // 縁までほぼ真っ黒(フェードは外周のわずかだけ)。重なると完全な闇になる
       sh.graphics.beginRadialGradientFill(
-        ["rgba(10,8,14,0.98)", "rgba(10,8,14,0.9)", "rgba(10,8,14,0)"], [0, 0.6, 1],
+        ["rgba(10,8,14,1)", "rgba(10,8,14,0.97)", "rgba(10,8,14,0.85)", "rgba(10,8,14,0)"],
+        [0, 0.55, 0.82, 1],
         0, 0, 0, 0, 0, r).drawCircle(0, 0, r);
       sh.x = bx; sh.y = by;
       sh.alpha = 0;
