@@ -9,7 +9,17 @@
   "use strict";
   var PP = window.PP;
 
-  var items = []; // {x, y, vy, kind, def, view}
+  var items = []; // {x, y, vx, vy, kind, def, color, view}
+
+  // アイテムの登場: その場で上向きに「ポンッ」とはじけ飛び、横に散りながら
+  // 放物線を描いて落ちてくる(x・y 両方が動く。玉が弾けた勢いを引き継ぐ見せ方)。
+  // 横速度は控えめにして、狙って取りに行ける範囲に収める
+  function popVel() {
+    return {
+      vx: (Math.random() - 0.5) * 180,          // 横に ±90 px/s ほど散る
+      vy: -(140 + Math.random() * 100)          // まず上へ 140〜240 px/s で短く鋭く跳ぶ
+    };
+  }
 
   // 玉が消えたときに呼ばれる。コンボ中はドロップ率が上がる
   // (ドロップ率は難易度で変えない。拾う気持ちよさは全難易度共通)。
@@ -51,7 +61,9 @@
     var view = makeItemView(def.icon, color);
     view.x = x; view.y = y;
     PP.layers.item.addChild(view);
-    items.push({ x: x, y: y, vy: 20, kind: kind, def: def, color: color, view: view });
+    var v = popVel();
+    PP.fx.burst(x, y, "#ffe08a", 8, 1.0);   // 登場の「ポンッ」
+    items.push({ x: x, y: y, vx: v.vx, vy: v.vy, kind: kind, def: def, color: color, view: view });
   }
 
   // パワーダウンアイテムの落下: 暗い紫の見た目で「避けるべき物」と分かる。
@@ -61,7 +73,9 @@
     var view = makeItemView(def.icon, null, true);
     view.x = x; view.y = y;
     PP.layers.item.addChild(view);
-    items.push({ x: x, y: y, vy: 20, kind: "down", def: def, color: null, view: view });
+    var v = popVel();
+    PP.fx.burst(x, y, "#b040ff", 8, 1.0);   // 紫の飛沫=登場の時点で「罠」と分かる
+    items.push({ x: x, y: y, vx: v.vx, vy: v.vy, kind: "down", def: def, color: null, view: view });
   }
 
   // 骸骨玉の撃破報酬: 確率もコインも罠も挟まず、パワーアップを確定で1個落とす
@@ -76,7 +90,9 @@
     var view = makeItemView(def.icon, color);
     view.x = x; view.y = y;
     PP.layers.item.addChild(view);
-    items.push({ x: x, y: y, vy: 20, kind: "power", def: def, color: color, view: view });
+    var v = popVel();
+    PP.fx.burst(x, y, "#ffe08a", 10, 1.2);   // 確定報酬は少し豪華にはじける
+    items.push({ x: x, y: y, vx: v.vx, vy: v.vy, kind: "power", def: def, color: color, view: view });
   }
 
   // 盤面(全レーン)に今ある色から1色選ぶ。玉が無ければ使用中の色数から選ぶ
@@ -99,7 +115,9 @@
     view.x = x; view.y = y;
     view.scaleX = view.scaleY = 1.25;
     PP.layers.item.addChild(view);
-    items.push({ x: x, y: y, vy: -40, kind: "treasure", def: def, view: view });
+    var v = popVel();
+    PP.fx.burst(x, y, "#ffe08a", 12, 1.4);
+    items.push({ x: x, y: y, vx: v.vx, vy: v.vy - 40, kind: "treasure", def: def, view: view });
   }
 
   // 重み付き抽選: 各要素の w(相対値)に比例した確率で1つ選ぶ。
@@ -119,28 +137,43 @@
 
   // colorIndex を渡すと、その色の玉として塗られる(カラーボム用)。
   // 「何色が消えるか」がアイテムの見た目だけで分かるようにする。
-  // dark=true はパワーダウン用: 暗い紫地+毒々しい縁で「取ってはいけない」を
-  // 見た目だけで伝える(パワーアップの金縁とはっきり区別できる)
+  // dark=true はパワーダウン用: 毒々しい紫のグロー+☠バッジ+棘付きの縁で
+  // 「取ってはいけない」を遠目でも一瞬で伝える(パワーアップの金縁と明確に区別)
   function makeItemView(icon, colorIndex, dark) {
     var cont = new createjs.Container();
     var pal = (colorIndex !== null && colorIndex !== undefined) ? PP.PALETTE[colorIndex] : null;
+    if (dark) {
+      // 外周の警告グロー(強めに脈動させる。金色と絶対に見間違えない紫)
+      var glow = new createjs.Shape();
+      glow.graphics
+        .beginRadialGradientFill(["rgba(176,64,255,0.55)", "rgba(176,64,255,0)"], [0.4, 1],
+          0, 0, 6, 0, 0, 44)
+        .drawCircle(0, 0, 44);
+      cont.addChild(glow);
+      createjs.Tween.get(glow, { loop: true })
+        .to({ alpha: 0.25, scaleX: 0.8, scaleY: 0.8 }, 340, createjs.Ease.quadInOut)
+        .to({ alpha: 1, scaleX: 1.15, scaleY: 1.15 }, 340, createjs.Ease.quadInOut);
+      cont.pulse = glow;   // 後始末用(update が removeChild する前に止める)
+    }
     var bg = new createjs.Shape();
     bg.graphics.beginFill(pal ? pal.main : (dark ? "#1a0e26" : "rgba(10,16,26,0.78)"))
-      .beginStroke(pal ? pal.light : (dark ? "#8a20d8" : "#f0c040")).setStrokeStyle(3)
+      .beginStroke(pal ? pal.light : (dark ? "#b040ff" : "#f0c040")).setStrokeStyle(dark ? 4 : 3)
       .drawCircle(0, 0, 26);
     cont.addChild(bg);
-    if (dark) {
-      // ゆっくり明滅させて不穏さを出す(拾う前に気づけるように)
-      createjs.Tween.get(bg, { loop: true })
-        .to({ alpha: 0.55 }, 420, createjs.Ease.quadInOut)
-        .to({ alpha: 1 }, 420, createjs.Ease.quadInOut);
-      cont.pulse = bg;   // 後始末用(update が removeChild する前に止める)
-    }
     var t = new createjs.Text(icon, "30px serif", "#fff");
     t.textAlign = "center";
     t.textBaseline = "middle";
     t.shadow = pal ? new createjs.Shadow("rgba(0,0,0,0.8)", 0, 1, 4) : null;
     cont.addChild(t);
+    if (dark) {
+      // 右上の☠バッジ: 骸骨玉と同じ記号で「呪い系」だと直感で繋がるようにする
+      var badge = new createjs.Text("☠", "18px serif", "#ff6b6b");
+      badge.textAlign = "center";
+      badge.textBaseline = "middle";
+      badge.x = 19; badge.y = -19;
+      badge.shadow = new createjs.Shadow("rgba(0,0,0,0.9)", 0, 1, 3);
+      cont.addChild(badge);
+    }
     return cont;
   }
 
@@ -161,6 +194,14 @@
       var it = items[i];
       it.vy += PP.ITEMS.fallGravity * dt;
       it.y += it.vy * dt;
+      // 横移動: はじけ飛んだ勢いは空気抵抗でゆっくり減衰し、落下は素直な放物線に
+      // なる(横に流れ続けるとキャッチの狙いが付けられないため)。
+      // 画面端では跳ね返して、取れない場所へ消えていかないようにする
+      it.x += (it.vx || 0) * dt;
+      it.vx = (it.vx || 0) * Math.max(0, 1 - dt * 0.9);
+      if (it.x < 28) { it.x = 28; it.vx = Math.abs(it.vx); }
+      else if (it.x > PP.W - 28) { it.x = PP.W - 28; it.vx = -Math.abs(it.vx); }
+      it.view.x = it.x;
       it.view.y = it.y;
       var caught = Math.abs(it.x - PP.cannon.x) <= 46 &&
                    it.y >= PP.cannon.y - 34 && it.y <= PP.cannon.y + 26;

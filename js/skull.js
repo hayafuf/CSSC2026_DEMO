@@ -208,8 +208,10 @@
       var bx = 120 + Math.random() * (PP.W - 240);
       var by = 140 + Math.random() * (PP.H - 260);
       var sh = new createjs.Shape();
+      // ボスの墨(ほぼ真っ黒)より薄めにする: 「見づらいが、うっすら透けて見える」
+      // 程度に留めて、理不尽さより駆け引き(避けそこねのペナルティ)に寄せる
       sh.graphics.beginRadialGradientFill(
-        ["rgba(10,8,14,1)", "rgba(10,8,14,0.97)", "rgba(10,8,14,0.85)", "rgba(10,8,14,0)"],
+        ["rgba(10,8,14,0.72)", "rgba(10,8,14,0.66)", "rgba(10,8,14,0.5)", "rgba(10,8,14,0)"],
         [0, 0.55, 0.82, 1],
         0, 0, 0, 0, 0, r).drawCircle(0, 0, r);
       sh.x = bx; sh.y = by;
