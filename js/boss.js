@@ -386,7 +386,8 @@
 
   // opts(省略可)で弾に「軌道の芸」を持たせる:
   //   wave:  { amp, freq, ph } … 左右に蛇行しながら進む(snake 弾)
-  //   hover: { y, time, rings: [{ count, speed }, …] }
+  //   spin:  rad/s … 速度ベクトルを毎フレーム回す=弧を描いて曲がる(渦巻き弾)
+  //   hover: { y, time, rings: [{ count, speed, spin }, …] }
   //          … 指定の高さまで降りたら停止してホバリングし、time 秒後に
   //            全方位リングを段階的に展開(rings を順に 0.45 秒間隔で放つ)、
   //            最後のリングと同時に自分は弾ける(ホバリング爆裂弾)
@@ -398,6 +399,13 @@
               r: r, view: view, t: Math.random() * 6.28 };
     if (opts) {
       if (opts.wave) b.wave = { amp: opts.wave.amp, freq: opts.wave.freq, ph: opts.wave.ph || 0 };
+      if (opts.spin) {
+        // 回転弾は極座標で動かす: 発射点を中心に、半径は radial 速度で単調増加、
+        // 角度は spin で回る。「回転しながら必ず外へ広がる」ことを保証する
+        // (速度ベクトルを回す方式だと一周して内側へ戻ってきてしまう)
+        b.orbit = { cx: x, cy: y, r: 0, ang: Math.atan2(vy, vx),
+                    vr: Math.sqrt(vx * vx + vy * vy), w: opts.spin };
+      }
       if (opts.hover) b.hover = { y: opts.hover.y, t: opts.hover.time,
                                   rings: opts.hover.rings.slice(), done: false };
     }
@@ -434,7 +442,8 @@
           for (var bk = 0; bk < bc.count; bk++) {
             var bang = (Math.PI * 2 / bc.count) * bk + half;
             spawnBullet(b.type, b.x, b.y,
-              Math.cos(bang) * bc.speed, Math.sin(bang) * bc.speed, 0, PP.BOSS.orb.r * 0.72);
+              Math.cos(bang) * bc.speed, Math.sin(bang) * bc.speed, 0, PP.BOSS.orb.r * 0.72,
+              bc.spin ? { spin: bc.spin } : null);
           }
           PP.fx.ring(b.x, b.y, ATTACKS[b.type].color, 12, 110, 450);
           PP.fx.burst(b.x, b.y, ATTACKS[b.type].color, 14, 1.6);
@@ -448,11 +457,19 @@
           }
         }
       }
-      b.vy += b.grav * dt;
-      b.x += b.vx * dt;
-      b.y += b.vy * dt;
-      // 蛇行弾: 進行に左右の揺れを重ねる(網のような弾幕を作る)
-      if (b.wave) b.x += Math.sin(b.t * b.wave.freq + b.wave.ph) * b.wave.amp * dt;
+      // 渦巻き弾: 極座標スパイラル。半径は増える一方なので必ず外へ広がる
+      if (b.orbit) {
+        b.orbit.r += b.orbit.vr * dt;
+        b.orbit.ang += b.orbit.w * dt;
+        b.x = b.orbit.cx + Math.cos(b.orbit.ang) * b.orbit.r;
+        b.y = b.orbit.cy + Math.sin(b.orbit.ang) * b.orbit.r;
+      } else {
+        b.vy += b.grav * dt;
+        b.x += b.vx * dt;
+        b.y += b.vy * dt;
+        // 蛇行弾: 進行に左右の揺れを重ねる(網のような弾幕を作る)
+        if (b.wave) b.x += Math.sin(b.t * b.wave.freq + b.wave.ph) * b.wave.amp * dt;
+      }
       b.t += dt;
       b.view.x = b.x; b.view.y = b.y;
       var pulse = 1 + 0.12 * Math.sin(b.t * 10);
@@ -758,17 +775,20 @@
     } else if (key === "freeze") {
       // 深淵の錨鎖: ボスを中心に広がる同心二重の錨のリング。
       // 外環(速・12発)と内環(遅・8発、半歩ずれ)が時間差で押し寄せる
+      // 外環は時計回り、内環は反時計回りに「回転」しながら広がる(spin)。
+      // 逆回転の二重渦=錨に繋がれた鎖が巻き付いてくるイメージ
       var F = B.freeze;
       var ringDefs = phase2
-        ? [{ n: 14, v: F.speed }, { n: 10, v: F.speed * 0.7 }, { n: 7, v: F.speed * 0.5 }]
-        : [{ n: 12, v: F.speed }, { n: 8, v: F.speed * 0.68 }];
+        ? [{ n: 14, v: F.speed, w: 0.55 }, { n: 10, v: F.speed * 0.7, w: -0.75 }, { n: 7, v: F.speed * 0.5, w: 0.95 }]
+        : [{ n: 12, v: F.speed, w: 0.55 }, { n: 8, v: F.speed * 0.68, w: -0.75 }];
       for (var rl = 0; rl < ringDefs.length; rl++) {
         var rd = ringDefs[rl];
         var shift = rl * (Math.PI / rd.n);         // 環ごとに半歩ずらす
         for (var f = 0; f < rd.n; f++) {
           var angF = (Math.PI * 2 / rd.n) * f + shift;
           spawnBullet("freeze", sx, sy,
-            Math.cos(angF) * rd.v * spdMul(), Math.sin(angF) * rd.v * spdMul(), 0, B.orb.r);
+            Math.cos(angF) * rd.v * spdMul(), Math.sin(angF) * rd.v * spdMul(), 0, B.orb.r,
+            { spin: rd.w });
         }
       }
     } else if (key === "addle") {
@@ -778,11 +798,11 @@
       var ddxA = tx - sx, ddyA = ty - sy;
       var dlenA = Math.sqrt(ddxA * ddxA + ddyA * ddyA) || 1;
       spawnBullet("addle", sx, sy,
-        ddxA / dlenA * 260 * spdMul(), Math.abs(ddyA) / dlenA * 260 * spdMul(), 0, B.shotSlow.r,
-        { hover: { y: 380, time: 1.0,
+        ddxA / dlenA * 360 * spdMul(), Math.abs(ddyA) / dlenA * 360 * spdMul(), 0, B.shotSlow.r,
+        { hover: { y: 380, time: 0.8,
                    rings: phase2
-                     ? [{ count: 12, speed: 240 * spdMul() }, { count: 16, speed: 180 * spdMul() }, { count: 20, speed: 140 * spdMul() }]
-                     : [{ count: 10, speed: 230 * spdMul() }, { count: 14, speed: 165 * spdMul() }] } });
+                     ? [{ count: 12, speed: 310 * spdMul(), spin: 0.5 }, { count: 16, speed: 240 * spdMul(), spin: -0.5 }, { count: 20, speed: 185 * spdMul(), spin: 0.5 }]
+                     : [{ count: 10, speed: 300 * spdMul(), spin: 0.5 }, { count: 14, speed: 220 * spdMul(), spin: -0.5 }] } });
     } else if (key === "shotSlow") {
       // 時凪の呪縛: 大弾のカーテンを五重(怒り時は六重)、時間差で1枚ずつ落とす。
       // 実際の発生は updateCurtain(奇数枚と偶数枚で隙間が互い違い)
@@ -1003,9 +1023,9 @@
       // 画面幅いっぱいのランダムな位置から、大砲の方へ緩く傾いて落ちる流星。
       // 重力で加速するので「上はまばら、下は速い」雨の密度勾配ができる
       var mx = 80 + Math.random() * (PP.W - 160);
-      var mvx = Math.max(-90, Math.min(90, (PP.cannon.x - mx) * 0.12));
+      var mvx = Math.max(-120, Math.min(120, (PP.cannon.x - mx) * 0.15));
       spawnBullet("barrage", mx, -30 - Math.random() * 60,
-        mvx * spdMul(), 140 * spdMul(), 240, PP.BOSS.orb.r * 0.8);
+        mvx * spdMul(), 200 * spdMul(), 330, PP.BOSS.orb.r * 0.8);
     }
     PP.audio.beep(240 + barrageLeft * 40, 0.08, "square", 0.08);
   }
@@ -1019,13 +1039,13 @@
     if (curtainLeft <= 0) return;
     curtainT -= dt;
     if (curtainT > 0) return;
-    curtainT = 0.55;
+    curtainT = 0.45;
     var row = curtainTotal - curtainLeft;
     curtainLeft--;
     var B = PP.BOSS;
     var odd = row % 2;                          // 0=7発の段 / 1=6発の段
     var nS = 7 - odd;
-    var vS = 235 * spdMul();                    // 全弾同速(層の間隔は時間差で作る)
+    var vS = 320 * spdMul();                    // 全弾同速(層の間隔は時間差で作る)
     var pitchS = PP.W / 8;                      // 両方の段で共通のピッチ
     for (var c2 = 0; c2 < nS; c2++) {
       var gxS = pitchS * (c2 + 1 + odd * 0.5);  // 6発の段は 7発の段の中間に
@@ -1042,12 +1062,12 @@
     if (sweepLeft <= 0) return;
     sweepT -= dt;
     if (sweepT > 0) return;
-    sweepT = 0.06;
+    sweepT = 0.05;
     sweepLeft--;
     var sx = body.x, sy = body.y + 38;
     var k = 1 - sweepLeft / sweepTotal;                    // 0→1 で掃引
     var ang = Math.PI * (0.12 + 0.76 * k);                 // 左→右へ掃く腕
-    var v = 300 * spdMul();
+    var v = 390 * spdMul();
     spawnBullet("randomize", sx, sy, Math.cos(ang) * v, Math.sin(ang) * v, 0, PP.BOSS.orb.r,
       { wave: { amp: 30, freq: 2.5, ph: k * 6 } });
     var ang2 = Math.PI - ang;                              // 右→左へ掃く腕(鏡像)

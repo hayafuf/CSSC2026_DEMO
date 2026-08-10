@@ -307,8 +307,8 @@
     // 弾種ごとのダメージ。ミサイルは貫通で確実に当たるので 1(お手軽大ダメージ禁止)。
     // 爆弾は不貫通=列の隙間を通し切らないと届かないので、通せたご褒美に 2
     dmg: { shot: 1, bomb: 2, missile: 1 },
-    gapHold: 2.5,       // チェーンに隙間が開いてから等速で保つ秒数(射線のチャンス)
-    gapCatchUp: 1.35,   // gapHold 経過後、後方グループが先頭より少しだけ速く進む倍率。
+    gapHold: 0,         // 隙間を等速で保つ猶予は無し(開いた瞬間から詰め始める)
+    gapCatchUp: 2.0,    // 後方グループが先頭より少しだけ速く進む倍率。
                         // 通常則(洞窟寄りの速い速度)へ戻すと急加速で不自然なため、
                         // 「先頭速度×この倍率」の等速でじわっと詰めて埋める
     waveInterval: 3,    // ボス戦の波間隔(秒)。絶え間なく補給→玉列は常に連続
@@ -321,10 +321,10 @@
     // 妖弾の共通判定: 大砲へのヒット箱(powerups のキャッチ箱と同じ寸法感)
     orb: { catchW: 50, catchTop: 40, catchBottom: 20, r: 16 },
     // 各攻撃: telegraph=予兆秒数 / dur=被弾時の効果秒数 / speed=妖弾の速さ px/s
-    ink:       { telegraph: 1.0, dur: 7.0, lobs: 5, grav: 420, vy0: -60,
-                 rMin: 110, rMax: 200 },     // タコスミ: 山なりの墨玉×5。着弾点に墨だまり、直撃で大visual妨害
-    addle:     { telegraph: 1.0, dur: 6.0, speed: 430 },              // Addle!!: 速い単発。被弾で左右反転
-    freeze:    { telegraph: 1.2, dur: 3.5, fan: 7, spread: 130, speed: 300 }, // 停止!: 7方向の扇。被弾で操作不能
+    ink:       { telegraph: 1.0, dur: 7.0, lobs: 5, grav: 560, vy0: -40,
+                 rMin: 110, rMax: 200 },     // 漆黒の墨獄: 弧を描く墨玉のカーテン。着弾点に墨だまり
+    addle:     { telegraph: 1.0, dur: 6.0, speed: 430 },              // 惑乱の逆潮: ホバリング多段リング。被弾で左右反転
+    freeze:    { telegraph: 1.2, dur: 3.5, fan: 7, spread: 130, speed: 380 }, // 深淵の錨鎖: 逆回転する同心リング。被弾で操作不能
     shotSlow:  { telegraph: 1.0, dur: 6.5, factor: 0.15, speed: 250, r: 26 }, // 時間の滞留: 大きく遅い弾。被弾で弾速低下
     // 運命のルーレット: 被弾でチェーン全体がルーレット回転 → 補給ルール準拠で色確定
     randomize: { telegraph: 0.9, spin: 1.1, step: 0.12, speed: 360 },
@@ -616,7 +616,7 @@
     // levelStep: 0 でレベル補正を切り、テンポは PP.BOSS 側だけで調整できる。
     {
       name: "クラーケンの海域", boss: true, overpass: false, sharp: true, corner: 26,
-      speed: { entry: 1000, hole: 12, curve: 4.0, levelStep: 0 },
+      speed: { entry: 1000, hole: 18, curve: 4.0, levelStep: 0 },
       lanes: [ { ctrl: BOSS_CTRL } ]
     }
   ];
