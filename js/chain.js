@@ -887,22 +887,28 @@
         }
         run = (c === prev) ? run + 1 : 1;
         prev = c;
-        if (c === b.color) continue;   // 同色なら view の作り直しを省く
+        if (c === b.color) continue;   // 同色なら差し替えを省く
         b.color = c;
-        var old = b.view;
-        var view = PP.ball.makeView(c);
-        view.x = old.x; view.y = old.y;
-        view.visible = old.visible;
-        if (old.parent) {
-          old.parent.addChildAt(view, old.parent.getChildIndex(old));
-          old.parent.removeChild(old);
-        } else {
-          PP.layers.ballUnder.addChild(view);
+        // view はそのままに共有 canvas だけ貼り替える(ルーレットの回転中は
+        // 0.12秒ごとに全玉が変わるので、作り直すと 1 秒間に数百個の
+        // DisplayObject 生成+レイヤー全積み直しになり大きなカクつきになる)
+        if (!PP.ball.recolorView(b.view, c)) {
+          // makeView 製でない view だけ従来どおり作り直す(通常は通らない)
+          var old = b.view;
+          var view = PP.ball.makeView(c);
+          view.x = old.x; view.y = old.y;
+          view.visible = old.visible;
+          if (old.parent) {
+            old.parent.addChildAt(view, old.parent.getChildIndex(old));
+            old.parent.removeChild(old);
+          } else {
+            PP.layers.ballUnder.addChild(view);
+          }
+          b.view = view;
+          g.ballsDirty = true;   // view を差し替えた時だけ重なり順を積み直す
         }
-        b.view = view;
       }
     }
-    g.ballsDirty = true;    // 重なり順を積み直す
     g.colorsDirty = true;   // 盤面の色構成が変わった → 装填色の見張りを回す
   }
 

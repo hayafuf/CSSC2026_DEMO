@@ -665,6 +665,7 @@
   // updateShots の玉座標キャッシュ。中身は毎フレーム書き直すが、配列やレーン毎の
   // 入れ物はモジュールに置いて使い回す(弾が飛んでいる間の毎フレーム確保を無くす)。
   var _cache = [], _cacheN = 0, _overPts = [], _overN = 0;
+  var _posDirty = true;   // 玉座標キャッシュの要更新フラグ(サブステップ間で持ち越す)
 
   // 発射玉の移動とチェーンへの命中判定(全レーン横断)。
   // dt が大きいフレーム(処理落ち等)では、弾が1フレームで当たり判定の半径を
@@ -672,9 +673,13 @@
   // 注釈参照)。そこで dt が大きいときは短い時間に等分して stepShots を複数回
   // 呼び、通常速度と同じ細かさで動かす。
   // 通常速度(60fps で dt ≈ 0.0167 秒)では従来どおり 1 回だけ呼ばれる。
+  // ステップ数は 4 で頭打ちにする: 上限が無いと「重い → 分割数が増える →
+  // さらに重い」の悪循環(処理落ちスパイラル)になる。上限後の 1 ステップは
+  // 最悪でも dt/4 で、弾半径に対するすり抜け余裕は実用上足りる
   function updateShots(dt) {
-    var steps = (dt > 0.02) ? Math.ceil(dt / 0.0167) : 1;
+    var steps = (dt > 0.02) ? Math.min(4, Math.ceil(dt / 0.0167)) : 1;
     var h = dt / steps;
+    _posDirty = true;   // チェーンはフレーム間でしか進まないので、引き直しはフレームに1回
     for (var i = 0; i < steps; i++) stepShots(h);
   }
   function stepShots(dt) {
@@ -690,7 +695,7 @@
     // 玉の画面座標(と立体交差の上下・トンネルの内外)は d から一意に決まる。
     // 弾ごとに全玉ぶん引き直すと「弾数 × 玉数」になるので、盤面が変わらない限り
     // 玉あたり 1 回に集約する。割り込み/爆発で列が変わったら posDirty で作り直す。
-    var posDirty = true;
+    // (キャッシュ自体はサブステップをまたいで有効。updateShots がフレーム頭で dirty にする)
     function refreshBallPos() {
       _overN = 0;   // 橋(上の帯)に乗っている玉の画面座標。下の玉の遮蔽判定に使う
       for (var li = 0; li < lanes.length; li++) {
@@ -710,7 +715,7 @@
         }
       }
       _cacheN = lanes.length;
-      posDirty = false;
+      _posDirty = false;
     }
 
     // 下の帯の玉(ground)が、橋の桁の下に隠れているか。橋に乗っている玉の画面座標が
@@ -744,10 +749,12 @@
         sh.view.y = sh.y;
         PP.fx.missileTrail(sh.x, sh.y + R, Math.min(140, (yPrev - sh.y) + 40),
           PP.MISSILE_HIT_HALF * 2);
-        PP.fx.burst(sh.x, sh.y + R * 1.2, "rgba(255,190,90,0.5)", 2);
+        if (PP.fx.particleLoad() < 0.75) {
+          PP.fx.burst(sh.x, sh.y + R * 1.2, "rgba(255,190,90,0.5)", 2);
+        }
         var hits = PP.chain.pierceSegment(sh.x, sh.y, yPrev);
         if (hits > 0) {
-          posDirty = true;   // 列が変わった → 通常弾は座標を引き直す
+          _posDirty = true;   // 列が変わった → 通常弾は座標を引き直す
           // 貫通のたびにボム級へ迫る強い揺れ(ボムの 80 は超えない)
           PP.fx.shake(Math.min(60, 12 + hits * 8), 0.5);
         }
@@ -784,7 +791,7 @@
         var bdmg = sh.special === "bomb" ? PP.BOSS.dmg.bomb : PP.BOSS.dmg.shot;
         if (sh.special === "bomb") {
           PP.chain.explodeAt(sh.x, sh.y);   // 爆風の演出ごと炸裂
-          posDirty = true;                  // 爆風で列が変わったかもしれない
+          _posDirty = true;                 // 爆風で列が変わったかもしれない
         }
         PP.boss.onHit(bdmg, sh.x, sh.y);
         if (sh.view.spark) createjs.Tween.removeTweens(sh.view.spark);
@@ -804,7 +811,7 @@
       // 上下の帯のうち「見えている上の帯」を優先する(スコアを少し下げて同点付近
       // で勝たせる)。トンネル内の玉(隠れている)は当たり判定から外す=撃てない。
       // 命中の可否判定そのものは実距離で行う。
-      if (posDirty) refreshBallPos();
+      if (_posDirty) refreshBallPos();
       var bestLane = -1, bestI = -1, bestScore = Infinity, bestDist = Infinity;
       var OVER_BIAS = (D * 0.6) * (D * 0.6);
       // 命中に必要な距離²(下の判定と同じ値)。score は最悪でも dist - OVER_BIAS
@@ -839,7 +846,7 @@
         if (sh.view.spark) createjs.Tween.removeTweens(sh.view.spark);
         PP.layers.shot.removeChild(sh.view);
         shots.splice(s, 1);
-        posDirty = true;   // 割り込み/爆発で列が変わった → 次弾は座標を引き直す
+        _posDirty = true;  // 割り込み/爆発で列が変わった → 次弾は座標を引き直す
       }
     }
   }

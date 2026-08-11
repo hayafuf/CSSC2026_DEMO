@@ -257,6 +257,20 @@
     return body;
   }
 
+  // 触手の再描画は 30Hz に間引き、結果は cache して blit する。
+  // 太い round ストローク×8本の再ラスタライズは canvas で最も高い部類の
+  // コストで、揺れは sin(t*2) 程度なので 30Hz サンプルでも見分けが付かない。
+  // 境界は式の最悪値(ex±sway, ey=34+148+46)+ストローク半幅から算出
+  var tentAcc = 1;   // 初回は必ず描く
+  function drawTentaclesThrottled(droop, dt) {
+    tentAcc += dt;
+    if (tentAcc < 1 / 30) return;
+    tentAcc = 0;
+    drawTentacles(droop);
+    if (tentShape.cacheCanvas) tentShape.updateCache();
+    else tentShape.cache(-195, 8, 390, 245);
+  }
+
   // 触手を描き直す(8本。sin で位相をずらしてうねらせる)。
   // dying 中は droop(0→1)でだらりと垂れ下がる。
   function drawTentacles(droop) {
@@ -317,6 +331,7 @@
         ["rgba(0,0,0,0)", "rgba(0,0,0,0.6)", "rgba(0,0,0,0.6)", "rgba(0,0,0,0)"],
         [0, 0.18, 0.82, 1], 0, 0, PP.W, 0)
       .drawRect(0, -26, PP.W, 52);
+    bband.cache(0, -26, PP.W, 52);   // 画面幅のグラデ帯は一度だけ焼く
     bannerText = new createjs.Text("", '700 30px "Cinzel","Hiragino Kaku Gothic ProN","Meiryo",serif', "#ffffff");
     bannerText.textAlign = "center"; bannerText.textBaseline = "middle";
     bannerText.x = PP.W / 2;
@@ -381,24 +396,42 @@
 
   // ---------- 妖弾(ボスの弾幕) ----------
   // type: "ink"(山なりの墨玉) / "addle" / "freeze" / "shotSlow" / "randomize"(直進オーブ)
+  // グラデーション円をそのまま Shape で持つと弾ごとに毎フレーム再ラスタライズ
+  // されて重い(弾幕中は100発近く生きる)ので、type ごとに一度だけ 1.25 倍解像度で
+  // canvas に焼き、共有 Bitmap を返す(ball.js の焼き込みと同じ発想)。
+  // 呼び出し側のパルス(最大1.12倍)でも native 解像度を超えない
+  var orbCanvas = {};
   function makeOrbView(type) {
-    var sh = new createjs.Shape();
-    if (type === "ink") {
-      sh.graphics
-        .beginRadialGradientFill(["#3a2a48", "#16101e", "rgba(10,8,14,0.4)"], [0, 0.7, 1],
-          -4, -4, 2, 0, 0, 20)
-        .drawCircle(0, 0, 18)
-        .beginFill("rgba(210,160,235,0.25)").drawCircle(-6, -7, 5);
-    } else {
-      var col = ATTACKS[type].color;
-      var r = (type === "shotSlow") ? PP.BOSS.shotSlow.r : PP.BOSS.orb.r;
-      sh.graphics
-        .beginRadialGradientFill(["#ffffff", col, "rgba(0,0,0,0)"], [0, 0.45, 1],
-          0, 0, 0, 0, 0, r * 1.7)
-        .drawCircle(0, 0, r * 1.7)
-        .setStrokeStyle(2).beginStroke(col).drawCircle(0, 0, r);
+    var c = orbCanvas[type];
+    if (!c) {
+      var sh = new createjs.Shape();
+      var pad;
+      if (type === "ink") {
+        sh.graphics
+          .beginRadialGradientFill(["#3a2a48", "#16101e", "rgba(10,8,14,0.4)"], [0, 0.7, 1],
+            -4, -4, 2, 0, 0, 20)
+          .drawCircle(0, 0, 18)
+          .beginFill("rgba(210,160,235,0.25)").drawCircle(-6, -7, 5);
+        pad = 24;
+      } else {
+        var col = ATTACKS[type].color;
+        var r = (type === "shotSlow") ? PP.BOSS.shotSlow.r : PP.BOSS.orb.r;
+        sh.graphics
+          .beginRadialGradientFill(["#ffffff", col, "rgba(0,0,0,0)"], [0, 0.45, 1],
+            0, 0, 0, 0, 0, r * 1.7)
+          .drawCircle(0, 0, r * 1.7)
+          .setStrokeStyle(2).beginStroke(col).drawCircle(0, 0, r);
+        pad = r * 1.7 + 3;
+      }
+      var S = 1.25;
+      sh.cache(-pad, -pad, pad * 2, pad * 2, S);
+      c = orbCanvas[type] = { img: sh.cacheCanvas, reg: pad * S, base: 1 / S };
     }
-    return sh;
+    var bmp = new createjs.Bitmap(c.img);
+    bmp.regX = bmp.regY = c.reg;
+    bmp.scaleX = bmp.scaleY = c.base;
+    bmp.baseScale = c.base;
+    return bmp;
   }
 
   // opts(省略可)で弾に「軌道の芸」を持たせる:
@@ -443,6 +476,10 @@
     var g = PP.game;
     var O = PP.BOSS.orb;
     var cx = PP.cannon.x, cy = PP.cannon.y;
+    // トレイル粒子の予算: 弾数に比例して粒子が増えると FPS が崩壊するので、
+    // 全弾合計で 1 フレーム 8 個まで(60fps で約480個/秒=従来の見え方と同等)。
+    // さらにプールが混んでいる時は発生自体を止める
+    var trailBudget = (PP.fx.particleLoad() < 0.75) ? 8 : 0;
     for (var i = bullets.length - 1; i >= 0; i--) {
       var b = bullets[i];
       // ホバリング爆裂弾: 指定の高さで静止 → 溜め → 全方位リングを段階展開。
@@ -450,7 +487,8 @@
       if (b.hover && !b.hover.done && b.y >= b.hover.y) {
         b.vx = 0; b.vy = 0;
         b.hover.t -= dt;
-        if (Math.random() < dt * 30) {
+        if (trailBudget > 0 && Math.random() < dt * 30) {
+          trailBudget--;
           PP.fx.burst(b.x + (Math.random() - 0.5) * 30, b.y + (Math.random() - 0.5) * 30,
                       ATTACKS[b.type].color, 1, 0.6);
         }
@@ -491,9 +529,10 @@
       b.t += dt;
       b.view.x = b.x; b.view.y = b.y;
       var pulse = 1 + 0.12 * Math.sin(b.t * 10);
-      b.view.scaleX = b.view.scaleY = pulse;
+      b.view.scaleX = b.view.scaleY = pulse * b.view.baseScale;
       // 尾を引く残光(妖弾の軌道が線で読める=避けやすく、画面も華やぐ)
-      if (Math.random() < dt * 26) {
+      if (trailBudget > 0 && Math.random() < dt * 26) {
+        trailBudget--;
         PP.fx.burst(b.x, b.y, ATTACKS[b.type].color, 1, 0.5);
       }
 
@@ -607,9 +646,24 @@
   // ---------- 墨だまり(タコスミの着弾跡) ----------
   // direct=true(大砲に直撃)は大量の濃い墨が画面のほぼ全域を覆う本気の目つぶし。
   // 外れた墨玉も着弾点に墨だまりを残す(避けても足元の視界は少し悪くなる)
+  // 巨大な放射グラデを毎フレーム再ラスタライズすると重いので、
+  // 単位サイズ(半径256)で一度だけ焼いた canvas を全ブロブで共有し、
+  // scale=r/256 の Bitmap として置く(放射グラデは線形スケールで見た目が一致)
+  var INK_UR = 256, inkCanvas = null;
+  function bakeInk() {
+    var sh = new createjs.Shape();
+    sh.graphics.beginRadialGradientFill(
+      ["rgba(10,8,14,0.88)", "rgba(10,8,14,0.83)", "rgba(10,8,14,0.7)", "rgba(10,8,14,0)"],
+      [0, 0.55, 0.82, 1],
+      0, 0, 0, 0, 0, INK_UR).drawCircle(0, 0, INK_UR);
+    sh.cache(-INK_UR, -INK_UR, INK_UR * 2, INK_UR * 2);
+    return sh.cacheCanvas;
+  }
+
   function splatInk(x, y, direct) {
     var B = PP.BOSS.ink;
     var n = direct ? 6 : 1;
+    if (!inkCanvas) inkCanvas = bakeInk();
     for (var i = 0; i < n; i++) {
       var r = B.rMin + Math.random() * (B.rMax - B.rMin);
       var bx = x, by = y;
@@ -618,13 +672,11 @@
         by = 140 + Math.random() * (PP.H - 260);
         r *= 1.3;
       }
-      var sh = new createjs.Shape();
       // 中心は濃い墨だがわずかに透ける(完全な闇だと理不尽なので、
       // 目を凝らせば玉列がかろうじて読める程度に留める)
-      sh.graphics.beginRadialGradientFill(
-        ["rgba(10,8,14,0.88)", "rgba(10,8,14,0.83)", "rgba(10,8,14,0.7)", "rgba(10,8,14,0)"],
-        [0, 0.55, 0.82, 1],
-        0, 0, 0, 0, 0, r).drawCircle(0, 0, r);
+      var sh = new createjs.Bitmap(inkCanvas);
+      sh.regX = sh.regY = INK_UR;
+      sh.scaleX = sh.scaleY = r / INK_UR;
       sh.x = bx; sh.y = by;
       sh.alpha = 0;
       createjs.Tween.get(sh).to({ alpha: 1 }, 220);
@@ -714,22 +766,38 @@
   // ⚠予告マーカーを置く(赤い予告サークル+明滅する⚠)。timer 経過で消える。
   // 解決(触手の突き上げ)は fireAttack 側が pendingZones を読んで行う
   var pendingZones = [];
+  // ⚠マーカーは「静的な塗り(cache)」「脈動する外周リング(cache して alpha だけ
+  // 動かす)」「収束する内リング(細い1本なので毎フレーム描いても軽い)」の
+  // 3枚に分け、毎フレームの clear+3円+rgba文字列連結をやめる
   function addWarning(x, y, r, timer) {
-    var sh = new createjs.Shape();
+    var fillSh = new createjs.Shape();
+    fillSh.graphics.beginFill("rgba(255,48,32,0.14)").drawCircle(0, 0, r);
+    fillSh.cache(-r - 2, -r - 2, r * 2 + 4, r * 2 + 4);
+    fillSh.x = x; fillSh.y = y;
+    var ringSh = new createjs.Shape();
+    ringSh.graphics.setStrokeStyle(3).beginStroke("#ff3020").drawCircle(0, 0, r);
+    ringSh.cache(-r - 4, -r - 4, r * 2 + 8, r * 2 + 8);
+    ringSh.x = x; ringSh.y = y;
+    var sh = new createjs.Shape();     // 収束リング(毎フレーム描き直し)
     sh.x = x; sh.y = y;
     var txt = new createjs.Text("⚠", "700 34px sans-serif", "#ffd24a");
     txt.textAlign = "center"; txt.textBaseline = "middle";
     txt.x = x; txt.y = y;
     txt.shadow = new createjs.Shadow("rgba(0,0,0,0.9)", 0, 2, 6);
-    warnCont.addChild(sh, txt);
-    warnings.push({ x: x, y: y, r: r, timer: timer, total: timer, sh: sh, txt: txt });
+    warnCont.addChild(fillSh, ringSh, sh, txt);
+    warnings.push({ x: x, y: y, r: r, timer: timer, total: timer,
+                    sh: sh, fill: fillSh, ring: ringSh, txt: txt });
+  }
+
+  function removeWarningViews(w) {
+    if (w.sh.parent) warnCont.removeChild(w.sh);
+    if (w.fill.parent) warnCont.removeChild(w.fill);
+    if (w.ring.parent) warnCont.removeChild(w.ring);
+    if (w.txt.parent) warnCont.removeChild(w.txt);
   }
 
   function clearWarnings() {
-    for (var i = 0; i < warnings.length; i++) {
-      if (warnings[i].sh.parent) warnCont.removeChild(warnings[i].sh);
-      if (warnings[i].txt.parent) warnCont.removeChild(warnings[i].txt);
-    }
+    for (var i = 0; i < warnings.length; i++) removeWarningViews(warnings[i]);
     warnings.length = 0;
     pendingZones.length = 0;
   }
@@ -740,17 +808,14 @@
       var w = warnings[i];
       w.timer -= dt;
       if (w.timer <= 0) {
-        if (w.sh.parent) warnCont.removeChild(w.sh);
-        if (w.txt.parent) warnCont.removeChild(w.txt);
+        removeWarningViews(w);
         warnings.splice(i, 1);
         continue;
       }
       var k = 1 - w.timer / w.total;                 // 0→1 で収束
+      w.ring.alpha = 0.5 + 0.3 * Math.sin(t * 12);
       var g = w.sh.graphics;
       g.clear();
-      g.setStrokeStyle(3).beginStroke("rgba(255,48,32," + (0.5 + 0.3 * Math.sin(t * 12)).toFixed(2) + ")")
-        .drawCircle(0, 0, w.r);
-      g.beginFill("rgba(255,48,32,0.14)").drawCircle(0, 0, w.r);
       g.setStrokeStyle(2).beginStroke("rgba(255,120,90,0.8)")
         .drawCircle(0, 0, w.r * (1 - k * 0.85));     // 内側へ収束するリング=残り時間
       w.txt.alpha = 0.6 + 0.4 * Math.sin(t * 10);
@@ -900,9 +965,34 @@
     strikes.length = 0;
   }
 
+  // 柱1本の作画(30Hz のスロットル時だけ呼ぶ)。太い round ストロークの
+  // 再ラスタライズが重いので、描いたら cache して次の再描画まで blit
+  function redrawStrike(s, topY) {
+    var g = s.sh.graphics;
+    g.clear();
+    var sway = Math.sin(t * 6 + s.seed) * 8;
+    // 太い触手柱(本体の触手と同配色)+先端のかぎ爪カーブ
+    g.setStrokeStyle(30, "round").beginStroke("#14261e")
+      .moveTo(s.x, PP.H + 20).quadraticCurveTo(s.x + sway, (PP.H + topY) / 2, s.x + sway * 0.5, topY + 30).endStroke();
+    g.setStrokeStyle(16, "round").beginStroke("#1e3830")
+      .moveTo(s.x + sway * 0.5, topY + 34).quadraticCurveTo(s.x + sway * 0.5 + 14, topY + 6, s.x + sway * 0.5 - 10, topY).endStroke();
+    // 吸盤(血赤)
+    g.beginFill("rgba(200,80,60,0.5)");
+    for (var d = 0; d < 4; d++) {
+      var dy = PP.H - (PP.H - topY - 40) * (d / 4);
+      g.drawCircle(s.x + sway * (d / 4), dy, 5 - d * 0.7);
+    }
+    if (s.sh.cacheCanvas) s.sh.updateCache();
+    else s.sh.cache(s.x - 50, PP.CANNON_Y - 110, 100, PP.H + 40 - (PP.CANNON_Y - 110));
+  }
+
+  var strikeAcc = 1;
   function updateStrikes(dt) {
     var K = PP.BOSS.tentacle;
     var g2 = PP.game;
+    strikeAcc += dt;
+    var redraw = strikeAcc >= 1 / 30;
+    if (redraw && strikes.length > 0) strikeAcc = 0;
     for (var i = strikes.length - 1; i >= 0; i--) {
       var s = strikes[i];
       s.timer -= dt;
@@ -916,20 +1006,8 @@
       var k = elapsed < s.rise ? (elapsed / s.rise)
             : (s.timer < 0.18 ? s.timer / 0.18 : 1);
       var topY = PP.H - (PP.H - (PP.CANNON_Y - 90)) * k;   // 画面下端 → 大砲の頭上まで
-      var g = s.sh.graphics;
-      g.clear();
-      var sway = Math.sin(t * 6 + s.seed) * 8;
-      // 太い触手柱(本体の触手と同配色)+先端のかぎ爪カーブ
-      g.setStrokeStyle(30, "round").beginStroke("#14261e")
-        .moveTo(s.x, PP.H + 20).quadraticCurveTo(s.x + sway, (PP.H + topY) / 2, s.x + sway * 0.5, topY + 30).endStroke();
-      g.setStrokeStyle(16, "round").beginStroke("#1e3830")
-        .moveTo(s.x + sway * 0.5, topY + 34).quadraticCurveTo(s.x + sway * 0.5 + 14, topY + 6, s.x + sway * 0.5 - 10, topY).endStroke();
-      // 吸盤(血赤)
-      g.beginFill("rgba(200,80,60,0.5)");
-      for (var d = 0; d < 4; d++) {
-        var dy = PP.H - (PP.H - topY - 40) * (d / 4);
-        g.drawCircle(s.x + sway * (d / 4), dy, 5 - d * 0.7);
-      }
+      // 作画だけ 30Hz に間引く。当たり判定・パリィ窓は毎フレーム full-dt のまま
+      if (redraw || !s.sh.cacheCanvas) redrawStrike(s, topY);
       // 命中判定は伸び切った瞬間に1回だけ。水柱+衝撃波で「海を割った」感を出す
       if (!s.hitDone && k >= 1) {
         s.hitDone = true;
@@ -984,6 +1062,8 @@
     g.setStrokeStyle(2).beginStroke("rgba(255,240,180,0.7)")
       .moveTo(x - gapW / 2, PP.CANNON_Y - 160).lineTo(x - gapW / 2, PP.CANNON_Y + 40)
       .moveTo(x + gapW / 2, PP.CANNON_Y - 160).lineTo(x + gapW / 2, PP.CANNON_Y + 40);
+    // 表示中は形が変わらないので焼き込み(攻撃1回につき1度だけ)
+    safePillar.cache(x - gapW / 2 - 2, PP.CANNON_Y - 162, gapW + 4, 206);
     safePillar.visible = true;
   }
 
@@ -1002,6 +1082,8 @@
       .drawRect(-70, -120, 140, 120);
     g.beginFill("rgba(235,250,255,0.9)");
     for (var i = 0; i < 8; i++) g.drawCircle(-60 + i * 17, -114 + Math.random() * 10, 4 + Math.random() * 4);
+    // 生成後は形が変わらない(移動と scaleY だけ)ので一度焼いて blit にする
+    sh.cache(-72, -126, 146, 134);
     sh.y = PP.CANNON_Y + 30;
     sh.x = tsuDir > 0 ? -80 : PP.W + 80;
     strikeCont.addChild(sh);
@@ -1021,8 +1103,8 @@
     wave.x += S.speed * spdMul() * wave.dir * dt;
     wave.sh.x = wave.x;
     wave.sh.scaleY = 1 + 0.06 * Math.sin(t * 14);
-    // しぶき
-    if (Math.random() < dt * 20) {
+    // しぶき(プールが混んでいる時は省く)
+    if (PP.fx.particleLoad() < 0.75 && Math.random() < dt * 20) {
       PP.fx.burst(wave.x + (Math.random() - 0.5) * 100, PP.CANNON_Y - 70,
                   "rgba(190,230,246,0.8)", 3, 0.9);
     }
@@ -1047,7 +1129,7 @@
     if (wave.carried) {
       PP.cannon.forceX(wave.x - wave.dir * 40);
       PP.game.bossFx.freeze = Math.max(PP.game.bossFx.freeze, 0.3);   // 流されている間は操作不能
-      if (Math.random() < dt * 24) {
+      if (PP.fx.particleLoad() < 0.75 && Math.random() < dt * 24) {
         PP.fx.burst(PP.cannon.x, PP.CANNON_Y - 30 - Math.random() * 40, "rgba(210,236,248,0.85)", 3, 1.0);
       }
     }
@@ -1120,7 +1202,9 @@
     var ang2 = Math.PI - ang;                              // 右→左へ掃く腕(鏡像)
     spawnBullet("randomize", sx, sy, Math.cos(ang2) * v, Math.sin(ang2) * v, 0, PP.BOSS.orb.r,
       { wave: { amp: 30, freq: 2.5, ph: 3 + k * 6 } });
-    PP.audio.beep(500 + k * 500, 0.04, "square", 0.05);
+    // 0.05秒刻み(20回/秒)で毎回鳴らすと Oscillator+Gain の生成が積み上がるので
+    // 3 tick に 1 回に間引く(上昇ジッパー音の聴感はほぼ同一)
+    if (sweepLeft % 3 === 0) PP.audio.beep(500 + k * 500, 0.04, "square", 0.05);
   }
 
   // 運命のルーレットの進行(被弾したときだけ回り始める)。回転中はチェーンの
@@ -1149,6 +1233,22 @@
   // 予兆のチャージ(telegraph 中だけ、本体の後ろで渦を巻く)。
   // 互い違いに回る2重の魔法陣アーク+中心へ吸い込まれる光の粒で
   // 「力を練り上げている」感を出す。収束しきる=発射の瞬間
+  // チャージリングも 30Hz 再描画+cache。非表示中は clear ではなく visible で消す
+  var chargeAcc = 1;
+  function drawChargeThrottled(dt) {
+    if (state !== "telegraph" || !curAttack) {
+      if (charge.visible) charge.visible = false;
+      return;
+    }
+    charge.visible = true;
+    chargeAcc += dt;
+    if (chargeAcc < 1 / 30) return;
+    chargeAcc = 0;
+    drawCharge();
+    if (charge.cacheCanvas) charge.updateCache();
+    else charge.cache(-178, -178, 356, 356);
+  }
+
   function drawCharge() {
     var g = charge.graphics;
     g.clear();
@@ -1267,7 +1367,7 @@
     stateT -= dt;
     body.y += 46 * dt;             // 海へ沈んでいく
     body.alpha = Math.max(0, stateT / 1.6);
-    if (Math.random() < dt * 14) { // 沈みながら弾ける
+    if (PP.fx.particleLoad() < 0.75 && Math.random() < dt * 14) { // 沈みながら弾ける
       PP.fx.burst(body.x + (Math.random() - 0.5) * 160,
                   body.y + (Math.random() - 0.5) * 120, "#39d8b8", 8, 1.4);
     }
@@ -1335,7 +1435,7 @@
     updateChips();
 
     if (state === "dead") return;
-    if (state === "dying") { updateDying(dt); drawTentacles(1); return; }
+    if (state === "dying") { updateDying(dt); drawTentaclesThrottled(1, dt); return; }
 
     // 移動: 画面上部をゆったり往復+上下の浮遊
     body.x = PP.W / 2 + Math.sin(moveT * B.moveSpeed) * B.moveAmp;
@@ -1355,8 +1455,8 @@
     if (hurtT > 0) { hurtT -= dt; hurt.alpha = Math.max(0, hurtT / 0.16) * 0.7; }
     else if (hurt.alpha !== 0) hurt.alpha = 0;
 
-    drawTentacles(0);
-    drawCharge();
+    drawTentaclesThrottled(0, dt);
+    drawChargeThrottled(dt);
 
     // 攻撃のステートマシン: idle(クールダウン)→ telegraph(予兆)→ 発射 → recover。
     // 怒りフェーズでは発射後に一定確率でコンボ追撃(短い予兆の ink/freeze)を仕込む

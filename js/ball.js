@@ -127,12 +127,28 @@
     if (!spinCanvas) bakeSpin();
 
     var cont = new createjs.Container();
-    cont.addChild(sprite(baseCanvas[colorIndex]));   // 下地+リム+フレネル(焼き込み)
+    var base = sprite(baseCanvas[colorIndex]);       // 下地+リム+フレネル(焼き込み)
+    cont.addChild(base);
     var spin = sprite(spinCanvas);                   // 回転する塗装の合わせ目
     cont.addChild(spin);
-    cont.addChild(sprite(shadeCanvas[colorIndex]));  // 陰影・スペキュラ・輪郭
+    var shade = sprite(shadeCanvas[colorIndex]);     // 陰影・スペキュラ・輪郭
+    cont.addChild(shade);
     cont.spin = spin;
+    // 色替え(ボスのルーレット)用: 色依存の 2 枚だけ参照を持たせて
+    // recolorView で canvas を差し替えられるようにする(view の作り直し不要)
+    cont.baseBmp = base;
+    cont.shadeBmp = shade;
     return cont;
+  }
+
+  // view を作り直さずに色だけ差し替える(共有 canvas の貼り替えのみ)。
+  // makeView 製でない view(宝玉など)には効かないので false を返す
+  function recolorView(view, colorIndex) {
+    if (!view || !view.baseBmp) return false;
+    if (baseCanvas[colorIndex] === undefined) bakeColor(colorIndex);
+    view.baseBmp.image = baseCanvas[colorIndex];
+    view.shadeBmp.image = shadeCanvas[colorIndex];
+    return true;
   }
 
   // 爆弾(キャッチして装填し、自分で撃つ)。鋳鉄の球+導火線の火花
@@ -380,6 +396,7 @@
 
   PP.ball = {
     makeView: makeView,
+    recolorView: recolorView,
     makeBombView: makeBombView,
     makeMissileView: makeMissileView,
     makeTreasureView: makeTreasureView,

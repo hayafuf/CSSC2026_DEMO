@@ -470,6 +470,7 @@
     PP.bg.update(dt);          // 動く背景(波・光条・霧・きらめき・遠雷)
     PP.courseView.updateRailFlow(dt);   // 溝を流れる光(作画は course-view.js)
     PP.fx.updateShake(dt);
+    PP.fx.updateParticles(dt);   // プール式パーティクルの前進(fx.js)
     PP.cannon.updateAim();
 
     renderChains();
