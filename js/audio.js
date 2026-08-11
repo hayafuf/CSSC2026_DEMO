@@ -217,6 +217,11 @@
   // 追加SE: 墨の着弾(ボスの墨獄・パワーダウン🦑)/ 骸骨玉の弾幕発射
   var seInk = sfx("SE/ink.mp3", 0.7);
   var seDarkMagic = sfx("SE/dark_magic.mp3", 0.65);
+  // 追加SE: ボスの攻撃(運命のルーレット=水色の掃射 / 海淵の大触腕=触手突き上げ /
+  //          惑乱の逆潮=ピンクの同心円リング展開)
+  var seBossSweep = sfx("SE/ボス_水色の攻撃.mp3", 0.7);
+  var seBossTentacle = sfx("SE/ボス_触手攻撃.mp3", 0.75);
+  var seBossAddle = sfx("SE/ボス_魅惑の攻撃_ピンク色の同心円攻撃.mp3", 0.7);
   // カラーボム発動: 選ばれた色が盤面から一掃されるときの炸裂音
   // ================================================================
   // TODO【課題4】カラーボムで再生するSEファイルを指定してみよう
@@ -295,6 +300,7 @@
   var bgmNormal = track("BGM/Game_music.mp3");
   var bgmDanger = track("BGM/Denger.mp3");
   var bgmOver = track("BGM/gameover_BGM.mp3", 0.5);
+  var bgmBoss = track("BGM/BOSS_BGM.mp3");    // ボス戦(クラーケンの海域)専用曲
   // 難易度ごとの通常曲(config.js の PP.DIFFICULTY の bgm)を実体化して使い回す。
   // 既定曲は起動時に読み込み済み。学生が追加した曲は最初に鳴らすときに読み込む
   var normalBySrc = { "BGM/Game_music.mp3": bgmNormal };
@@ -508,7 +514,9 @@
     crisis(0);
     if (!unlocked) return;
     seSuck.stop();
-    bgmNormal = normalTrackFor(PP.diff().bgm);   // 選択中の難易度の曲に差し替える
+    // ボス戦は専用曲。それ以外は選択中の難易度の曲に差し替える。
+    // bgmNormal を差し替えておけば、危機(setDanger)からの復帰も同じ曲へ戻る
+    bgmNormal = (PP.game && PP.game.bossMode) ? bgmBoss : normalTrackFor(PP.diff().bgm);
     // すでに通常曲が流れているなら止めない(レベル間で曲を切らない)
     if (current === bgmNormal && !bgmNormal.paused) return;
     current = bgmNormal;
@@ -615,6 +623,9 @@
     tsunami: seTsunami,           // 大津波の発射
     inkSplat: seInk,              // 墨の着弾(墨獄・パワーダウン🦑)
     darkMagic: seDarkMagic,       // 骸骨玉の弾幕発射(暗黒魔法)
+    bossSweep: seBossSweep,       // 運命のルーレット(水色の掃射)の発動
+    bossTentacle: seBossTentacle, // 海淵の大触腕(触手突き上げ)の発動
+    bossAddle: seBossAddle,       // 惑乱の逆潮(ピンクの同心円リング)の展開
     // ---- 危機(crisis.js が毎フレーム呼ぶ) ----
     crisis: crisis,            // 0〜1 の深さで警報ループの音量/ピッチを決める
     swallowed: swallowed,      // 玉が1個ぶん樽に落ちた

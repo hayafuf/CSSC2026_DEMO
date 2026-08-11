@@ -504,6 +504,9 @@
           PP.fx.ring(b.x, b.y, ATTACKS[b.type].color, 12, 110, 450);
           PP.fx.burst(b.x, b.y, ATTACKS[b.type].color, 14, 1.6);
           PP.audio.beep(340, 0.12, "square", 0.1);
+          // 同心円リング展開の専用SE(約3秒)。0.45秒間隔の多段リングで
+          // 重なりすぎないよう、最初の展開の1回だけ鳴らす
+          if (!b.hover.seDone) { b.hover.seDone = true; PP.audio.bossAddle(); }
           if (b.hover.rings.length > 0) {
             b.hover.t = 0.45;          // 次のリングまでの溜め
           } else {
@@ -926,12 +929,14 @@
       sweepTotal = 16 + (phase2 ? 6 : 0);
       sweepLeft = sweepTotal;
       sweepT = 0;
+      PP.audio.bossSweep();   // 水色の掃射の専用SE
     } else if (key === "tentacle") {
       // ⚠地点へ画面下から触手が突き上げる(範囲内ならランダムなデバフ)
       for (var z = 0; z < pendingZones.length; z++) spawnStrike(pendingZones[z]);
       pendingZones.length = 0;
       PP.fx.shake(10, 0.25);
       PP.audio.beep(90, 0.4, "sawtooth", 0.14);
+      PP.audio.bossTentacle();   // 触手突き上げの専用SE
     } else if (key === "tsunami") {
       PP.audio.tsunami();   // 水壁が走り出す轟音
       startWave();
