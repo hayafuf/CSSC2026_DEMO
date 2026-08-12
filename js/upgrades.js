@@ -59,6 +59,7 @@
     active: false,   // 救済(2個消し・ドロップブースト)発動中か
     wild: false,     // 万能玉が装填されているか
     droughtT: 0,     // ペア枯渇が続いている秒数
+    recoverT: 0,     // 発動中、回復(枯渇でない)が続いている秒数(解除のデバウンス)
     scanT: 0,        // 次のペア走査までの秒数
     rearmT: 0,       // 万能玉の再武装までの秒数
     grace: 0,        // 解除後の猶予秒(飛行中の弾・割り込み待ちの2個消しを守る)
@@ -480,9 +481,17 @@
     // なだれ込み中・危機レーン無し・先頭グループにペアあり → 枯渇ではない
     if (!g.rolloutDone || !rescue.droughted) {
       rescue.droughtT = 0;
-      if (rescue.active) deactivateRescue();
+      // 発動中でも即時には解除しない: 反動で先頭が危機ラインを行き来したり、
+      // 万能玉の着弾で一瞬だけペアが生まれたりするたびに解除⇄再発動が起きると、
+      // 装填玉が虹⇄通常色で明滅してしまう。「回復が recover 秒続いたら解除」
+      // (発動側の drought と対称のデバウンス)に均す
+      if (rescue.active) {
+        rescue.recoverT += dt;
+        if (rescue.recoverT >= RS.recover) deactivateRescue();
+      }
       return;
     }
+    rescue.recoverT = 0;
 
     rescue.droughtT += dt;
     if (!rescue.active && rescue.droughtT >= RS.drought) activateRescue();
@@ -505,6 +514,7 @@
   function activateRescue() {
     rescue.active = true;
     rescue.pulseT = 0;
+    rescue.recoverT = 0;
     armWild();
     PP.fx.floatText("🌈 海神の加護! 万能玉!", PP.W / 2, 96, "#8ef0d0", 24);
     PP.fx.floatText("⚔ 加護の間は2個で消える!", PP.W / 2, 128, "#8ef0d0", 17);
@@ -551,6 +561,7 @@
     rescue.active = false;
     rescue.wild = false;
     rescue.droughtT = 0;
+    rescue.recoverT = 0;
     rescue.scanT = 0;
     rescue.rearmT = 0;
     rescue.grace = 0;

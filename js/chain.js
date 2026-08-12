@@ -42,12 +42,12 @@
   // 毎フレーム全玉の座標を引くので、座標オブジェクトの確保を無くす(cannon.js と同じ手)。
   var _pos = { x: 0, y: 0, tx: 0, ty: 0 };
 
-  // 次の波までの間隔(秒)。レベルが上がるほど短くなる。
-  // ボス戦は「玉列が途切れず流れ続ける」演出なので、専用の短い間隔を使う
+  // 次の波までの保険タイマー(秒)。通常コースの本来のトリガは「最後尾の位置」
+  // (updateWaveTimer 参照)で、時間はあくまで手詰まり防止の上限。
+  // ボス戦は「玉列が途切れず流れ続ける」演出なので、専用の短い間隔で時間駆動する
   function waveInterval() {
     if (PP.game.bossMode) return PP.BOSS.waveInterval;
-    var w = PP.WAVE_INTERVAL;
-    return Math.max(w.min, w.base - (PP.game.level - 1) * w.perLevel);
+    return PP.WAVE_NEXT.maxWait;
   }
 
   // 新しい波の補給を開始する(レーン単位)
@@ -80,7 +80,11 @@
     PP.hud.update();
   }
 
-  // 波のタイマー。時間が来たら(かつ前の波が洞窟口を空けていたら)次の波へ。
+  // 次の波のトリガ。前の波が洞窟口を空けていることが前提で、
+  //   ・通常コース: 最後尾(前の波の締めの宝玉)が樽へある程度近づいたら次の波
+  //     (PP.WAVE_NEXT.progress)。時間(waveTimer)は、最後尾が宝を失って
+  //     停止したまま放置された場合でも補給が途絶えないための保険にだけ使う
+  //   ・ボス戦: 従来どおり時間駆動(短い間隔で絶え間なく補給する演出)
   // 掃討フェーズ(g.finishing=全レーン共通)に入ったら補給は打ち切る。ただし
   // 供給中だった波の残り(lane.pending と末尾の宝玉)は最後まで出し切る。
   function updateWaveTimer(lane, dt) {
@@ -91,7 +95,13 @@
     var balls = lane.balls;
     var clear = balls.length === 0 || balls[balls.length - 1].d >= D;
     if (!clear) return;
-    if (lane.waveTimer <= 0 || balls.length === 0) startWave(lane);
+    if (balls.length === 0) { startWave(lane); return; }
+    if (g.bossMode) {
+      if (lane.waveTimer <= 0) startWave(lane);
+      return;
+    }
+    if (balls[balls.length - 1].d >= lane.rail.holeD * PP.WAVE_NEXT.progress ||
+        lane.waveTimer <= 0) startWave(lane);
   }
 
   // 補給口から玉を追加。波の補給が終わったら末尾に宝玉を付ける
