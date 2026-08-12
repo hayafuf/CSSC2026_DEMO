@@ -322,6 +322,57 @@
     return cont;
   }
 
+  // 【強化】万能玉(海神の加護)。骨白の球+虹色リング+✨の明滅。
+  // どの色に当てても「当てた玉の色」として挿入される(色継承は chain.js insertShot)。
+  // cont.spin に虹リングを載せて転がりを見せ、cont.spark は cannon.js の既存の
+  // Tween 後始末(view.spark を removeTweens)にそのまま乗せる。
+  function makeWildView() {
+    var cont = new createjs.Container();
+
+    // 外周のグロー(teal。救済の合図と同じ色言語)
+    var glow = new createjs.Shape();
+    glow.graphics
+      .beginRadialGradientFill(["rgba(142,240,208,0.5)", "rgba(142,240,208,0)"], [0.4, 1],
+        0, 0, 4, 0, 0, R + 12)
+      .drawCircle(0, 0, R + 12);
+    cont.addChild(glow);
+
+    // 本体(骨白の球)
+    var body = new createjs.Shape();
+    body.graphics
+      .beginRadialGradientFill(["#ffffff", "#ece6d6", "#8a8474"], [0, 0.6, 1],
+        -R * 0.32, -R * 0.34, R * 0.06, 0, 0, R)
+      .drawCircle(0, 0, R);
+    body.graphics.setStrokeStyle(1.5).beginStroke("rgba(0,0,0,0.5)").drawCircle(0, 0, R - 0.7);
+    body.cache(-R - 2, -R - 2, (R + 2) * 2, (R + 2) * 2);
+    cont.addChild(body);
+
+    // 虹色リング(6色の弧)。回転レイヤーに載せて転がりを見せる
+    var ring = new createjs.Shape();
+    var cols = ["#ff5d5d", "#ffb84a", "#ffe95a", "#68e07c", "#5aa8ff", "#b06cff"];
+    for (var i = 0; i < cols.length; i++) {
+      ring.graphics.setStrokeStyle(4.5).beginStroke(cols[i])
+        .arc(0, 0, R - 5, i * Math.PI / 3, (i + 1) * Math.PI / 3).endStroke();
+    }
+    ring.cache(-R - 2, -R - 2, (R + 2) * 2, (R + 2) * 2);
+    cont.addChild(ring);
+
+    // ハイライト(球感)
+    var shine = new createjs.Shape();
+    shine.graphics.beginFill("rgba(255,255,255,0.75)")
+      .drawEllipse(-R * 0.6, -R * 0.66, R * 0.3, R * 0.2);
+    cont.addChild(shine);
+
+    // ✨ の明滅(glow ごと脈動させる)
+    createjs.Tween.get(glow, { loop: true })
+      .to({ alpha: 0.35, scaleX: 0.85, scaleY: 0.85 }, 300, createjs.Ease.quadInOut)
+      .to({ alpha: 1, scaleX: 1.1, scaleY: 1.1 }, 300, createjs.Ease.quadInOut);
+
+    cont.spin = ring;
+    cont.spark = glow;   // cannon.js の後始末(removeTweens(view.spark))に相乗り
+    return cont;
+  }
+
   // 装填用: チェーンに残っている色から選ぶ。基本は「盤面に実在する色」を
   // 色ごと重み1で一様に引く(本家Zuma準拠。手詰まりは原理的に起きない)。
   // そのうえで、先頭(樽に一番近い玉 = 最初の非宝玉)の色だけ PICK_FRONT_GAIN 倍に
@@ -400,6 +451,7 @@
     makeBombView: makeBombView,
     makeMissileView: makeMissileView,
     makeTreasureView: makeTreasureView,
+    makeWildView: makeWildView,
     makeSkullOverlay: makeSkullOverlay,
     pickColor: pickColor,
     spawnColor: spawnColor

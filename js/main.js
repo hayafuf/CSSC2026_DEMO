@@ -127,6 +127,7 @@
     g.specialLoaded = false;
     g.finishing = false;
     PP.powerups.clear();
+    PP.upgrades.onLevelStart();   // 【強化】自動系タイマー・救済を仕切り直す(段数は維持)
     // 骸骨玉の弾・墨と状態異常を仕切り直す(リトライ・再出航もここを通る)。
     // ボス戦は boss.setActive → reset → clearStatusFx が別途ゼロ化するが、
     // 通常コースはここが唯一のリセット地点になる
@@ -404,6 +405,7 @@
       PP.chain.update(dt);         // 全レーンのチェーンを更新
       PP.cannon.updateShots(dt);   // 命中時にその場でマッチ判定される
       PP.powerups.update(dt);
+      PP.upgrades.update(dt);      // 【強化】自動砲塔・自動装填・手詰まり救済
       // 骸骨玉の弾幕(通常コースのみ。ボス戦は boss.js の弾幕があるので出さない)
       if (!g.bossMode && PP.skull) PP.skull.update(dt);
       PP.hud.updateEffects();
@@ -461,6 +463,19 @@
         PP.crisis.update(dt);
         PP.cannon.syncColors();
       }
+      // 【強化】💎 キャッチで積まれた選択の権利をここで消化する(遅延オープン)。
+      // collect の瞬間に開かないのは、同フレーム直後の樽あふれ判定が state を
+      // retrying/draining へ上書きし得るため。「まだ playing なら開く」が安全
+      // (boss.consumeVictory と同じパターン)。リトライと重なった場合は権利が
+      // 保持され、明転後の最初の playing フレームでここが開く。
+      if (g.state === "playing" && PP.upgrades.pendingChoice()) {
+        PP.upgrades.openChoice();
+      }
+    } else if (g.state === "choosing") {
+      // 【強化】宝玉の力の3択中。ゲームプレイ更新を一切呼ばない=盤面・弾・
+      // アイテム・タイマーが全部その場で凍る(retrying と同じ考え方)。
+      // 背景・パーティクル・カードの Tween は下の共通処理で動き続ける
+      PP.upgrades.updateChoice(dt);
     } else if (g.state === "retrying") {
       updateRetry(dt);   // リトライの画面切り替え(【課題5-3】)。終わると playing に戻る
     } else if (g.state === "draining" || g.state === "over") {
@@ -588,6 +603,7 @@
     g.level = 1;
     if (PP.editor && PP.editor.active) PP.editor.close();
     if (PP.hud && PP.hud.hideOverlay) PP.hud.hideOverlay();
+    PP.upgrades.closeChoice();   // 【強化】3択の途中で試遊が始まったときの保険
     startLevel();
   };
   // レールと洞窟・樽だけを組み直す(玉は並べ直さない)。エディタのプレビュー用。
@@ -642,6 +658,13 @@
       PP.hud.setDifficulty(diffHit);
       return;
     }
+    // 【強化】宝玉の力の3択中はカードの選択だけを受け付ける。
+    // カード外のクリックでも return して、再開直後の誤発射を防ぐ
+    if (g.state === "choosing") {
+      var upId = PP.upgrades.hitChoice(e.stageX, e.stageY);
+      if (upId) PP.upgrades.choose(upId);
+      return;
+    }
     if (g.state === "title") {
       PP.hud.hideOverlay();
       startLevel();
@@ -681,6 +704,7 @@
       g.score = 0;
       g.coins = 0;
       g.lives = PP.LIFE.startLives;   // 新しいランは所持ライフから始まる【課題5】
+      PP.upgrades.onRunReset();       // 【強化】宝玉の力もランと一緒に畳む
       PP.hud.hideOverlay();
       startLevel();
     } else if (g.state === "over") {
@@ -688,6 +712,7 @@
       g.score = 0;
       g.coins = 0;
       g.lives = PP.LIFE.startLives;   // 新しいランは所持ライフから始まる【課題5】
+      PP.upgrades.onRunReset();       // 【強化】宝玉の力もランと一緒に畳む
       PP.hud.hideOverlay();
       startLevel();
     }
@@ -882,6 +907,9 @@
       } else if (e.code === "KeyM") {
         PP.fx.floatText(PP.audio.toggleMute() ? "🔇 消音" : "🔊 音あり",
           PP.W / 2, 88, "#f0e6c8", 22);
+      } else if (/^Digit[1-3]$/.test(e.code) && PP.game.state === "choosing") {
+        // 【強化】宝玉の力の3択は 1〜3 キーでも選べる
+        PP.upgrades.chooseIndex(parseInt(e.code.charAt(5), 10) - 1);
       } else if (/^Digit[1-4]$/.test(e.code)) {
         // 1〜4 キーでも難易度(【課題1】)を選べる。難易度ボタンが出ている画面
         // (タイトル/ゲームオーバー/全制覇後)だけ有効。ステージの合間は変えられない

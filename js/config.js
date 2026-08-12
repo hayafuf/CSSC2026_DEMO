@@ -53,8 +53,12 @@
   PP.DIFFICULTY_ORDER = ["easy", "normal", "hard", "hardcore"];
   // 現在の難易度プリセットを引くヘルパ(反映ロジック側が使う。ここは触らない)
   PP.diff = function () { return PP.DIFFICULTY[PP.game.difficulty] || PP.DIFFICULTY.normal; };
-  // 樽の許容個数(難易度補正込み・最低1)
-  PP.barrelCap = function () { return Math.max(1, PP.BARREL_CAPACITY + PP.diff().barrelBonus); };
+  // 樽の許容個数(難易度補正込み・最低1)。
+  // 【強化】「深い樽底」(barrelcap)の段数ぶん上乗せされる(upgrades.js)
+  PP.barrelCap = function () {
+    var up = (PP.game && PP.game.upgrades && PP.game.upgrades.barrelcap) || 0;
+    return Math.max(1, PP.BARREL_CAPACITY + PP.diff().barrelBonus + up);
+  };
 
   // ---------- 【課題5】コインとライフ ----------
   // 通常ドロップの宝はコイン(🪙)として落ちる。大砲でキャッチして集めると
@@ -67,6 +71,12 @@
     startLives: 2,     // 出航時に持っているライフ(ここからコインで「回復」する)
     coinsPerLife: 5,   // 何枚集めたらライフ+1になるか(TODO【課題5-1】で使う)
     maxLives: 3        // ライフの上限
+  };
+  // ライフ回復に必要なコイン枚数(【強化】「換金術」coin の段数ぶん減る・下限2)。
+  // 消費側(powerups.js / hud.js)は PP.LIFE.coinsPerLife ではなくこちらを読む
+  PP.coinsPerLife = function () {
+    var up = (PP.game && PP.game.upgrades && PP.game.upgrades.coin) || 0;
+    return Math.max(2, PP.LIFE.coinsPerLife - up);
   };
 
   // ---------- タッチ端末の判定 ----------
@@ -324,7 +334,9 @@
     ink:       { telegraph: 1.0, dur: 7.0, lobs: 5, grav: 560, vy0: -40,
                  rMin: 170, rMax: 280 },     // 漆黒の墨獄: 弧を描く墨玉のカーテン。着弾点に墨だまり
     addle:     { telegraph: 1.0, dur: 6.0, speed: 430 },              // 惑乱の逆潮: ホバリング多段リング。被弾で左右反転
-    freeze:    { telegraph: 1.2, dur: 3.5, fan: 7, spread: 130, speed: 380 }, // 深淵の錨鎖: 逆回転する同心リング。被弾で操作不能
+    freeze:    { telegraph: 1.2, dur: 2.0, fan: 7, spread: 130, speed: 380 }, // 深淵の錨鎖: 逆回転する同心リング。被弾で操作不能
+                 // dur: 完全な操作不能は体感が長い(骸骨玉の freezeDur=1.3 と同思想)。
+                 // 3.5 は「危機中に食らうとほぼ死」だったので 2.0 へ短縮
     shotSlow:  { telegraph: 1.0, dur: 6.5, factor: 0.15, speed: 250, r: 26 }, // 時間の滞留: 大きく遅い弾。被弾で弾速低下
     // 運命のルーレット: 被弾でチェーン全体がルーレット回転 → 補給ルール準拠で色確定
     randomize: { telegraph: 0.9, spin: 1.1, step: 0.12, speed: 360 },
@@ -686,6 +698,69 @@
     { id: "spyglass",  name: "望遠鏡",       icon: "🔭", dur: 10, w: 0.8 }   // 長い照準ガイド
   ];
 
+  // ---------- 【強化】宝玉の力(ローグライト強化)の設計表 ----------
+  // 波を全消しして解放された 💎 をキャッチすると、この中から3枚のカードが出て
+  // 1つ選べる。効果は「1回の出航(ラン)」の間ずっと有効で、重ね取りで育つ。
+  // ゲームオーバー / 全海域制覇でリセット(仕組みは js/upgrades.js)。
+  //   max : 重ね取りの上限段数
+  //   w   : カードに出る重み(強いものほど小さくして「引けたら嬉しい」に寄せる)
+  //   kind: 現在値の計算式の種類(upgrades.js の val が解釈する)
+  //     "interval" … base × decay^(段数-1)。floor で下限(自動系の発動間隔・秒)
+  //     "mult"     … 1 + steps[] の累積加算(逓減は steps の減り方で表現する倍率)
+  //     "add"      … 段数そのものを加算量に使う
+  PP.UPGRADES = [
+    { id: "autogun",    name: "自動砲塔",     icon: "🔫", max: 6, w: 0.9,
+      kind: "interval", base: 8.0, decay: 0.8, floor: 2.5,
+      desc: "数秒ごとに一番危ない\nレーンの先頭を撃ち抜く" },
+    { id: "autoload",   name: "自動装填機",   icon: "⚙️", max: 5, w: 0.7,
+      kind: "interval", base: 45, decay: 0.85, floor: 20,
+      desc: "数十秒ごとに爆弾か\nミサイルがスロットへ届く" },
+    { id: "droprate",   name: "戦利品の嗅覚", icon: "🧲", max: 4, w: 1.0,
+      kind: "mult", steps: [0.30, 0.30, 0.25, 0.20],
+      desc: "アイテムのドロップ率が\n上がる" },
+    { id: "cluster",    name: "同色の潮流",   icon: "🔮", max: 4, w: 1.0,
+      kind: "add",
+      desc: "補給される玉に\n同色の塊が増える" },
+    { id: "bombw",      name: "火薬の目利き", icon: "💣", max: 3, w: 0.8,
+      kind: "mult", steps: [0.60, 0.60, 0.60],
+      desc: "ドロップ率が少し上がり\n爆弾が出やすくなる" },
+    { id: "missw",      name: "火筒の目利き", icon: "🚀", max: 3, w: 0.8,
+      kind: "mult", steps: [0.60, 0.60, 0.60],
+      desc: "ドロップ率が少し上がり\nミサイルが出やすくなる" },
+    { id: "barrelcap",  name: "深い樽底",     icon: "🛢️", max: 3, w: 0.6,
+      kind: "add",
+      desc: "樽が呑み込める玉の数が\n1個増える" },
+    { id: "recoil",     name: "砲撃の重み",   icon: "💥", max: 3, w: 0.9,
+      kind: "mult", steps: [0.20, 0.15, 0.10],
+      desc: "消したときの押し戻しが\n強くなる" },
+    { id: "combo",      name: "コンボの余韻", icon: "🔥", max: 3, w: 0.9,
+      kind: "mult", steps: [0.25, 0.19, 0.12],
+      desc: "コンボの継続時間が\n延びる" },
+    { id: "spyglass",   name: "常備望遠鏡",   icon: "🔭", max: 1, w: 0.6,
+      kind: "add",
+      desc: "照準ガイドが常に\n着弾点まで伸びる" },
+    { id: "coin",       name: "換金術",       icon: "🪙", max: 3, w: 0.8,
+      kind: "add",
+      desc: "ライフ回復に必要な\nコインが1枚減る" },
+    { id: "bombradius", name: "大口径火薬",   icon: "🧨", max: 3, w: 0.7,
+      kind: "mult", steps: [0.15, 0.13, 0.10],
+      desc: "爆弾の爆風が\n広がる" }
+  ];
+
+  // ---------- 【強化】手詰まり救済(海神の加護)のしきい値 ----------
+  // 「射程内(狙える玉の中)に同色の隣接ペアが1つも無い」状態が続くと、装填玉が
+  // 万能玉(🌈 どこに当てても同色扱い)になり、撃った弾は2個で消えるようになる。
+  // 挿入は列を樽側へ +1D 押すが、2個消し(-2D)+反動で必ず取り返せる=腕で脱出できる。
+  PP.RESCUE = {
+    drought: 5.0,        // ペア枯渇が何秒続いたら発動するか(平常時)
+    droughtCrisis: 1.5,  // 危機中(樽に呑まれ始め)の短縮しきい値
+    crisisLv: 1.0,       // 「危機中」とみなす PP.crisis.level() の値(1.0=樽に入り始め)
+    dropBoost: 1.5,      // 救済中のドロップ率倍率(立て直しの道具を厚く配る)
+    rescuePoolMult: 2.0, // 救済中に ⚓(錨)と 💣(爆弾)の出現重みへ掛ける倍率
+    rearm: 4.0,          // 万能玉を消費してもまだ枯渇なら、何秒で再武装するか
+    scanInterval: 0.4    // ペア枯渇の走査間隔(秒)。毎フレームは走査しない
+  };
+
   // ---------- 落下アイテム(宝・パワーアップ) ----------
   PP.ITEMS = {
     // ドロップが多いと、盤面を消すのがプレイヤーの腕ではなく道具の仕事になるx 。
@@ -719,6 +794,7 @@
     difficulty: "normal", // 選択中の難易度(PP.DIFFICULTY のキー。タイトル画面で選ぶ)
     coins: 0,             // 【課題5】拾ったコインの枚数
     lives: PP.LIFE.startLives, // 【課題5】残りライフ(出航時から持っていて、コインで回復する)
+    upgrades: {},         // 【強化】ラン単位の強化段数 {autogun:2, ...}。over/gameclear で空へ(upgrades.js)
     builtCourse: null,    // 現在レールを組んであるコース(同一なら組み直さない)
     speed: PP.speedProfile(null),  // 現在のコースの速度プロファイル(buildCourse で入れ替わる)
     customCourse: null,   // エディタ/共有コースの試遊中はここに入る(null=通常進行)

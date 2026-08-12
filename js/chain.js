@@ -513,6 +513,11 @@
     var ratio = isCombo ? PP.RECOIL_COMBO_RATIO : PP.RECOIL_RATIO;
     var maxDist = (isCombo ? PP.RECOIL_COMBO_DIST : PP.RECOIL_MAX) * mult;
     var damp = isCombo ? PP.RECOIL_COMBO_DAMP : PP.RECOIL_DAMP;
+    // 【強化】「砲撃の重み」: 押し戻しの強さと最大距離が伸びる(damp は据え置き
+    // = 押す時間ではなく距離が伸びる。RECOIL_FLOOR が洞窟への押し込み過ぎを防ぐ)
+    var rMul = PP.upgrades.val("recoil");
+    ratio *= rMul;
+    maxDist *= rMul;
     var rv = v * ratio * mult;
 
     // 同フレームの複数衝突や、連鎖で引き継いだ反動との比較(まだ押せる距離で比べる)。
@@ -649,7 +654,11 @@
            balls[i - 1].d - balls[i].d <= D + 1) i--;
     while (j + 1 < balls.length && balls[j + 1].color === c &&
            balls[j].d - balls[j + 1].d <= D + 1) j++;
-    if (j - i + 1 < 3) return false;
+    // 【強化】救済(海神の加護)中は、撃った弾の割り込み(chained=false)に限り
+    // 2個で消える。chained=false はこの経路(updatePendingMatches)だけが通るので、
+    // 磁力合流・連鎖・爆発の巻き込みで盤面が勝手に2個ずつ溶ける事故は起きない
+    var need = (!chained && PP.upgrades.rescueActive()) ? 2 : 3;
+    if (j - i + 1 < need) return false;
     popRun(lane, i, j, chained);
     return true;
   }
@@ -660,7 +669,8 @@
     var balls = lane.balls;
     var n = j - i + 1;
     g.combo = chained ? (g.comboTimer > 0 ? g.combo + 1 : 1) : 1;
-    g.comboTimer = PP.COMBO_WINDOW;
+    // 【強化】「コンボの余韻」で窓が延びる(未取得なら val は 1 = 従来どおり)
+    g.comboTimer = PP.COMBO_WINDOW * PP.upgrades.val("combo");
     var points = n * 10 * g.combo;
     g.score += points;
 
@@ -718,6 +728,19 @@
     return removed.length;
   }
 
+  // 【強化】自動砲塔用: balls[index] の1個だけを破壊する。
+  // popRun を使わないのは、あちらがコンボを 1 に上書きしてプレイヤーの継続コンボを
+  // 踏み潰し、maybeDrop まで回してしまうため。destroyRange 経路なので骸骨玉の
+  // 撃破報酬はそのまま通り、joinAt により前後が同色接触なら連鎖(chained)へ発展する
+  // = 自動破壊がプレイヤーのお膳立てになる。スコア加算は呼び出し側(upgrades.js)。
+  function destroySingle(lane, index) {
+    if (index < 0 || index >= lane.balls.length) return 0;
+    if (lane.balls[index].treasure) return 0;   // 宝玉は壊さない(二重の保険)
+    var n = destroyRange(lane, index, index);
+    joinAt(lane, index);
+    return n;
+  }
+
   // 消えた跡 index の前後がすでに接触していたら、その場で連鎖クリア(コンボを積む)。
   function joinAt(lane, index) {
     var balls = lane.balls;
@@ -761,7 +784,10 @@
   // 判定は画面上の実距離(レール距離ではない)。宝玉は巻き込まない。
   function explodeAt(x, y) {
     var g = PP.game;
-    var R2 = PP.BOMB_RADIUS * PP.BOMB_RADIUS;
+    // 【強化】「大口径火薬」で爆風が広がる。演出も RAD 基準にして、
+    // 見た目の火球と実際に消える範囲が一致し続けるようにする
+    var RAD = PP.BOMB_RADIUS * PP.upgrades.val("bombradius");
+    var R2 = RAD * RAD;
     var total = 0;
     g.eachLane(function (lane) {
       var balls = lane.balls, runs = [];
@@ -781,13 +807,13 @@
     // 大爆発の演出(空振りでも起爆はしている)。
     // 白熱の芯 → 赤い火球 → 三重の衝撃波リング、と内から外へ重ねて
     // 「火薬が破裂した」迫力を出す。色は火球らしい赤系でまとめる。
-    PP.fx.flash(x, y, "rgba(255,255,240,1)", PP.BOMB_RADIUS * 0.5);   // 白熱の芯
-    PP.fx.flash(x, y, "rgba(255,90,40,0.95)", PP.BOMB_RADIUS * 1.3); // 赤い火球
-    PP.fx.ring(x, y, "#ffb08a", 10, PP.BOMB_RADIUS * 1.7, 560);
-    PP.fx.ring(x, y, "#ff5a3c", 14, PP.BOMB_RADIUS * 1.25, 420);
-    PP.fx.ring(x, y, "#e01810", 8, PP.BOMB_RADIUS * 0.8, 300);
+    PP.fx.flash(x, y, "rgba(255,255,240,1)", RAD * 0.5);   // 白熱の芯
+    PP.fx.flash(x, y, "rgba(255,90,40,0.95)", RAD * 1.3); // 赤い火球
+    PP.fx.ring(x, y, "#ffb08a", 10, RAD * 1.7, 560);
+    PP.fx.ring(x, y, "#ff5a3c", 14, RAD * 1.25, 420);
+    PP.fx.ring(x, y, "#e01810", 8, RAD * 0.8, 300);
     // 火の粉の飛距離は爆風半径に連動させる(半径 = 玉2個ぶんのとき spread 1)
-    var spread = PP.BOMB_RADIUS / (PP.D * 2);
+    var spread = RAD / (PP.D * 2);
     PP.fx.burst(x, y, "#ff6a4a", 55, spread);
     PP.fx.burst(x, y, "#e01810", 40, spread);
     PP.fx.burst(x, y, "#ffd27a", 24, spread);   // 火の粉の混ざり
@@ -849,6 +875,16 @@
   function insertShot(lane, sh, hitIndex) {
     var balls = lane.balls;
     var hit = balls[hitIndex];
+    // 【強化】万能玉(海神の加護): 当たった玉の色を継承して挿入する。
+    // マッチ判定・磁力の色比較(===)には一切手を入れずに
+    // 「どこに撃っても必ずペアが成立する」を実現するカメレオン方式。
+    // 宝玉は命中対象外(cannon.js)なので継承元が null になることはない
+    if (sh.wild && hit.color !== null && hit.color !== undefined) {
+      sh.color = hit.color;
+      var wq = lane.rail.posAt(hit.d);
+      PP.fx.ring(wq.x, wq.y, "#8ef0d0", 8, 60, 260);
+      PP.fx.burst(wq.x, wq.y, "#8ef0d0", 8);
+    }
     var p = lane.rail.posAt(hit.d);
     // レール接線との内積で、樽側(前)か補給側(後)かを決定
     var dot = (sh.x - p.x) * p.tx + (sh.y - p.y) * p.ty;
@@ -934,6 +970,7 @@
     // 公開系はレーンを受け取り、そのまま内部処理へ渡す
     resolveMatchAt: resolveMatchAt,
     popRun: popRun,
+    destroySingle: destroySingle,
     explodeAt: explodeAt,
     pierceSegment: pierceSegment,
     insertShot: insertShot,

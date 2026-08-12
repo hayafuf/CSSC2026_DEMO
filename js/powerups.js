@@ -36,6 +36,8 @@
     if (!g.bossMode && downCd <= 0 && Math.random() < PP.ITEMS.downChance) dropDown(x, y);
     var chance = PP.ITEMS.dropChance + Math.min(g.combo, 5) * PP.ITEMS.comboBonus;
     chance *= (g.builtCourse && g.builtCourse.dropMult) || 1;
+    // 【強化】「戦利品の嗅覚」等のドロップ率倍率(救済中のブースト込み。上限3倍)
+    chance *= PP.upgrades.dropMult();
     if (Math.random() > chance) return;
     drop(x, y);
   }
@@ -57,7 +59,8 @@
       if (PP.game.bossMode) {
         pool = pool.filter(function (p) { return p.id !== "reverse"; });
       }
-      def = weightedPick(pool);
+      // 【強化】「目利き」系(💣🚀の重み増)と救済中の ⚓💣 増量を反映
+      def = weightedPick(PP.upgrades.adjustPool(pool));
       // カラーボムは「色」を持って落ちる。盤面に今ある色から選ぶので拾い損が無い
       if (def.id === "colorbomb") color = pickBoardColor();
     }
@@ -89,7 +92,7 @@
     if (PP.game.bossMode) {
       pool = pool.filter(function (p) { return p.id !== "reverse"; });
     }
-    var def = weightedPick(pool);
+    var def = weightedPick(PP.upgrades.adjustPool(pool));   // 【強化】重み補正を反映
     var color = (def.id === "colorbomb") ? pickBoardColor() : null;
     var view = makeItemView(def.icon, color);
     view.x = x; view.y = y;
@@ -234,7 +237,8 @@
     if (it.kind === "coin") {
       // 【課題5】コインをキャッチ。枚数を増やして、ライフ回復の判定へ
       PP.game.coins++;
-      PP.fx.floatText("🪙 " + PP.game.coins + " / " + PP.LIFE.coinsPerLife, it.x, it.y - 22, "#ffe08a", 18);
+      // 必要枚数は【強化】「換金術」で減ることがあるので PP.coinsPerLife() を読む
+      PP.fx.floatText("🪙 " + PP.game.coins + " / " + PP.coinsPerLife(), it.x, it.y - 22, "#ffe08a", 18);
       checkCoinLife();
       PP.hud.update();
     } else if (it.kind === "down") {
@@ -256,6 +260,9 @@
     } else if (it.kind === "treasure") {
       PP.game.score += it.def.value;
       PP.fx.floatText("+" + it.def.value, it.x, it.y - 22, "#ffe08a", 18);
+      // 【強化】宝玉の力: 選択の権利を1つ積む。ここでは state を変えず、
+      // main.js の tick 末尾(まだ playing のとき)が3択を開く(遅延オープン)
+      PP.upgrades.requestChoice();
       PP.hud.update();
     } else if (it.def.id === "colorbomb") {
       // カラーボムはキャッチした瞬間に発動: アイテムと同じ色の玉が全部消える
@@ -274,8 +281,9 @@
     // 【課題5-1】コインが PP.LIFE.coinsPerLife 枚たまったらライフに変える。
     // ライフが上限(maxLives)のときは増やさず、コインは取っておく
     // (あふれた分は次の回復にそのまま使える)。
-    if (g.coins >= PP.LIFE.coinsPerLife && g.lives < PP.LIFE.maxLives) {
-      g.coins -= PP.LIFE.coinsPerLife;
+    // 必要枚数は【強化】「換金術」で減ることがあるので PP.coinsPerLife() を読む
+    if (g.coins >= PP.coinsPerLife() && g.lives < PP.LIFE.maxLives) {
+      g.coins -= PP.coinsPerLife();
       g.lives++;
       PP.fx.floatText("❤ ライフ +1!", PP.W / 2, 96, "#ff5d8f", 24);
     }

@@ -178,8 +178,9 @@
         .to({ scaleX: 1, scaleY: 1 }, 260, createjs.Ease.backOut);
     }
     lastCombo = g.combo;
-    // 【課題5】コインとライフ(ライフ0は "-"、ライフ回復なしの難易度では "✕")
-    hudCoinLife.text = "🪙 " + g.coins + "/" + PP.LIFE.coinsPerLife +
+    // 【課題5】コインとライフ(ライフ0は "-"、ライフ回復なしの難易度では "✕")。
+    // 必要枚数は【強化】「換金術」で減ることがあるので PP.coinsPerLife() を読む
+    hudCoinLife.text = "🪙 " + g.coins + "/" + PP.coinsPerLife() +
       "   ❤ " + (PP.diff().useLives === false ? "✕" : (g.lives > 0 ? g.lives : "-"));
   }
 
@@ -203,6 +204,8 @@
       var spIcon = g.special === "missile" ? "🚀" : "💣";
       parts.unshift(spIcon + (g.specialLoaded ? " 装填" : " 待機"));
     }
+    // 【強化】救済(海神の加護)で万能玉が装填されている合図
+    if (PP.upgrades.wildArmed()) parts.unshift("🌈 万能");
     // 表示文字列(残り秒は Math.ceil なので約1秒に1回しか変わらない)が同じなら、
     // 文字幅の計測(getMeasuredWidth はキャンバスでの実測=重い)とチップの
     // 再描画を丸ごと飛ばす。チップの形は文字列の幅だけで決まるので絵は同一。

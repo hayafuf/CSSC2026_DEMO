@@ -974,6 +974,8 @@
   // ---------- 開閉 ----------
   function open() {
     if (ED.active) return;
+    // 【強化】宝玉の力の3択中はエディタを開かない(選択が宙に浮くのを防ぐ)
+    if (PP.game.state === "choosing") return;
     ED.active = true;
     var g = PP.game;
     // 盤面をきれいにして編集に集中できる状態へ(全レーンの玉を片付ける)

@@ -475,8 +475,13 @@
     var mx = PP.cannon.x;
     var my = PP.cannon.y - MUZZLE_LEN;
     var special = (g.special && g.specialLoaded) ? g.special : null;
+    // 【強化】救済(海神の加護)の万能玉は通常色弾だけ。特殊弾を撃つときは
+    // 消費せず持ち越す(色玉に戻した次の1発が万能玉になる)
+    var wild = !special && PP.upgrades.wildArmed();
+    if (wild) PP.upgrades.consumeWild();
     var view = special === "missile" ? PP.ball.makeMissileView()
              : special === "bomb"    ? PP.ball.makeBombView()
+             : wild                  ? PP.ball.makeWildView()
              : PP.ball.makeView(g.currentColor);
     view.x = mx; view.y = my;
     PP.layers.shot.addChild(view);
@@ -488,6 +493,7 @@
       spd: PP.MISSILE_SPEED0, // ミサイル用のスカラー速度(他の弾は未使用)
       roll: 0,              // 転がり表現用の累積距離
       special: special,     // null | "bomb" | "missile"
+      wild: wild,           // 【強化】万能玉(着弾時に当てた玉の色を継承 = chain.js)
       color: g.currentColor, view: view
     });
     PP.audio.fire();
@@ -566,7 +572,9 @@
     if (nPresent < 2 && anyPending) return;
 
     var changed = false;
-    if (!(g.special && g.specialLoaded) && !present[g.currentColor]) {
+    // 【強化】万能玉の装填中は current の引き直しをしない(色は着弾時に決まる)
+    if (!(g.special && g.specialLoaded) && !present[g.currentColor] &&
+        !PP.upgrades.wildArmed()) {
       g.currentColor = PP.ball.pickColor(g.nextColor);
       changed = true;
     }
@@ -598,6 +606,7 @@
     // 砲口の縁 muzzleFront が loadSlot より上にあるので、下半分が口に沈んで見える。
     currentView = (g.special && g.specialLoaded)
       ? (g.special === "missile" ? PP.ball.makeMissileView() : PP.ball.makeBombView())
+      : PP.upgrades.wildArmed() ? PP.ball.makeWildView()   // 【強化】救済中は虹の万能玉
       : PP.ball.makeView(g.currentColor);
     currentView.x = 0; currentView.y = LOAD_Y;
     loadSlot.addChild(currentView);
@@ -621,7 +630,8 @@
       return;
     }
     var x = PP.cannon.x;
-    var spy = PP.game.effects.spyglass > 0;
+    // 【強化】「常備望遠鏡」を取っていれば常に着弾点まで伸びる
+    var spy = PP.game.effects.spyglass > 0 || PP.upgrades.has("spyglass");
     var topY;
     if (spy) {
       topY = firstHitY(x);   // 玉は毎フレーム動くので着弾点の走査だけは毎回行う
