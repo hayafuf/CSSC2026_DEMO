@@ -326,10 +326,24 @@
     }
     PP.hud.update();
     if (allDone) {
-      sweep = null;
-      // 締めの全画面フラッシュ(この直後に levelClear がクリア画面を開く)
-      PP.fx.screenFlash("rgba(255,230,150,0.22)", 0.22, 500);
-      levelClear();
+      // 走査完了 → すぐにクリア画面を開かず、余韻(afterglow)を置く。
+      // 大花火の残光の中、終点からきらめきが立ちのぼる間を見せてから畳む
+      if (sweep.after === undefined) {
+        sweep.after = cs.afterglow;
+        PP.fx.screenFlash("rgba(255,230,150,0.22)", 0.22, 500);
+      }
+      sweep.after -= dt;
+      // 終点あたりから、まばらな金のきらめきが立ちのぼり続ける
+      if (Math.random() < dt * 10) {
+        var ap = sweep.parts[Math.floor(Math.random() * sweep.parts.length)];
+        var pp = ap.lane.rail.posAt(Math.max(ap.to, PP.R));
+        PP.fx.burst(pp.x + (Math.random() - 0.5) * 120, pp.y - Math.random() * 60,
+                    Math.random() < 0.5 ? "#ffd24a" : "#fff3c0", 3, 1.2);
+      }
+      if (sweep.after <= 0) {
+        sweep = null;
+        levelClear();
+      }
     }
   }
 
