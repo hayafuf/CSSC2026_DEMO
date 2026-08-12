@@ -221,6 +221,16 @@
         collect(it);
       }
       if (caught || it.y > PP.H + 24) {
+        // 掃討完了後のクリア待ち(main.js が「空中のアイテムが無くなるまで」
+        // 走査の開始を待つ)中に 💎 を取り損ねても失われないように、
+        // 画面外へ落ちた宝玉だけは自動回収する(従来 levelClear が持っていた保証)
+        if (!caught && it.kind === "treasure" && g.finishing) {
+          g.score += it.def.value;
+          PP.upgrades.requestChoice();
+          PP.fx.floatText("💎 宝玉を回収! +" + it.def.value, it.x, PP.H - 60, "#ffe08a", 20);
+          PP.audio.treasure();
+          PP.hud.update();
+        }
         if (it.view.pulse) createjs.Tween.removeTweens(it.view.pulse);   // 明滅の後始末
         PP.layers.item.removeChild(it.view);
         items.splice(i, 1);
@@ -423,6 +433,8 @@
     collectTreasures: collectTreasures,
     colorBomb: colorBomb,
     update: update,
-    clear: clear
+    clear: clear,
+    // 空中に残っているアイテム数(クリア時、走査開始を待つ判定に使う)
+    count: function () { return items.length; }
   };
 })();

@@ -118,7 +118,8 @@
       lane.pendingMatches = [];
       lane.leadD = 0;   // 先頭球の最終位置(クリア時の爆発走査の終点)も仕切り直す
     });
-    sweep = null;   // 走査の途中で試遊などが始まったときの保険
+    killSweep();    // 走査の途中で試遊などが始まったときの保険(彗星の頭も片付ける)
+    itemWaitHinted = false;
     g.shots.forEach(function (s) { PP.layers.shot.removeChild(s.view); });
     g.shots = [];
     g.combo = 0;
@@ -223,7 +224,34 @@
   // PP.CLEAR_SWEEP.pointsPerBall を加算する。走査が終わってから levelClear() へ。
   // 走査中も state は "playing" のまま(盤面は空なので害がなく、HUD のスコアが
   // 生きた状態でカウントアップして見える)。数値は config.js の PP.CLEAR_SWEEP。
-  var sweep = null;   // { parts: [{lane, d, to, nextBurst, n, bonus, done}] }
+  var sweep = null;   // { t, parts: [{lane, d, to, nextBurst, n, bonus, done, comet}] }
+  // 「残ったアイテムを回収せよ」の案内を出したか(クリアごとに1回だけ)
+  var itemWaitHinted = false;
+
+  // 走査の先頭で燃える「彗星の頭」。多層の放射グラデを一度だけ焼いて使い回し、
+  // 毎フレームは位置と脈動スケールを書くだけ(ラスタライズは起きない)
+  function makeComet() {
+    var s = new createjs.Shape();
+    s.graphics
+      .beginRadialGradientFill(
+        ["rgba(255,252,230,0.95)", "rgba(255,214,90,0.6)", "rgba(255,150,40,0)"],
+        [0, 0.35, 1], 0, 0, 0, 0, 0, 40)
+      .drawCircle(0, 0, 40);
+    s.compositeOperation = "lighter";
+    s.cache(-41, -41, 82, 82);
+    PP.layers.fx.addChild(s);
+    return s;
+  }
+
+  // 走査の途中で試遊・リトライなどが始まったときの後始末(彗星の頭を残さない)
+  function killSweep() {
+    if (!sweep) return;
+    for (var i = 0; i < sweep.parts.length; i++) {
+      var c = sweep.parts[i].comet;
+      if (c && c.parent) c.parent.removeChild(c);
+    }
+    sweep = null;
+  }
 
   function startClearSweep() {
     var g = PP.game;
@@ -232,29 +260,50 @@
       var from = lane.rail.holeD;
       var to = Math.max(lane.leadD || 0, PP.R);   // 先頭球が最後にいた場所まで
       if (from - to < PP.D) return;               // 走る距離が無いレーンは飛ばす
-      parts.push({ lane: lane, d: from, to: to, nextBurst: from, n: 0, bonus: 0, done: false });
+      // 発進の号砲: 樽の口で大きく弾けてから走り出す
+      var p0 = lane.rail.posAt(from);
+      PP.fx.flash(p0.x, p0.y, "#ffe9a0", 60);
+      PP.fx.ring(p0.x, p0.y, "#ffd24a", 10, 110, 420);
+      PP.fx.burst(p0.x, p0.y, "#ffd24a", 18, 1.8);
+      parts.push({ lane: lane, d: from, to: to, nextBurst: from, n: 0, bonus: 0,
+                   done: false, comet: makeComet() });
     });
     if (!parts.length) { levelClear(); return; }
-    sweep = { parts: parts };
+    // 全画面の金フラッシュ + 揺れ + 宣言で「ボーナスタイム発動!」を伝える
+    PP.fx.screenFlash("rgba(255,214,110,0.28)", 0.28, 450);
+    PP.fx.shake(14, 0.4);
+    PP.fx.floatText("✨ 距離ボーナス!", PP.W / 2, PP.H / 2 - 60, "#ffd24a", 30);
+    sweep = { t: 0, parts: parts };
   }
 
   function updateSweep(dt) {
     var g = PP.game;
     var cs = PP.CLEAR_SWEEP;
+    sweep.t += dt;
     var allDone = true;
     for (var i = 0; i < sweep.parts.length; i++) {
       var pt = sweep.parts[i];
       if (pt.done) continue;
       allDone = false;
       pt.d -= cs.speed * dt;
+      // 彗星の頭を先頭に追従させる(加算合成の光が脈打ちながら駆け抜ける)
+      var hp = pt.lane.rail.posAt(Math.max(pt.d, pt.to));
+      pt.comet.x = hp.x; pt.comet.y = hp.y;
+      pt.comet.scaleX = pt.comet.scaleY = 1 + 0.3 * Math.sin(sweep.t * 22 + i * 2);
       // D ごとに爆発と加点(処理落ちフレームでは複数段まとめて進む)
       while (pt.nextBurst >= pt.d && pt.nextBurst >= pt.to) {
         var p = pt.lane.rail.posAt(pt.nextBurst);
-        PP.fx.burst(p.x, p.y, "#ffd24a", 5, 0.8);
+        // 金と白金を交互に散らす火花のシャワー(パーティクルはプール制なので
+        // 飽和しても超過分が捨てられるだけ=重くならない)
+        PP.fx.burst(p.x, p.y, (pt.n & 1) ? "#fff3c0" : "#ffd24a", 7, 1.4);
+        if ((pt.n & 1) === 0) PP.fx.ring(p.x, p.y, "#ffd24a", 4, 52, 260);
         if ((pt.n & 3) === 0) {
-          PP.fx.ring(p.x, p.y, "#ffd24a", 4, 40, 220);
           // 音程が駆け上がるチクタク音(全段鳴らすとうるさいので4段に1回)
           PP.audio.beep(480 + (pt.n % 32) * 14, 0.05, "square", 0.05);
+        }
+        if ((pt.n & 7) === 0) {   // 8個ごとの節目は大きく光って小さく揺れる
+          PP.fx.flash(p.x, p.y, "#ffe9a0", 40);
+          PP.fx.shake(5, 0.15);
         }
         g.score += cs.pointsPerBall;
         pt.bonus += cs.pointsPerBall;
@@ -263,14 +312,23 @@
       }
       if (pt.d <= pt.to) {
         pt.done = true;
+        if (pt.comet.parent) pt.comet.parent.removeChild(pt.comet);
         var pe = pt.lane.rail.posAt(Math.max(pt.to, PP.R));
-        PP.fx.floatText("距離ボーナス +" + pt.bonus, pe.x, pe.y - 26, "#ffd24a", 20);
-        PP.fx.ring(pe.x, pe.y, "#ffd24a", 8, 70, 320);
+        // 終点の大花火: 白閃光 + 多重リング + 大量の金粉 + 揺れ
+        PP.fx.flash(pe.x, pe.y, "#fff6d0", 80);
+        PP.fx.ring(pe.x, pe.y, "#ffd24a", 8, 130, 460);
+        PP.fx.ring(pe.x, pe.y, "#fff3c0", 4, 80, 340);
+        PP.fx.burst(pe.x, pe.y, "#ffd24a", 22, 2.4);
+        PP.fx.burst(pe.x, pe.y, "#fff3c0", 12, 1.6);
+        PP.fx.shake(16, 0.35);
+        PP.fx.floatText("距離ボーナス +" + pt.bonus, pe.x, pe.y - 26, "#ffd24a", 26);
       }
     }
     PP.hud.update();
     if (allDone) {
       sweep = null;
+      // 締めの全画面フラッシュ(この直後に levelClear がクリア画面を開く)
+      PP.fx.screenFlash("rgba(255,230,150,0.22)", 0.22, 500);
       levelClear();
     }
   }
@@ -523,10 +581,20 @@
           startFinishing();
         }
       }
-      // 掃討完了: 補給が尽きて、全レーンの玉も無くなったら、樽から先頭跡まで
-      // 爆発が駆け抜ける距離ボーナス(Zuma 式のクリア演出)を経てクリアへ
+      // 掃討完了: 補給が尽きて、全レーンの玉も無くなったら、まず空中に残った
+      // アイテム(💎・コイン・パワーアップ)をプレイヤーに取らせる。全部
+      // 取る/落ちるのを待ってから、樽から先頭跡まで爆発が駆け抜ける距離
+      // ボーナス(Zuma 式のクリア演出)を経てクリアへ。アイテムは重力で必ず
+      // 画面外へ落ちる(💎 だけは powerups が自動回収する)ので、待ちは詰まらない
       if (g.state === "playing" && g.finishing && allLanesEmpty() && !sweep) {
-        startClearSweep();   // 走る距離が無ければその場で levelClear() が呼ばれる
+        if (PP.powerups.count() > 0) {
+          if (!itemWaitHinted) {
+            itemWaitHinted = true;
+            PP.fx.floatText("残ったアイテムを回収せよ!", PP.W / 2, PP.H / 2 - 40, "#ffe08a", 26);
+          }
+        } else {
+          startClearSweep();   // 走る距離が無ければその場で levelClear() が呼ばれる
+        }
       }
       if (sweep && g.state === "playing") {
         updateSweep(dt);     // 走査が終わった tick で levelClear() が呼ばれる
