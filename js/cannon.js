@@ -630,8 +630,7 @@
       return;
     }
     var x = PP.cannon.x;
-    // 【強化】「常備望遠鏡」を取っていれば常に着弾点まで伸びる
-    var spy = PP.game.effects.spyglass > 0 || PP.upgrades.has("spyglass");
+    var spy = PP.game.effects.spyglass > 0;
     var topY;
     if (spy) {
       topY = firstHitY(x);   // 玉は毎フレーム動くので着弾点の走査だけは毎回行う

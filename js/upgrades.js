@@ -10,9 +10,10 @@
  * 設計表(種類・重み・式)は config.js の PP.UPGRADES。
  *
  * ■ 海神の加護(手詰まり救済)
- * 手詰まりの本体は「狙える玉の中に同色の隣接ペアが1つも無い」状態。挿入の
- * 重なり解消は常に樽側へ押すので(chain.js insertShot)、ペアを自作する行為
- * 自体が先頭を死線へ押し込む。そこでペア枯渇が一定時間続いたら:
+ * 手詰まりの本体は「危機レーンの先頭グループ(樽に食い込んでいる塊)に、狙える
+ * 同色の隣接ペアが1つも無い」状態。挿入の重なり解消は常に樽側へ押すので
+ * (chain.js insertShot)、ペアを自作する行為自体が先頭を死線へ押し込む。
+ * そこで危機レーンの局所ペア枯渇が一定時間続いたら:
  *   1) 装填玉が万能玉(🌈)になる … 当たった玉の色を継承して挿入される
  *      (chain.js insertShot)ので、どこに撃っても必ずペアが成立する
  *   2) 撃った弾の割り込みに限り2個で消える(chain.js resolveMatchAt)
@@ -62,8 +63,7 @@
     rearmT: 0,       // 万能玉の再武装までの秒数
     grace: 0,        // 解除後の猶予秒(飛行中の弾・割り込み待ちの2個消しを守る)
     pulseT: 0,       // 発動中の脈動リングの周期タイマー
-    pairSeen: true,  // 直近の走査でペアが見つかったか
-    anyBalls: false  // 直近の走査で「狙える玉」が1個でもあったか
+    droughted: false // 直近の走査で「危機レーンの先頭グループがペア枯渇」だったか
   };
   var choice = null;             // 選択UI {cont, rects, guardT}
 
@@ -296,10 +296,12 @@
         : valAt(def, lv).toFixed(1) + "秒 → " + valAt(def, lv + 1).toFixed(1) + "秒";
     }
     if (id === "cluster") {
+      // 塊率の基準はコースごとに違う(コース5は 0.75)ので、絶対値ではなく
+      // 「今のコースでどれだけ増えるか」の +% で見せる
       var base = (PP.game.builtCourse && PP.game.builtCourse.spawnCluster) || PP.SPAWN_CLUSTER;
       var cur = 1 - (1 - base) * Math.pow(0.85, lv);
       var nx = 1 - (1 - base) * Math.pow(0.85, lv + 1);
-      return "塊率 " + Math.round(cur * 100) + "% → " + Math.round(nx * 100) + "%";
+      return "同色率 +" + Math.round((nx - cur) * 100) + "%";
     }
     if (id === "barrelcap") return "許容 " + PP.barrelCap() + "個 → " + (PP.barrelCap() + 1) + "個";
     if (id === "coin") {
@@ -307,7 +309,6 @@
       var c1 = Math.max(2, PP.LIFE.coinsPerLife - lv - 1);
       return "必要 " + c0 + "枚 → " + c1 + "枚";
     }
-    if (id === "spyglass") return "常時発動";
     if (id === "combo") {
       return (PP.COMBO_WINDOW * valAt(def, lv)).toFixed(1) + "秒 → " +
              (PP.COMBO_WINDOW * valAt(def, lv + 1)).toFixed(1) + "秒";
@@ -425,30 +426,44 @@
   }
 
   // ---------- 手詰まり救済(海神の加護) ----------
+  // 局所判定: 危機レーン(先頭が樽際 PP.CRISIS.start を越えた)に限り、
+  // 「先頭の連結グループ(樽に食い込んでいる塊)」の狙える玉 frontBalls 個の中に
+  // 同色の隣接ペアがあるかだけを見る。危機の解消に効くのは先頭グループを
+  // 消すことだけなので、後方の離れたペアは数えない(全域判定だと塊率35%の
+  // 盤面ではどこかにほぼ必ずペアが残り、実戦でまったく発動しなかった)。
   // 「狙える玉」の規準は cannon.js の命中判定と同じ: 宝玉でない・洞窟の外・
   // 樽に沈んでいない・トンネル内でない。届かない玉を挟んだら連なりは切れる。
   // ※ 立体交差で桁に隠れた玉(occludedByDeck)までは見ない — 隠れペアがあると
-  //   発動がやや遅れるだけで安全側なので、走査コストに見合わない
-  function scanPairs() {
-    var pair = false, any = false;
+  //   発動がやや早まるだけで安全側なので、走査コストに見合わない
+  function scanCrisisDrought() {
+    var drought = false;
     PP.game.eachLane(function (lane) {
-      var balls = lane.balls, prev = null;
+      var balls = lane.balls;
+      if (!balls.length) return;
       var holeD = lane.rail.holeD;
-      for (var i = 0; i < balls.length; i++) {
+      // このレーンは危機か(先頭が樽際ゾーンに入っているか)
+      if (balls[0].d < holeD * PP.CRISIS.start) return;
+      var prev = null, seen = 0, pair = false;
+      for (var i = 0; i < balls.length && seen < PP.RESCUE.frontBalls; i++) {
         var b = balls[i];
-        if (b.d < PP.R) break;   // ここから後ろは洞窟内
+        if (b.d < PP.R) break;                        // ここから後ろは洞窟内
+        // 先頭の連結グループの終わり(隙間)で打ち切る。後方の別グループを
+        // 消しても、樽に食い込んでいる先頭グループは沈み続けるため
+        if (i > 0 && balls[i - 1].d - b.d > PP.D + 1) break;
         var ok = !b.treasure && b.d <= holeD && !lane.rail.tunnelAt(b.d);
         if (ok) {
-          any = true;
+          seen++;
           if (prev && prev.color === b.color && prev.d - b.d <= PP.D + 1) {
             pair = true;
-            return false;   // 1つ見つかれば十分(eachLane を打ち切る)
+            break;
           }
         }
         prev = ok ? b : null;
       }
+      // ペアが無ければ枯渇(狙える玉がゼロ=全部沈んでいる場合も含む)
+      if (!pair) { drought = true; return false; }
     });
-    return { pair: pair, any: any };
+    return drought;
   }
 
   function tickRescue(dt) {
@@ -459,22 +474,18 @@
     rescue.scanT -= dt;
     if (rescue.scanT <= 0) {
       rescue.scanT = RS.scanInterval;
-      var r = scanPairs();
-      rescue.pairSeen = r.pair;
-      rescue.anyBalls = r.any;
+      rescue.droughted = scanCrisisDrought();
     }
 
-    // なだれ込み中・盤面が空・ペアあり → 枯渇ではない
-    if (!g.rolloutDone || !rescue.anyBalls || rescue.pairSeen) {
+    // なだれ込み中・危機レーン無し・先頭グループにペアあり → 枯渇ではない
+    if (!g.rolloutDone || !rescue.droughted) {
       rescue.droughtT = 0;
       if (rescue.active) deactivateRescue();
       return;
     }
 
     rescue.droughtT += dt;
-    var crisis = PP.crisis && PP.crisis.level && PP.crisis.level() >= RS.crisisLv;
-    var need = crisis ? RS.droughtCrisis : RS.drought;
-    if (!rescue.active && rescue.droughtT >= need) activateRescue();
+    if (!rescue.active && rescue.droughtT >= RS.drought) activateRescue();
 
     if (rescue.active) {
       // 万能玉を消費(発射)してもまだ枯渇が続くなら再武装(外した場合の保険)
@@ -544,8 +555,7 @@
     rescue.rearmT = 0;
     rescue.grace = 0;
     rescue.pulseT = 0;
-    rescue.pairSeen = true;
-    rescue.anyBalls = false;
+    rescue.droughted = false;
     closeChoiceUI();
   }
 

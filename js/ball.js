@@ -434,6 +434,9 @@
     // 塊率はコース定義の spawnCluster で上書きできる(例: コース5は4レーンに
     // 注意が割れるぶん、塊を濃くして1レーンあたりの消しやすさを上げる)
     var cluster = (g.builtCourse && g.builtCourse.spawnCluster) || PP.SPAWN_CLUSTER;
+    // 【強化】「同色の潮流」で塊率が上がる(1-(1-c)×0.85^lv。未取得なら素通し)。
+    // 漸近型なのでコース5(0.75)でも100%には届かず、SPAWN_RUN_MAX の4連上限も残る
+    cluster = PP.upgrades.clusterBoost(cluster);
     // 直前が宝玉(= 前の波の末尾)なら塊は引き継がない
     if (n > 0 && !balls[n - 1].treasure && Math.random() < cluster) {
       var last = balls[n - 1].color;

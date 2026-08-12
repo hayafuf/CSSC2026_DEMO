@@ -38,6 +38,10 @@
     chance *= (g.builtCourse && g.builtCourse.dropMult) || 1;
     // 【強化】「戦利品の嗅覚」等のドロップ率倍率(救済中のブースト込み。上限3倍)
     chance *= PP.upgrades.dropMult();
+    // 危機ボーナス: 樽に呑まれ始めるほど加算で上がる(あふれ寸前で +crisisDropBonus)。
+    // crisis.level() は 0(平常)〜2(あふれ寸前)の滑らかな値
+    var crisisLv = (PP.crisis && PP.crisis.level) ? PP.crisis.level() : 0;
+    chance += PP.ITEMS.crisisDropBonus * (crisisLv / 2);
     if (Math.random() > chance) return;
     drop(x, y);
   }
@@ -378,6 +382,28 @@
     }
   }
 
+  // 【強化】ステージクリアの瞬間、空中に残っている 💎 を自動回収する
+  // (main.js levelClear から)。最後の波の宝玉は「全消し=盤面が空」と同時に
+  // 解放されるため、落下を待つ前にクリア判定が走り、今までは必ず取り損ねていた。
+  // スコアと選択の権利(requestChoice)を両方与える。権利は次のステージの
+  // 最初の playing フレームで3択として開く(キューの仕組みがそのまま面倒を見る)
+  function collectTreasures() {
+    var got = 0;
+    for (var i = items.length - 1; i >= 0; i--) {
+      var it = items[i];
+      if (it.kind !== "treasure") continue;
+      PP.game.score += it.def.value;
+      PP.upgrades.requestChoice();
+      PP.fx.floatText("💎 宝玉を回収! +" + it.def.value, it.x, it.y - 22, "#ffe08a", 20);
+      if (it.view.pulse) createjs.Tween.removeTweens(it.view.pulse);
+      PP.layers.item.removeChild(it.view);
+      items.splice(i, 1);
+      got++;
+    }
+    if (got) PP.audio.treasure();
+    return got;
+  }
+
   // レベル開始時のリセット
   function clear() {
     items.forEach(function (it) {
@@ -394,6 +420,7 @@
     maybeDrop: maybeDrop,
     dropPower: dropPower,
     dropTreasure: dropTreasure,
+    collectTreasures: collectTreasures,
     colorBomb: colorBomb,
     update: update,
     clear: clear

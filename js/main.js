@@ -116,7 +116,9 @@
       lane.waveFresh = false;
       lane.waveTimer = 0;
       lane.pendingMatches = [];
+      lane.leadD = 0;   // 先頭球の最終位置(クリア時の爆発走査の終点)も仕切り直す
     });
+    sweep = null;   // 走査の途中で試遊などが始まったときの保険
     g.shots.forEach(function (s) { PP.layers.shot.removeChild(s.view); });
     g.shots = [];
     g.combo = 0;
@@ -177,6 +179,11 @@
     var total = PP.COURSES.length;
     // 最終ステージ(自作コースのプレイ中は除く)ならゲームクリア
     var isFinal = !g.customCourse && g.level >= total;
+    // 【強化】空中に残った 💎 を回収してからスコアを畳む。最後の波の宝玉は
+    // 盤面が空になる瞬間に解放されるので、ここで拾わないと必ず取り損ねる。
+    // 選択の権利は次のステージ開始直後に3択として開く(最終ステージ後は
+    // ランが終わるため、権利はスコア +500 だけ残して畳まれる)
+    PP.powerups.collectTreasures();
     g.score += 1000;
     if (PP.skull) PP.skull.clear();   // クリア画面に妖弾・墨を固めて残さない
     PP.crisis.stop();          // 警報と赤い帳を畳む
@@ -207,6 +214,64 @@
     } else {
       PP.hud.showOverlay("⚓ ステージ " + g.level + "/" + total + " 制覇!",
         "耐え切って残りも掃討した! 生存ボーナス +1000\nスコア " + g.score + " 点\n" + PP.TAP + "で次のステージへ");
+    }
+  }
+
+  // ---------- ステージクリアの爆発走査(Zuma 式の距離ボーナス) ----------
+  // 掃討完了の瞬間、各レーンの樽の口から「先頭球が最後にいた場所」(lane.leadD、
+  // tick が毎フレーム控えている)まで金の爆発が駆け抜け、玉1個ぶん(D)ごとに
+  // PP.CLEAR_SWEEP.pointsPerBall を加算する。走査が終わってから levelClear() へ。
+  // 走査中も state は "playing" のまま(盤面は空なので害がなく、HUD のスコアが
+  // 生きた状態でカウントアップして見える)。数値は config.js の PP.CLEAR_SWEEP。
+  var sweep = null;   // { parts: [{lane, d, to, nextBurst, n, bonus, done}] }
+
+  function startClearSweep() {
+    var g = PP.game;
+    var parts = [];
+    g.eachLane(function (lane) {
+      var from = lane.rail.holeD;
+      var to = Math.max(lane.leadD || 0, PP.R);   // 先頭球が最後にいた場所まで
+      if (from - to < PP.D) return;               // 走る距離が無いレーンは飛ばす
+      parts.push({ lane: lane, d: from, to: to, nextBurst: from, n: 0, bonus: 0, done: false });
+    });
+    if (!parts.length) { levelClear(); return; }
+    sweep = { parts: parts };
+  }
+
+  function updateSweep(dt) {
+    var g = PP.game;
+    var cs = PP.CLEAR_SWEEP;
+    var allDone = true;
+    for (var i = 0; i < sweep.parts.length; i++) {
+      var pt = sweep.parts[i];
+      if (pt.done) continue;
+      allDone = false;
+      pt.d -= cs.speed * dt;
+      // D ごとに爆発と加点(処理落ちフレームでは複数段まとめて進む)
+      while (pt.nextBurst >= pt.d && pt.nextBurst >= pt.to) {
+        var p = pt.lane.rail.posAt(pt.nextBurst);
+        PP.fx.burst(p.x, p.y, "#ffd24a", 5, 0.8);
+        if ((pt.n & 3) === 0) {
+          PP.fx.ring(p.x, p.y, "#ffd24a", 4, 40, 220);
+          // 音程が駆け上がるチクタク音(全段鳴らすとうるさいので4段に1回)
+          PP.audio.beep(480 + (pt.n % 32) * 14, 0.05, "square", 0.05);
+        }
+        g.score += cs.pointsPerBall;
+        pt.bonus += cs.pointsPerBall;
+        pt.n++;
+        pt.nextBurst -= PP.D;
+      }
+      if (pt.d <= pt.to) {
+        pt.done = true;
+        var pe = pt.lane.rail.posAt(Math.max(pt.to, PP.R));
+        PP.fx.floatText("距離ボーナス +" + pt.bonus, pe.x, pe.y - 26, "#ffd24a", 20);
+        PP.fx.ring(pe.x, pe.y, "#ffd24a", 8, 70, 320);
+      }
+    }
+    PP.hud.update();
+    if (allDone) {
+      sweep = null;
+      levelClear();
     }
   }
 
@@ -403,6 +468,10 @@
         if (g.comboTimer <= 0) { g.combo = 0; PP.hud.update(); }
       }
       PP.chain.update(dt);         // 全レーンのチェーンを更新
+      // 先頭球の位置を毎フレーム控える(クリア時の爆発走査の終点になる)
+      g.eachLane(function (lane) {
+        if (lane.balls.length) lane.leadD = lane.balls[0].d;
+      });
       PP.cannon.updateShots(dt);   // 命中時にその場でマッチ判定される
       PP.powerups.update(dt);
       PP.upgrades.update(dt);      // 【強化】自動機銃・自動装填・手詰まり救済
@@ -454,9 +523,13 @@
           startFinishing();
         }
       }
-      // 掃討完了: 補給が尽きて、全レーンの玉も無くなったらクリア
-      if (g.state === "playing" && g.finishing && allLanesEmpty()) {
-        levelClear();
+      // 掃討完了: 補給が尽きて、全レーンの玉も無くなったら、樽から先頭跡まで
+      // 爆発が駆け抜ける距離ボーナス(Zuma 式のクリア演出)を経てクリアへ
+      if (g.state === "playing" && g.finishing && allLanesEmpty() && !sweep) {
+        startClearSweep();   // 走る距離が無ければその場で levelClear() が呼ばれる
+      }
+      if (sweep && g.state === "playing") {
+        updateSweep(dt);     // 走査が終わった tick で levelClear() が呼ばれる
       }
 
       if (g.state === "playing") {
