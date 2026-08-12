@@ -728,7 +728,7 @@
     return removed.length;
   }
 
-  // 【強化】自動砲塔用: balls[index] の1個だけを破壊する。
+  // 【強化】自動機銃用: balls[index] の1個だけを破壊する。
   // popRun を使わないのは、あちらがコンボを 1 に上書きしてプレイヤーの継続コンボを
   // 踏み潰し、maybeDrop まで回してしまうため。destroyRange 経路なので骸骨玉の
   // 撃破報酬はそのまま通り、joinAt により前後が同色接触なら連鎖(chained)へ発展する

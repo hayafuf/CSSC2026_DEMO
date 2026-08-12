@@ -52,7 +52,7 @@
 
   // ---------- 揮発状態(段数以外はランに残さない=レベル開始で仕切り直し) ----------
   var queued = 0;                // 未消化の 💎(選択の権利)。リトライを跨いで残す
-  var autogunT = 0;              // 自動砲塔の次弾までの残り秒
+  var autogunT = 0;              // 自動機銃の次弾までの残り秒
   var autoloadT = 0;             // 自動装填の次着荷までの残り秒
   var rescue = {
     active: false,   // 救済(2個消し・ドロップブースト)発動中か
@@ -321,51 +321,90 @@
     choice = null;
   }
 
-  // ---------- 自動砲塔 / 自動装填 / 救済(playing 中の毎 tick) ----------
+  // ---------- 自動機銃 / 自動装填 / 救済(playing 中の毎 tick) ----------
   function update(dt) {
     if (has("autogun")) tickAutogun(dt);
     if (has("autoload")) tickAutoload(dt);
     tickRescue(dt);
   }
 
-  // 一番危ないレーン(先頭の d/holeD が最大 = ball.js pickColor と同じ危険度定義)の
-  // 先頭から最初の「破壊できる玉」を返す。宝玉・洞窟内・トンネル内は撃たない。
-  // 樽に沈んだ玉(d > holeD)は対象に含める — 危機の圧を抜くのがこの砲の存在意義
-  function findAutogunTarget() {
-    var best = null, bestRatio = -1;
-    PP.game.eachLane(function (lane) {
-      var balls = lane.balls;
-      var holeD = lane.rail.holeD || 1;
-      for (var i = 0; i < balls.length; i++) {
-        var b = balls[i];
-        if (b.d < PP.R) break;                  // ここから後ろは全部洞窟内
-        if (b.treasure) continue;               // 宝玉は絶対に壊さない
-        if (lane.rail.tunnelAt(b.d)) continue;  // トンネル内はプレイヤーと同じく視界外
-        var ratio = balls[0].d / holeD;         // レーンの危険度は先頭で測る
-        if (ratio > bestRatio) { bestRatio = ratio; best = { lane: lane, index: i }; }
-        break;                                  // このレーンの候補は最前の1個だけ
+  // 大砲の真上の列で最初に当たる玉を返す(無ければ null)。
+  // 「勝手に賢く消える」のではなく、大砲をどこに置くか=何を撃ち抜かせるかが
+  // プレイヤーの判断になるようにする(引き金は自分の位置取り)。
+  // 当たる/当たらないの規準はプレイヤーの弾(cannon.js firstHitY)と同じ:
+  // 宝玉・洞窟内・トンネル内は対象外。横幅 D*0.9、一番手前(y が大きい)の玉。
+  function findGunTarget() {
+    var x = PP.cannon.x;
+    var muzzleY = PP.cannon.y - 52;
+    var best = null, bestY = 66;   // HUD 下端(66)より上に玉は無い
+    PP.game.eachLaneBall(function (b, lane) {
+      if (b.treasure || b.d < PP.R) return;
+      if (lane.rail.tunnelAt(b.d)) return;
+      var p = lane.rail.posAt(b.d);
+      if (Math.abs(p.x - x) <= PP.D * 0.9 && p.y < muzzleY && p.y > bestY) {
+        bestY = p.y;
+        best = { lane: lane, ball: b, x: p.x, y: p.y };
       }
     });
     return best;
   }
 
   function tickAutogun(dt) {
-    var target = findAutogunTarget();
-    if (!target) return;   // 撃てる玉が無い間はタイマーを進めない(開幕の空撃ち防止)
     autogunT -= dt;
     if (autogunT > 0) return;
+    var target = findGunTarget();
+    // 真上に狙える玉が無い間は「装填済み」のまま待つ(タイマーは 0 で止める)。
+    // 大砲がチェーンの上を横切った瞬間に発射される=位置取りが引き金になる
+    if (!target) { autogunT = 0; return; }
     autogunT = val("autogun");
-    var b = target.lane.balls[target.index];
-    var p = target.lane.rail.posAt(b.d);
-    // popRun は使わない: コンボを 1 に上書きしてプレイヤーの継続コンボを踏み潰し、
-    // maybeDrop まで回ってしまう。destroySingle(chain.js)は純粋な1個破壊+連鎖判定
-    PP.chain.destroySingle(target.lane, target.index);
-    PP.game.score += 5;
-    PP.fx.flash(PP.cannon.x, PP.cannon.y - 52, "rgba(255,214,140,0.9)", 26);
-    PP.fx.ring(p.x, p.y, "#ffd24a", 6, 60, 300);
-    PP.fx.floatText("🔫 +5", p.x, p.y - 20, "#ffd24a", 14);
-    PP.audio.beep(880, 0.07, "square", 0.06);
-    PP.hud.update();
+    fireGun(target);
+  }
+
+  // 銃弾を砲口から目標へ飛ばし、着弾で1個撃ち抜く。
+  // 挿入(通常弾)にしないのは、勝手な発射が盤面にゴミ色を混ぜてプレイヤーの
+  // 邪魔をするため。popRun も使わない: コンボを 1 に上書きして継続コンボを
+  // 踏み潰し、maybeDrop まで回ってしまう。destroySingle は純粋な1個破壊+連鎖判定
+  var GUN_SPEED = 3000;   // 銃弾の速さ px/s(通常弾の上限 2600 より速い=銃らしい)
+  function fireGun(target) {
+    var mx = PP.cannon.x, my = PP.cannon.y - 52;
+    var lane = target.lane, ball = target.ball;
+    // 弾道(トレーサー): 砲口から着弾点へ金の線が一瞬走り、すっと消える。
+    // 「どこから撃って何に当たったか」がひと目で分かる=位置取りが引き金だと伝わる
+    var tracer = new createjs.Shape();
+    tracer.graphics.setStrokeStyle(2.5).beginStroke("rgba(255,214,140,0.55)")
+      .moveTo(mx, my).lineTo(target.x, target.y);
+    tracer.graphics.setStrokeStyle(1).beginStroke("rgba(255,246,220,0.8)")
+      .moveTo(mx, my).lineTo(target.x, target.y);
+    PP.layers.fx.addChild(tracer);
+    // 弾丸: 金の弾頭 + 尾を引く光条(進行方向は着弾点へ向けて回す)
+    var b = new createjs.Shape();
+    b.graphics.beginLinearGradientFill(["rgba(255,210,74,0)", "rgba(255,210,74,0.85)"],
+      [0, 1], 0, 26, 0, -4)
+      .drawRect(-2, -4, 4, 30);                                    // 尾の光条
+    b.graphics.beginFill("#ffd24a").drawEllipse(-4, -12, 8, 16);   // 弾頭
+    b.graphics.beginFill("rgba(255,244,200,0.95)").drawEllipse(-2.5, -11, 5, 8);
+    b.x = mx; b.y = my;
+    b.rotation = Math.atan2(target.x - mx, my - target.y) * 180 / Math.PI;
+    PP.layers.shot.addChild(b);
+    PP.fx.flash(mx, my, "rgba(255,214,140,0.9)", 22);
+    PP.audio.beep(880, 0.06, "square", 0.06);
+    var time = Math.max(40, (my - target.y) / GUN_SPEED * 1000);
+    createjs.Tween.get(b).to({ x: target.x, y: target.y }, time).call(function () {
+      PP.layers.shot.removeChild(b);
+      // トレーサーは着弾後にすっとフェードして消える
+      createjs.Tween.get(tracer).to({ alpha: 0 }, 200)
+        .call(function () { PP.layers.fx.removeChild(tracer); });
+      // 着弾。選択画面・リトライ中に届いた弾は不発(凍った盤面を壊さない)
+      if (PP.game.state !== "playing") return;
+      var i = lane.balls.indexOf(ball);   // 飛んでいる間に消えていたら空振り
+      if (i < 0) { PP.fx.burst(target.x, target.y, "#ffd24a", 4); return; }
+      var p = lane.rail.posAt(ball.d);    // 着弾時点の実位置で演出を出す
+      PP.chain.destroySingle(lane, i);
+      PP.game.score += 5;
+      PP.fx.ring(p.x, p.y, "#ffd24a", 6, 60, 300);
+      PP.fx.floatText("🔫 +5", p.x, p.y - 20, "#ffd24a", 14);
+      PP.hud.update();
+    });
   }
 
   function tickAutoload(dt) {

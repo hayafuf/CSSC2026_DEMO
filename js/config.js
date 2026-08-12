@@ -709,9 +709,9 @@
   //     "mult"     … 1 + steps[] の累積加算(逓減は steps の減り方で表現する倍率)
   //     "add"      … 段数そのものを加算量に使う
   PP.UPGRADES = [
-    { id: "autogun",    name: "自動砲塔",     icon: "🔫", max: 6, w: 0.9,
+    { id: "autogun",    name: "自動機銃",     icon: "🔫", max: 6, w: 0.9,
       kind: "interval", base: 8.0, decay: 0.8, floor: 2.5,
-      desc: "数秒ごとに一番危ない\nレーンの先頭を撃ち抜く" },
+      desc: "数秒ごとに大砲の真上へ\n銃弾を自動発射する" },
     { id: "autoload",   name: "自動装填機",   icon: "⚙️", max: 5, w: 0.7,
       kind: "interval", base: 45, decay: 0.85, floor: 20,
       desc: "数十秒ごとに爆弾か\nミサイルがスロットへ届く" },

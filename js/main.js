@@ -405,7 +405,7 @@
       PP.chain.update(dt);         // 全レーンのチェーンを更新
       PP.cannon.updateShots(dt);   // 命中時にその場でマッチ判定される
       PP.powerups.update(dt);
-      PP.upgrades.update(dt);      // 【強化】自動砲塔・自動装填・手詰まり救済
+      PP.upgrades.update(dt);      // 【強化】自動機銃・自動装填・手詰まり救済
       // 骸骨玉の弾幕(通常コースのみ。ボス戦は boss.js の弾幕があるので出さない)
       if (!g.bossMode && PP.skull) PP.skull.update(dt);
       PP.hud.updateEffects();
