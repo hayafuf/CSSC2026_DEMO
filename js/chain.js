@@ -149,9 +149,14 @@
   }
 
   // 接触グループの区切りインデックス([開始index,...])
+  // 毎フレーム×レーン数だけ呼ばれるので、配列は使い回す(GC 振動を避ける)。
+  // レーンごとに逐次消費され、フレームをまたいで保持されないので 1 本で安全
+  var _starts = [0];
   function groupStarts(lane) {
     var balls = lane.balls;
-    var starts = [0];
+    var starts = _starts;
+    starts.length = 1;
+    starts[0] = 0;
     for (var i = 1; i < balls.length; i++) {
       if (balls[i - 1].d - balls[i].d > D + 0.5) starts.push(i);
     }
@@ -289,15 +294,23 @@
   }
 
   // 移動前のグループ間の隙間(接合点)を控える。移動・磁力で D 以内へ閉じたら合流。
+  // groupStarts と同じ理由で、配列と {tail, head} オブジェクトをプールして使い回す
+  var _joints = [], _jointPool = [];
   function snapshotJoints(lane, starts) {
     var balls = lane.balls;
-    var joints = [];
+    var n = 0;
     for (var ji = 0; ji < starts.length - 1; ji++) {
       var jTail = balls[starts[ji + 1] - 1];
       var jHead = balls[starts[ji + 1]];
-      if (jTail.d - jHead.d - D > 0) joints.push({ tail: jTail, head: jHead });
+      if (jTail.d - jHead.d - D > 0) {
+        var jt = _jointPool[n] || (_jointPool[n] = { tail: null, head: null });
+        jt.tail = jTail; jt.head = jHead;
+        _joints[n] = jt;
+        n++;
+      }
     }
-    return joints;
+    _joints.length = n;
+    return _joints;
   }
 
   // 1) 前進。錨(stop)=停止 / 逆風(reverse)=正味速度で後退 / 通常=位置依存の速度で前進。

@@ -259,12 +259,12 @@
 
   // 触手の再描画は 30Hz に間引き、結果は cache して blit する。
   // 太い round ストローク×8本の再ラスタライズは canvas で最も高い部類の
-  // コストで、揺れは sin(t*2) 程度なので 30Hz サンプルでも見分けが付かない。
+  // コストで、揺れは sin(t*2) 程度なので 20Hz サンプルでも見分けが付かない。
   // 境界は式の最悪値(ex±sway, ey=34+148+46)+ストローク半幅から算出
   var tentAcc = 1;   // 初回は必ず描く
   function drawTentaclesThrottled(droop, dt) {
     tentAcc += dt;
-    if (tentAcc < 1 / 30) return;
+    if (tentAcc < 1 / 20) return;
     tentAcc = 0;
     drawTentacles(droop);
     if (tentShape.cacheCanvas) tentShape.updateCache();
@@ -380,8 +380,13 @@
     g.setStrokeStyle(1.5).beginStroke("#c9a86a").drawRoundRect(HP_X, HP_Y, HP_W, HP_H, 8);
   }
 
-  // 状態異常チップ(アイコン+残り秒)。文字列が変わったときだけ差し替える
-  function updateChips() {
+  // 状態異常チップ(アイコン+残り秒)。文字列が変わったときだけ差し替える。
+  // 表示値は Math.ceil の秒なので、配列構築+join 自体も 0.25 秒に1回で十分
+  var chipAcc = 1;
+  function updateChips(dt) {
+    chipAcc += dt;
+    if (chipAcc < 0.25) return;
+    chipAcc = 0;
     var fx = PP.game.bossFx;
     var parts = [];
     if (fx.ink > 0) parts.push("🦑" + Math.ceil(fx.ink));
@@ -445,8 +450,9 @@
     var view = makeOrbView(type);
     view.x = x; view.y = y;
     bulletCont.addChild(view);
+    var hitR = r + PP.R * 0.9;   // 自弾との迎撃半径(毎フレーム再計算しない)
     var b = { type: type, x: x, y: y, vx: vx, vy: vy, grav: grav || 0,
-              r: r, view: view, t: Math.random() * 6.28 };
+              r: r, hitR2: hitR * hitR, view: view, t: Math.random() * 6.28 };
     if (opts) {
       if (opts.wave) b.wave = { amp: opts.wave.amp, freq: opts.wave.freq, ph: opts.wave.ph || 0 };
       if (opts.spin) {
@@ -479,7 +485,8 @@
     // トレイル粒子の予算: 弾数に比例して粒子が増えると FPS が崩壊するので、
     // 全弾合計で 1 フレーム 8 個まで(60fps で約480個/秒=従来の見え方と同等)。
     // さらにプールが混んでいる時は発生自体を止める
-    var trailBudget = (PP.fx.particleLoad() < 0.75) ? 8 : 0;
+    // 墨で画面が覆われている間はトレイルがほぼ見えないので予算を絞る
+    var trailBudget = (PP.fx.particleLoad() < 0.75) ? (inkBlobs.length > 0 ? 5 : 8) : 0;
     for (var i = bullets.length - 1; i >= 0; i--) {
       var b = bullets[i];
       // ホバリング爆裂弾: 指定の高さで静止 → 溜め → 全方位リングを段階展開。
@@ -544,11 +551,15 @@
       // 耐久値(hitsLeft)を持つ大玉は削り切るまで消えない(残り数を表示)
       var blocked = false;
       if (b.hitCd > 0) b.hitCd -= dt;
+      // 弾幕中は弾×ショットの総当たりになるので、縦距離だけで先に棄却する
+      // (cannon.js stepShots の SKIP_R2 と同じパターン。ほとんどのペアは
+      //  dy チェックだけで抜け、平方距離の計算までたどり着かない)
       for (var s = g.shots.length - 1; s >= 0; s--) {
         var sh = g.shots[s];
-        var dx = sh.x - b.x, dy = sh.y - b.y;
-        var rr = b.r + PP.R * 0.9;
-        if (dx * dx + dy * dy < rr * rr) {
+        var dy = sh.y - b.y;
+        if (dy * dy >= b.hitR2) continue;
+        var dx = sh.x - b.x;
+        if (dx * dx + dy * dy < b.hitR2) {
           if (b.hitsLeft > 1) {
             // まだ耐える: 1発ぶん削って怯ませる(ミサイルは多段ヒット防止の間を置く)
             if (!(b.hitCd > 0)) {
@@ -652,7 +663,12 @@
   // 巨大な放射グラデを毎フレーム再ラスタライズすると重いので、
   // 単位サイズ(半径256)で一度だけ焼いた canvas を全ブロブで共有し、
   // scale=r/256 の Bitmap として置く(放射グラデは線形スケールで見た目が一致)
-  var INK_UR = 256, inkCanvas = null;
+  // さらに、生きている墨ブロブ(最大10個超の巨大半透明 Bitmap)を毎フレーム
+  // 60Hz でステージに直接合成するとフィルレートで FPS が崩壊するので、
+  // inkCont ごと画面サイズで cache し、12Hz でだけ再合成する。
+  // 毎フレームのコストは「キャッシュ済み1枚の全画面ブリット」だけになる。
+  // フェードイン(220ms)・晴れフェード(0.8s)・遅いドリフトは 12Hz でも滑らかに見える
+  var INK_UR = 256, inkCanvas = null, inkAcc = 0;
   function bakeInk() {
     var sh = new createjs.Shape();
     sh.graphics.beginRadialGradientFill(
@@ -688,6 +704,8 @@
     }
     PP.fx.burst(x, y, "rgba(20,14,26,0.9)", 14, 1.5);
     PP.audio.inkSplat();
+    if (!inkCont.cacheCanvas) inkCont.cache(0, 0, PP.W, PP.H);
+    inkAcc = 1;   // 次の updateInk で即再合成(フェードイン開始を1フレームで反映)
   }
 
   function removeInk() {
@@ -696,9 +714,14 @@
       if (inkBlobs[i].sh.parent) inkBlobs[i].sh.parent.removeChild(inkBlobs[i].sh);
     }
     inkBlobs.length = 0;
+    if (inkCont && inkCont.cacheCanvas) inkCont.uncache();
   }
 
   function updateInk(dt) {
+    if (inkBlobs.length === 0) {
+      if (inkCont.cacheCanvas) inkCont.uncache();   // 墨ゼロなら全画面ブリットもやめる
+      return;
+    }
     for (var i = inkBlobs.length - 1; i >= 0; i--) {
       var b = inkBlobs[i];
       b.life -= dt;
@@ -712,6 +735,15 @@
       b.sh.y = b.by + Math.cos(t * 0.5 + b.ph) * 6;
       // 残り 0.8 秒からゆっくり薄れて消える(突然消えるより「晴れていく」)
       if (b.life < 0.8) b.sh.alpha = b.life / 0.8;
+    }
+    if (inkBlobs.length === 0) {
+      if (inkCont.cacheCanvas) inkCont.uncache();
+      return;
+    }
+    inkAcc += dt;
+    if (inkAcc >= 1 / 12) {
+      inkAcc = 0;
+      if (inkCont.cacheCanvas) inkCont.updateCache();
     }
   }
 
@@ -996,7 +1028,7 @@
     var K = PP.BOSS.tentacle;
     var g2 = PP.game;
     strikeAcc += dt;
-    var redraw = strikeAcc >= 1 / 30;
+    var redraw = strikeAcc >= 1 / 20;
     if (redraw && strikes.length > 0) strikeAcc = 0;
     for (var i = strikes.length - 1; i >= 0; i--) {
       var s = strikes[i];
@@ -1238,7 +1270,7 @@
   // 予兆のチャージ(telegraph 中だけ、本体の後ろで渦を巻く)。
   // 互い違いに回る2重の魔法陣アーク+中心へ吸い込まれる光の粒で
   // 「力を練り上げている」感を出す。収束しきる=発射の瞬間
-  // チャージリングも 30Hz 再描画+cache。非表示中は clear ではなく visible で消す
+  // チャージリングも 20Hz 再描画+cache。非表示中は clear ではなく visible で消す
   var chargeAcc = 1;
   function drawChargeThrottled(dt) {
     if (state !== "telegraph" || !curAttack) {
@@ -1247,7 +1279,7 @@
     }
     charge.visible = true;
     chargeAcc += dt;
-    if (chargeAcc < 1 / 30) return;
+    if (chargeAcc < 1 / 20) return;
     chargeAcc = 0;
     drawCharge();
     if (charge.cacheCanvas) charge.updateCache();
@@ -1437,7 +1469,7 @@
     updateBarrage(dt);
     updateSweep(dt);
     updateCurtain(dt);
-    updateChips();
+    updateChips(dt);
 
     if (state === "dead") return;
     if (state === "dying") { updateDying(dt); drawTentaclesThrottled(1, dt); return; }

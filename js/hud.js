@@ -49,6 +49,11 @@
   var dispScore = 0, lastCombo = 0, animT = 0, lastNow = 0;
   // 前フレームに描いた値(同じ値ならテキスト差し替え・チップ再描画を飛ばす)
   var lastScoreDrawn = null, lastEffectsText = null;
+  // 生存ゲージの形状キー(同じ形なら clear→グラデ生成→再描画を飛ばす)と
+  // 僅少グローの点灯状態(消灯への切り替わりで一度だけ clear する)
+  var lastGaugeKey = null, gaugeGlowOn = false;
+  // チップ構築の間引き用(初回は必ず構築する)
+  var effAcc = 1;
 
   // 桁区切り
   function comma(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
@@ -178,30 +183,8 @@
       "   ❤ " + (PP.diff().useLives === false ? "✕" : (g.lives > 0 ? g.lives : "-"));
   }
 
-  // 毎tick: スコアのカウントアップ、生存ゲージ、時間制パワーアップの残り
-  function updateEffects() {
-    var g = PP.game;
-    var now = (typeof performance !== "undefined" ? performance.now() : Date.now());
-    var dt = lastNow ? Math.min((now - lastNow) / 1000, 0.05) : 0;
-    lastNow = now; animT += dt;
-
-    // updateEffects はプレイ中しか呼ばれないので、ここでボタンを出す
-    // (プレイ以外の画面では showOverlay() が隠す)
-    if (pauseBtn) pauseBtn.visible = true;
-    if (swapBtn) swapBtn.visible = true;
-
-    // スコアのカウントアップ(急変・減少時は即反映)
-    if (g.score < dispScore || Math.abs(g.score - dispScore) > 200000) dispScore = g.score;
-    else dispScore += (g.score - dispScore) * Math.min(1, dt * 9);
-    if (Math.abs(g.score - dispScore) < 0.6) dispScore = g.score;
-    // 丸めた表示値が前フレームと同じなら、カンマ整形(正規表現)と差し替えを飛ばす
-    var rounded = Math.round(dispScore);
-    if (rounded !== lastScoreDrawn) {
-      lastScoreDrawn = rounded;
-      hudScore.text = comma(rounded);
-    }
-
-    // パワーアップのチップ
+  // パワーアップ・状態異常のチップ行を組み立てて差し替える(0.25秒に1回)
+  function rebuildEffectChips(g) {
     var parts = [];
     PP.POWERUPS.forEach(function (p) {
       if (p.dur > 0 && g.effects[p.id] > 0) parts.push(p.icon + Math.ceil(g.effects[p.id]));
@@ -237,21 +220,85 @@
           .drawRoundRect(hudEffects.x - 12, 15, tw + 24, 32, 16);
       }
     }
+  }
+
+  // 毎tick: スコアのカウントアップ、生存ゲージ、時間制パワーアップの残り
+  function updateEffects() {
+    var g = PP.game;
+    var now = (typeof performance !== "undefined" ? performance.now() : Date.now());
+    var dt = lastNow ? Math.min((now - lastNow) / 1000, 0.05) : 0;
+    lastNow = now; animT += dt;
+
+    // updateEffects はプレイ中しか呼ばれないので、ここでボタンを出す
+    // (プレイ以外の画面では showOverlay() が隠す)
+    if (pauseBtn) pauseBtn.visible = true;
+    if (swapBtn) swapBtn.visible = true;
+
+    // スコアのカウントアップ(急変・減少時は即反映)
+    if (g.score < dispScore || Math.abs(g.score - dispScore) > 200000) dispScore = g.score;
+    else dispScore += (g.score - dispScore) * Math.min(1, dt * 9);
+    if (Math.abs(g.score - dispScore) < 0.6) dispScore = g.score;
+    // 丸めた表示値が前フレームと同じなら、カンマ整形(正規表現)と差し替えを飛ばす
+    var rounded = Math.round(dispScore);
+    if (rounded !== lastScoreDrawn) {
+      lastScoreDrawn = rounded;
+      hudScore.text = comma(rounded);
+    }
+
+    // パワーアップのチップ。表示値は Math.ceil の秒なので、配列構築+join は
+    // 0.25 秒に1回で十分(最終的な描画スキップは従来通り文字列比較で判定)
+    effAcc += dt;
+    if (effAcc >= 0.25) { effAcc = 0; rebuildEffectChips(g); }
 
     // 生存ゲージ
+    // テキスト(残り秒など)は毎フレーム更新するが、バー形状は「描画キー」が
+    // 前フレームと変わったときだけ再構築する。線形グラデの生成はフレームごとに
+    // 行うと無駄が大きい(特にボス戦は表示が完全に不変なのに毎フレーム作っていた)
+    var ratio = 0, low = false, fillW = 0, gKey;
+    if (g.bossMode) {
+      // ボス戦: 生存ゲージの代わりに討伐の合図(深紅で満たして
+      // 「時間切れ待ちではない」ことを示す)。1戦につき1回しか描かない
+      gKey = "boss";
+      gaugeText.text = "討伐せよ!";
+      gaugeText.color = "#ffb0a0";
+    } else if (g.finishing) {
+      gKey = "fin";
+      var left = 0;
+      for (var li = 0; li < g.lanes.length; li++) left += g.lanes[li].balls.length;
+      gaugeText.text = "残り " + left;
+      gaugeText.color = C_TEAL;
+    } else {
+      ratio = g.timeTotal > 0 ? Math.max(0, g.timeLeft / g.timeTotal) : 0;
+      low = ratio < 0.25;
+      if (ratio > 0.01) fillW = Math.max(6, (GAUGE_W - 3) * ratio);
+      gKey = "n:" + Math.round(fillW) + (low ? "L" : "");
+      gaugeText.text = Math.max(0, g.timeLeft).toFixed(1) + "s";
+      gaugeText.color = low ? "#ff8a6a" : C_VAL;
+    }
+
+    // 残り僅少の赤く脈打つグローだけは毎フレーム(点滅アニメ)。消灯は一度だけ clear
+    if (fillW > 0 && low) {
+      var glow = gaugeGlow.graphics; glow.clear();
+      var pulse = 0.35 + 0.35 * (0.5 + 0.5 * Math.sin(animT * 7));
+      glow.beginStroke("rgba(255,70,60," + pulse.toFixed(3) + ")").setStrokeStyle(3.5)
+        .drawRoundRect(-1.5, -1.5, GAUGE_W + 3, GAUGE_H + 3, 8);
+      gaugeGlowOn = true;
+    } else if (gaugeGlowOn) {
+      gaugeGlow.graphics.clear();
+      gaugeGlowOn = false;
+    }
+
+    if (gKey === lastGaugeKey) return;
+    lastGaugeKey = gKey;
+
     var gg = gaugeBar.graphics; gg.clear();
-    var glow = gaugeGlow.graphics; glow.clear();
     // 枠(暗ガラス + 真鍮縁)
     gg.beginFill("rgba(4,8,12,0.7)").drawRoundRect(0, 0, GAUGE_W, GAUGE_H, 7);
 
-    // ボス戦: 生存ゲージの代わりに討伐の合図を出す(ボスの HP バーは boss.js が
-    // HUD 直下に描く)。深紅で満たして「時間切れ待ちではない」ことを示す
     if (g.bossMode) {
       gg.beginLinearGradientFill(["#ff9a8a", "#e04848", "#7a1420"], [0, 0.5, 1], 0, 0, 0, GAUGE_H)
         .drawRoundRect(1.5, 1.5, GAUGE_W - 3, GAUGE_H - 3, 5.5);
       gg.setStrokeStyle(1.5).beginStroke("#ff6a5a").drawRoundRect(0, 0, GAUGE_W, GAUGE_H, 7);
-      gaugeText.text = "討伐せよ!";
-      gaugeText.color = "#ffb0a0";
       return;
     }
 
@@ -259,36 +306,21 @@
       gg.beginLinearGradientFill(["#b6ffe6", "#8ef0d0", "#3fbfa0"], [0, 0.5, 1], 0, 0, 0, GAUGE_H)
         .drawRoundRect(1.5, 1.5, GAUGE_W - 3, GAUGE_H - 3, 5.5);
       gg.setStrokeStyle(1.5).beginStroke("#8ef0d0").drawRoundRect(0, 0, GAUGE_W, GAUGE_H, 7);
-      var left = 0;
-      for (var li = 0; li < g.lanes.length; li++) left += g.lanes[li].balls.length;
-      gaugeText.text = "残り " + left;
-      gaugeText.color = C_TEAL;
       return;
     }
 
-    var ratio = g.timeTotal > 0 ? Math.max(0, g.timeLeft / g.timeTotal) : 0;
-    var low = ratio < 0.25;
-    if (ratio > 0.01) {
-      var fillW = Math.max(6, (GAUGE_W - 3) * ratio);
+    if (fillW > 0) {
       var cols = low ? ["#ff9a6a", "#ff5b4a", "#c81e1e"] : ["#ffe89a", "#f0c040", "#b8860b"];
       gg.beginLinearGradientFill(cols, [0, 0.5, 1], 0, 0, 0, GAUGE_H)
         .drawRoundRect(1.5, 1.5, fillW, GAUGE_H - 3, 5.5);
       // 上端の照り
       gg.beginFill("rgba(255,255,255,0.28)").drawRoundRect(2.5, 2.5, fillW - 2, 3, 2);
-      // 残り僅少なら赤く脈打つグロー
-      if (low) {
-        var pulse = 0.35 + 0.35 * (0.5 + 0.5 * Math.sin(animT * 7));
-        glow.beginStroke("rgba(255,70,60," + pulse.toFixed(3) + ")").setStrokeStyle(3.5)
-          .drawRoundRect(-1.5, -1.5, GAUGE_W + 3, GAUGE_H + 3, 8);
-      }
     }
     // 目盛り
     gg.setStrokeStyle(1).beginStroke("rgba(0,0,0,0.35)");
     for (var t = 1; t < 4; t++) { var mx = 1.5 + (GAUGE_W - 3) * (t / 4); gg.moveTo(mx, 2).lineTo(mx, GAUGE_H - 2); }
     gg.endStroke();
     gg.setStrokeStyle(1.5).beginStroke("#c9a86a").drawRoundRect(0, 0, GAUGE_W, GAUGE_H, 7);
-    gaugeText.text = Math.max(0, g.timeLeft).toFixed(1) + "s";
-    gaugeText.color = low ? "#ff8a6a" : C_VAL;
   }
 
   // ---------- オーバーレイ ----------
