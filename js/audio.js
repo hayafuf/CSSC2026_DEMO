@@ -480,6 +480,10 @@
   function setDanger(on) {
     if (!unlocked) return;
     if (current === bgmOver) return;   // ゲームオーバー中は曲を戻さない
+    // ボス戦はボス曲を流し続ける: ボス戦は補給が絶え間なく危機を頻繁に往復する
+    // ので、そのたびに曲が替わる(しかも復帰でイントロから鳴り直す)と決戦の
+    // 緊張感が切れる。危機の緊迫は警報ループ(crisis.mp3)が担っている
+    if (PP.game && PP.game.bossMode) on = false;
     var want = on ? bgmDanger : bgmNormal;
     if (want === current) return;
     // 曲を切り替えるときは頭出しして、危険の始まりが分かるようにする

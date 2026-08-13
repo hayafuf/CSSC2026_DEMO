@@ -7,8 +7,8 @@
  * 決まっていて、予兆リングと弾の色、そして弾道で読める(弾幕シューティング
  * の作法。色はボスの妖弾 ATTACKS と同じ言語: freeze=金 / addle=桃)。
  * 弾道も性質と揃える: freeze(錨)は重力で落下加速する重い弾、
- * addle(渦)は撃ち出し直後だけ波打ち、減衰して直線に収束する蛇行弾
- * (揺れっぱなしだと軌道が読めず理不尽。パラメータは config.js PP.SKULL)。
+ * addle(渦)は直線弾の回転掃射(渦の模様は「回転する発射角」が作る。
+ * 弾自体は揺らさない=軌道が直線で読める。パラメータは config.js PP.SKULL)。
  * 破壊すればパワーアップ確定ドロップ+ボーナススコア(chain.js)。
  *
  * 弾の動き・迎撃・大砲ヒットの作法は boss.js の妖弾に合わせてある
@@ -125,21 +125,17 @@
     return bmp;
   }
 
-  // 弾1発の生成(全パターン共通の実弾)
-  function spawnBullet(x, y, ang, spd, type, ph) {
+  // 弾1発の生成(全パターン共通の実弾。直線弾で、freeze だけ重力が乗る)
+  function spawnBullet(x, y, ang, spd, type) {
     var view = makeBulletView(type);
     view.x = x; view.y = y;
     cont.addChild(view);
     bullets.push({
       x: x, y: y,
-      bx: x, by: y,                    // 蛇行の基準点(直進する芯。addle が使う)
-      nx: -Math.sin(ang), ny: Math.cos(ang),   // 進路と直交の単位ベクトル
-      ph: ph || 0,                     // 蛇行の位相
       vx: Math.cos(ang) * spd,
       vy: Math.sin(ang) * spd,
       r: PP.SKULL.orbR, type: type, view: view,
-      t: Math.random() * 6.28,         // 脈動・回転用(初期値ランダムで揃い踏み防止)
-      st: 0                            // 蛇行用の経過秒(0 始まりで発射口から滑らかに振れる)
+      t: Math.random() * 6.28          // 脈動・回転用(初期値ランダムで揃い踏み防止)
     });
   }
 
@@ -198,17 +194,17 @@
       var off = v.step === 0 ? 0 : spread / (S.fan - 1) / 2;
       for (var i = 0; i < S.fan; i++) {
         var ang = (S.fan > 1 ? v.base - spread / 2 + spread * (i / (S.fan - 1)) : v.base) + off;
-        spawnBullet(x, y, ang, v.spd, "freeze", 0);
+        spawnBullet(x, y, ang, v.spd, "freeze");
       }
       PP.fx.ring(x, y, T.color, 6, 56, 320);
       if (v.step > 0) PP.audio.beep(150, 0.12, "sawtooth", 0.08);   // 追い波の重い手応え
     } else {
       // 渦巻きの掃射: 掃射角 addleSweepDeg を弾数で割って1発ずつ回す。
-      // 位相も1発ずつずらすので、蛇行と合わさって螺旋がうねって見える
+      // 直線弾の連続発射が、結果として螺旋の模様を描く(弾幕STGの渦の作法)
       var sweep = S.addleSweepDeg * Math.PI / 180;
       var k = v.steps > 1 ? v.step / (v.steps - 1) : 0.5;
       var ang2 = v.base + v.dir * (-sweep / 2 + sweep * k);
-      spawnBullet(x, y, ang2, v.spd, "addle", v.step * 0.9);
+      spawnBullet(x, y, ang2, v.spd, "addle");
       PP.fx.burst(x, y, T.color, 2, 0.9);
       if ((v.step & 1) === 0) PP.audio.beep(560 + v.step * 45, 0.05, "square", 0.045);
     }
@@ -317,26 +313,12 @@
     for (var i = bullets.length - 1; i >= 0; i--) {
       var b = bullets[i];
       b.t += dt;
-      b.st += dt;
-      if (b.type === "freeze") {
-        // 錨の弾: 重力で落下加速しながら直進(遅く出て速く落ちる。横に逃げて躱す)
-        b.vy += S.freezeGravity * dt;
-        b.x += b.vx * dt;
-        b.y += b.vy * dt;
-      } else {
-        // 渦の弾: 直進する芯(bx, by)の周りを進路と直交に正弦で蛇行。
-        // 発射時の位相ぶんを引いて、発射口からは必ず滑らかに振れ始める。
-        // 蛇行は addleSwayFade 秒かけて減衰し、以降は直線に収束する
-        // (渦巻きの本体は回転する発射角。弾まで揺れ続けると軌道が読めない)。
-        // 当たり判定も見た目どおり蛇行後の位置(x, y)で取る
-        b.bx += b.vx * dt;
-        b.by += b.vy * dt;
-        var fade = Math.max(0, 1 - b.st / S.addleSwayFade);
-        var w = 6.2832 * S.addleWaveHz;
-        var sway = (Math.sin(b.st * w + b.ph) - Math.sin(b.ph)) * S.addleWaveAmp * fade;
-        b.x = b.bx + b.nx * sway;
-        b.y = b.by + b.ny * sway;
-      }
+      // freeze(錨)だけ重力で落下加速(遅く出て速く落ちる。横に逃げて躱す)。
+      // addle(渦)は完全な直線弾: 渦の模様は回転する発射角(volleyStep)が
+      // 作るもので、弾を揺らすと軌道が読めなくなるのでやらない
+      if (b.type === "freeze") b.vy += S.freezeGravity * dt;
+      b.x += b.vx * dt;
+      b.y += b.vy * dt;
       b.view.x = b.x; b.view.y = b.y;
       // 脈動 + 衛星粒の回転(弾幕STGらしい「生きてる弾」。回転は見た目だけで
       // 当たり判定 r は不変)。基準スケールは焼き込み解像度ぶんの縮小
