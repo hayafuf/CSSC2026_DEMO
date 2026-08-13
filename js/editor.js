@@ -81,17 +81,16 @@
   function snapToGrid(v) { return Math.round(v / GRID) * GRID; }
   function snap(v) { return ED.snap ? snapToGrid(v) : Math.round(v); }
 
-  // 制御点の複製。3要素目(その角の角丸半径)があれば保つ。
-  function copyPt(p) { return (p.length > 2) ? [p[0], p[1], p[2]] : [p[0], p[1]]; }
-  function copyCtrl(a) { return a.map(copyPt); }
+  // コースデータの複製は API と同じ実装を使う。
+  var courseUtils = PP.courseUtils;
+  var copyPt = courseUtils.copyPoint;
+  var copyCtrl = courseUtils.copyPoints;
 
   // ---------- レーン(マルチレーン)ヘルパ ----------
   // 区間指定({from,to} の配列)の複製。
-  function copySpans(a) { return (a || []).map(function (s) { return { from: s.from, to: s.to }; }); }
+  var copySpans = courseUtils.copySpans;
   // レーン1本の深いコピー(ctrl は角丸半径ごと、tunnels/raised は {from,to} を複製)。
-  function copyLane(ln) {
-    return { ctrl: copyCtrl(ln.ctrl || []), tunnels: copySpans(ln.tunnels), raised: copySpans(ln.raised) };
-  }
+  var copyLane = courseUtils.copyEditableLane;
   function copyLanes(a) { return a.map(copyLane); }
   function newLane() { return { ctrl: [], tunnels: [], raised: [] }; }
   // 入力(Course.lanes 等)から ED.lanes を作る。欠けた配列は空で補う。

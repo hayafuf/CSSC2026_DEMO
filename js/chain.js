@@ -37,6 +37,16 @@
   // reverseFrameRet はこのフレームの後退量(advance が書き、update が積む)
   var reverseV = 0, reverseWasActive = false, reverseDist = 0, reverseFrameRet = 0;
 
+  // 風の状態を初期化する(レベル開始・リトライ時に main.js が呼ぶ)。
+  // これが無いと、風が吹いている最中のリトライで reverseWasActive が true のまま
+  // 残り、再開1フレーム目に「時間切れ終了」と誤検出して開幕から凪が入ってしまう
+  function resetWind() {
+    reverseV = 0;
+    reverseWasActive = false;
+    reverseDist = 0;
+    reverseFrameRet = 0;
+  }
+
   // 波の効果音を鳴らした直近の時刻(ms)。マルチレーンではレベル開始時に全レーンが
   // 同時に波を湧かせるので、この窓の間に重なった波は音を1回にまとめる(N重奏を防ぐ)。
   var lastWaveSoundT = -1e9;
@@ -272,18 +282,29 @@
 
     // 逆風の風速はフレーム先頭で1回だけ更新する(全レーンへ同じ風速を適用)。
     // 初速から加速し、固定の最大風速 PP.REVERSE_MAX で頭打ち(config.js)。
+    // 終わり方は距離(REVERSE_RANGE)と時間切れ(dur)の2通りあり、どちらでも
+    // eff.reverseHold の「凪」を挟んでから前進を再開する(即発車させない)。
     if (eff.reverse > 0) {
-      if (!reverseWasActive) { reverseV = PP.REVERSE_SPEED; reverseDist = 0; }  // 発動の瞬間に初速へ
+      if (!reverseWasActive) {
+        // 発動の瞬間に初速へ。凪の最中に再取得したら風を優先(ホールド破棄)
+        reverseV = PP.REVERSE_SPEED;
+        reverseDist = 0;
+        eff.reverseHold = 0;
+      }
       if (reverseDist >= PP.REVERSE_RANGE) {
         // 玉およそ15個ぶん(REVERSE_RANGE)戻し切ったら、残り秒数を待たずに
-        // 効果ごと終了する=そのまま前進を再開する。「距離で終わる」アイテム。
-        // 効果時間(PP.POWERUPS の dur)は、風が流れに勝てず戻し切れない
-        // 場合の保険の上限としてだけ働く
+        // 効果ごと終了する。「距離で終わる」アイテム。効果時間(PP.POWERUPS の
+        // dur)は、風が流れに勝てず戻し切れない場合の保険の上限としてだけ働く
         eff.reverse = 0;
         reverseV = 0;
+        eff.reverseHold = PP.REVERSE_HOLD;
       } else {
         reverseV = Math.min(reverseV + PP.REVERSE_ACCEL * dt, PP.REVERSE_MAX);
       }
+    } else if (reverseWasActive) {
+      // 時間切れ(powerups.update が dur を 0 にした)での終了もここで拾って凪を入れる
+      reverseV = 0;
+      eff.reverseHold = PP.REVERSE_HOLD;
     }
     reverseWasActive = eff.reverse > 0;
 
@@ -361,6 +382,11 @@
         if (-net > reverseFrameRet) reverseFrameRet = -net;   // 実後退量(上限の計上用)
         for (i = rs; i < re; i++) balls[i].d += net;
       }
+    } else if (eff.reverseHold > 0) {
+      // 吹き戻し後の凪: 錨と同様に前進だけ止める(反動・磁力・重なり解消は
+      // 生かすので、開いた隙間は閉じ続ける)。タイマー減算は powerups.update
+      // の汎用ループが行う。切れた後の発車は spdD/spdHold の既存機構が
+      // 「じわっと加速」にしてくれる
     } else if (g.bossMode && starts.length > 1) {
       // ボスコースの特例: 隙間が開いている間は「洞窟に繋がっている最後尾の
       // 列群」だけが前進し、前方に切り離された断片はその場に静止する。
@@ -990,6 +1016,7 @@
 
   PP.chain = {
     update: update,
+    resetWind: resetWind,
     startWave: startWave,
     scrambleColors: scrambleColors,
     clearTreasures: clearTreasures,

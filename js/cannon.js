@@ -3,6 +3,8 @@
  *
  * マウスの X 座標に追従して横移動し、真上に発射する。
  * 玉を2個持ち、右クリック(または Space)で交換できる。
+ * 特殊弾(爆弾/ミサイル)を持っている間は、同じ操作で
+ * 「砲身の特殊弾 ⇔ 左脇スロットの色玉」を行き来する。
  * ========================================================= */
 (function () {
   "use strict";
@@ -14,16 +16,17 @@
   var currentView;   // 装填中の玉
   var nextView;      // 次弾の表示
   var aimLine;       // 照準ガイド
-  var stockSlot;     // 特殊弾のストックスロット(画面左下・固定位置)
+  var stockSlot;     // 特殊弾のストックスロット(大砲の左脇に追従)
   var stockIcon;     // スロット内の特殊弾アイコン(spark トゥイーン後始末用)
   var stockLabel;    // スロットの状態表示(「待機」/「装填中」)
 
   var MUZZLE_LEN = 52; // 砲口までの高さ
 
-  // 特殊弾ストックスロットの位置とクリック判定の半幅。
-  // 大砲はマウス X に追従するので、大砲に付けたUIはカーソルの下に来られない。
-  // 固定位置に置き、main.js が発射より先にここへのクリックを拾う。
-  var STOCK_SX = 56, STOCK_SY = PP.H - 60, STOCK_R = 34;
+  // 特殊弾ストックスロットのクリック判定の半幅。位置は次弾ラックの鏡像
+  // (大砲の左脇)で、RACK_X の定義後に STOCK_X / STOCK_Y として決める。
+  // swap(Space/右クリック)が装填⇔待機の双方向トグルなので、スロットを
+  // 直接クリックしなくても出し入れできる(直タップはタッチ向けの補助)。
+  var STOCK_R = 34;
 
   // ---------- 素材(道・洞窟・樽と同じ金属言語で喋らせる) ----------
   // 以前の砲身は #11151c〜#565f70 のガンメタルで、世界中が磨いた真鍮
@@ -70,6 +73,7 @@
   var LOAD_Y = -52;  // 装填した玉の中心。砲口(-53)にちょうど収まり、
                      // fire() が玉を出す位置(-MUZZLE_LEN = -52)と一致する
   var RACK_X = 74, RACK_Y = -6;   // 次弾の弾架(太った砲架 RX=46 を避けた位置)
+  var STOCK_X = -RACK_X, STOCK_Y = RACK_Y;   // 特殊弾スロット(次弾ラックの鏡像=左脇)
 
   // 砲身のある y での半幅(補強帯・トラニオン・リムを輪郭に合わせるため)
   function halfAt(y) {
@@ -358,10 +362,10 @@
     nextLabel.shadow = new createjs.Shadow("rgba(0,0,0,0.8)", 0, 1, 1);
     root.addChild(nextLabel);
 
-    // 特殊弾のストックスロット(固定位置。特殊弾を持っている間だけ表示)。
-    // 台座は次弾ラック(buildRack)と同じブロンズの言語で描く。
+    // 特殊弾のストックスロット(大砲の左脇=次弾ラックの鏡像。特殊弾を
+    // 持っている間だけ表示)。台座は次弾ラック(buildRack)と同じブロンズの言語で描く。
     stockSlot = new createjs.Container();
-    stockSlot.x = STOCK_SX; stockSlot.y = STOCK_SY;
+    stockSlot.x = STOCK_X; stockSlot.y = STOCK_Y;
     stockSlot.visible = false;
     var plate = new createjs.Shape();
     plate.graphics
@@ -380,14 +384,14 @@
     stockLabel.textBaseline = "middle";
     stockLabel.shadow = new createjs.Shadow("rgba(0,0,0,0.8)", 0, 1, 1);
     stockSlot.addChild(stockLabel);
-    var caption = new createjs.Text(PP.TAP + "で交換",
+    var caption = new createjs.Text(PP.TOUCH ? "砲をタップで交換" : "Spaceで交換",
       '700 10px "Hiragino Kaku Gothic ProN","Meiryo",serif', "#f5e8c8");
     caption.x = 0; caption.y = 40;
     caption.textAlign = "center";
     caption.textBaseline = "middle";
     caption.shadow = new createjs.Shadow("rgba(0,0,0,0.8)", 0, 1, 1);
     stockSlot.addChild(caption);
-    layer.addChild(stockSlot);
+    root.addChild(stockSlot);   // 大砲コンテナの子にして横移動に追従させる
   }
 
   // ストックスロットの表示を現在の状態に合わせて組み直す
@@ -416,12 +420,13 @@
   }
 
   // (sx, sy) がストックスロットのクリック範囲内か(特殊弾所持中のみ有効)。
-  // タッチ端末では指の太さぶん判定を広げる(見た目はそのまま)
+  // スロットは大砲に追従するので判定も大砲相対。タッチ端末では指の太さぶん
+  // 判定を広げる(見た目はそのまま)
   var STOCK_PAD = PP.TOUCH ? 12 : 0;
   function hitStock(sx, sy) {
     return PP.game.state === "playing" && !!PP.game.special &&
-           Math.abs(sx - STOCK_SX) < STOCK_R + STOCK_PAD &&
-           Math.abs(sy - STOCK_SY) < STOCK_R + STOCK_PAD;
+           Math.abs(sx - (PP.cannon.x + STOCK_X)) < STOCK_R + STOCK_PAD &&
+           Math.abs(sy - (PP.cannon.y + STOCK_Y)) < STOCK_R + STOCK_PAD;
   }
 
   // マウス追従の横移動(縦は固定)
@@ -530,11 +535,14 @@
     refreshBalls();
   }
 
-  // 「今の玉」と「次の玉」を交換。特殊弾を装填中なら、まず待機へ戻す
+  // 「今の玉」と「次の玉」を交換。特殊弾を持っている間は「砲身 ⇔ 左脇スロット」の
+  // 双方向トグルになる(押すたびに特殊弾と色玉が入れ替わる)。このため特殊弾の
+  // 所持中は色玉同士の交換はできないが、特殊弾は色玉の順番を消費しないので
+  // 「色玉に戻す → 撃つ → 特殊弾に戻す」で困らない。
   function swap() {
     var g = PP.game;
     if (g.state !== "playing") return;
-    if (g.special && g.specialLoaded) { toggleSpecial(); return; }
+    if (g.special) { toggleSpecial(); return; }
     var t = g.currentColor;
     g.currentColor = g.nextColor;
     g.nextColor = t;

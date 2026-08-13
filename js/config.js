@@ -96,13 +96,15 @@
   // 逆風パワーアップ: 風速を「進行方向の速度」から引き算して正味の後退を作る。
   // 玉の動き = 進行速度 - 風速。風速は発動から REVERSE_ACCEL で強まり、
   // REVERSE_MAX で頭打ち。「時間」ではなく「距離」で終わるアイテム:
-  // 実際に累計 REVERSE_RANGE 戻したらその場で効果ごと終了し、前進を再開する。
+  // 実際に累計 REVERSE_RANGE 戻したら効果ごと終了し、REVERSE_HOLD の
+  // 「凪」(静止)を挟んでから前進を再開する。
   // 効果時間(PP.POWERUPS の dur)は、風が流れに勝てず戻し切れない場合の
   // 保険の上限としてだけ働く。
-  PP.REVERSE_SPEED = 200;   // 逆風の初速(風速) px/s
-  PP.REVERSE_ACCEL = 340;   // 逆風の加速度 px/s^2(発動から風が強まる)
+  PP.REVERSE_SPEED = 160;   // 逆風の初速(風速) px/s
+  PP.REVERSE_ACCEL = 180;   // 逆風の加速度 px/s^2(発動からゆっくり風が強まる)
   PP.REVERSE_MAX = 1400;    // 逆風の最大風速 px/s(速い区間でも風が勝てる強さ)
   PP.REVERSE_RANGE = 700;   // 吹き戻しの上限距離 px(玉およそ15個ぶん。実後退で計上)
+  PP.REVERSE_HOLD = 0.4;    // 吹き戻し終了後、前進を再開するまでの静止時間(秒)
   PP.COMBO_WINDOW = 1.6;  // コンボ継続時間(秒)
 
   // ---------- チェーンの速度プロファイル ----------
@@ -707,7 +709,7 @@
   // TODO【課題4】w を変えて、どの道具がよく落ちるかを調整してみよう。
   PP.POWERUPS = [
     { id: "slow",      name: "囚人の歩み",   icon: "🐌", dur: 8,  w: 1.0 },  // チェーン速度半減
-    { id: "reverse",   name: "逆風",         icon: "🌬️", dur: 4,  w: 0.6 },  // チェーンが後退
+    { id: "reverse",   name: "逆風",         icon: "🌬️", dur: 5,  w: 0.6 },  // チェーンが後退
     { id: "stop",      name: "錨",           icon: "⚓", dur: 5,  w: 0.9 },  // チェーン停止
     { id: "bomb",      name: "爆弾",         icon: "💣", dur: 0,  w: 0.8 },  // 大砲に装填して自分で撃つ
     { id: "missile",   name: "ミサイル",     icon: "🚀", dur: 0,  w: 0.8 },  // 装填して撃つ・直進貫通
@@ -857,8 +859,10 @@
     currentColor: 0,      // 大砲に装填中の色
     nextColor: 0,         // 次弾の色
     special: null,        // 所持中の特殊弾 null | "bomb" | "missile"(1個まで。新規取得で置き換え)
-    specialLoaded: false, // true=砲身に装填中(次の発射は特殊弾)/ false=左下スロットで待機
-    effects: { slow: 0, reverse: 0, stop: 0, spyglass: 0 }, // 残り秒数(全レーンに効く)
+    specialLoaded: false, // true=砲身に装填中(次の発射は特殊弾)/ false=砲脇スロットで待機
+    // 残り秒数(全レーンに効く)。reverseHold は逆風終了後の静止ホールドで、
+    // POWERUPS の id ではないので HUD のチップには出ない(hud.js は id しか見ない)
+    effects: { slow: 0, reverse: 0, stop: 0, spyglass: 0, reverseHold: 0 },
     bossMode: false,      // ボス戦中か(startLevel がコースの boss フラグから設定)
     // 状態異常の残り秒数(ボスの妖弾・骸骨玉の弾幕・パワーダウンアイテムが使う)。
     // 減算は powerups.js の update ただ1か所で行い(全コースで毎フレーム動く)、

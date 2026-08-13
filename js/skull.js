@@ -2,8 +2,10 @@
  * skull.js — 骸骨玉(通常コースの弾幕ボール)
  *
  * チェーンの一部の玉に骸骨マークが付く(chain.js spawnBalls)。
- * 放置すると予兆(赤い明滅+警告音)のあと、大砲を狙った扇状の
- * 妖弾を撃つ。被弾で停止(freeze)か操作反転(addle)。
+ * 放置すると予兆(明滅+警告音)のあと、大砲を狙った扇状の妖弾を撃つ。
+ * 被弾で停止(freeze)か操作反転(addle)。デバフの種類は予兆の時点で
+ * 決まっていて、予兆リングと弾の色で読める(弾幕シューティングの作法。
+ * 色はボスの妖弾 ATTACKS と同じ言語: freeze=金 / addle=桃)。
  * 破壊すればパワーアップ確定ドロップ+ボーナススコア(chain.js)。
  *
  * 弾の動き・迎撃・大砲ヒットの作法は boss.js の妖弾に合わせてある
@@ -45,22 +47,86 @@
            !lane.rail.tunnelAt(b.d) && b.view.visible;
   }
 
-  // 妖弾の見た目: 暗紅色の光球(ボスの妖弾と同じ radial gradient の作法)
-  function makeBulletView() {
-    var S = PP.SKULL;
-    var sh = new createjs.Shape();
-    sh.graphics
-      .beginRadialGradientFill(["#ffffff", "#ff4d4d", "rgba(0,0,0,0)"], [0, 0.45, 1],
-        0, 0, 0, 0, 0, S.orbR * 1.7)
-      .drawCircle(0, 0, S.orbR * 1.7)
-      .setStrokeStyle(2).beginStroke("#ff4d4d").drawCircle(0, 0, S.orbR);
-    return sh;
+  // デバフ種類ごとの色と演出の定義。色は boss.js の ATTACKS・applyHit の
+  // 着弾リングと同じ言語(freeze=金の錨鎖 / addle=桃の逆潮)。
+  // 予兆リング・弾・残光・迎撃の火花まで全部この色で統一し、
+  // 「何が飛んでくるか」を発射前から読めるようにする
+  var TYPES = {
+    freeze: {
+      color: "#ffd24a",
+      glowIn: "rgba(255,235,170,0.95)", glowMid: "rgba(255,180,40,0.35)",
+      coreEdge: "rgba(255,224,140,0.9)",
+      label: "⛓ 動けない!",
+      teleBeep: 120        // 予兆の警告音の高さ(低い=重い錨)
+    },
+    addle: {
+      color: "#ff5d8f",
+      glowIn: "rgba(255,214,230,0.95)", glowMid: "rgba(255,60,130,0.35)",
+      coreEdge: "rgba(255,190,215,0.9)",
+      label: "🌀 操作が逆に!",
+      teleBeep: 175        // 高い=惑わせる渦
+    }
+  };
+  function pickType() { return Math.random() < 0.5 ? "freeze" : "addle"; }
+
+  // 妖弾の見た目: 白熱のコア+色付きグロー+回転が見える衛星粒の光球。
+  // boss.js makeOrbView と同じく種類ごとに1回だけ canvas へ焼いて全弾で
+  // 共有する(旧実装は弾ごとに radial gradient の Shape を作っていた)
+  var orbSprites = {};      // type -> 焼き込み済み canvas
+  var ORB_SCALE = 1.25;     // 高解像度で焼いて縮小表示(拡大時のボケ防止)
+  function orbSprite(type) {
+    if (orbSprites[type]) return orbSprites[type];
+    var R = PP.SKULL.orbR;
+    var T = TYPES[type];
+    var half = Math.ceil(R * 2.4 * ORB_SCALE);
+    var cv = document.createElement("canvas");
+    cv.width = cv.height = half * 2;
+    var ctx = cv.getContext("2d");
+    ctx.translate(half, half);
+    ctx.scale(ORB_SCALE, ORB_SCALE);
+    // 外周のグロー(加算合成で光って見える)
+    var glow = ctx.createRadialGradient(0, 0, 0, 0, 0, R * 2.2);
+    glow.addColorStop(0, T.glowIn);
+    glow.addColorStop(0.55, T.glowMid);
+    glow.addColorStop(1, "rgba(0,0,0,0)");
+    ctx.fillStyle = glow;
+    ctx.beginPath(); ctx.arc(0, 0, R * 2.2, 0, 6.2832); ctx.fill();
+    // 色付きの外殻リング(弾幕STGの「輪郭で当たりが読める」弾)
+    ctx.strokeStyle = T.color;
+    ctx.lineWidth = 3;
+    ctx.beginPath(); ctx.arc(0, 0, R, 0, 6.2832); ctx.stroke();
+    // 白熱のコア
+    var core = ctx.createRadialGradient(0, 0, 0, 0, 0, R * 0.62);
+    core.addColorStop(0, "#ffffff");
+    core.addColorStop(0.7, T.coreEdge);
+    core.addColorStop(1, "rgba(255,255,255,0)");
+    ctx.fillStyle = core;
+    ctx.beginPath(); ctx.arc(0, 0, R * 0.62, 0, 6.2832); ctx.fill();
+    // 対角4つの衛星粒(回転させたときに「回っている」のが見える)
+    ctx.fillStyle = T.color;
+    for (var k = 0; k < 4; k++) {
+      var a = k * Math.PI / 2 + Math.PI / 4;
+      ctx.beginPath();
+      ctx.arc(Math.cos(a) * R * 1.45, Math.sin(a) * R * 1.45, 2.6, 0, 6.2832);
+      ctx.fill();
+    }
+    orbSprites[type] = cv;
+    return cv;
+  }
+  var BULLET_BASE = 1 / ORB_SCALE;   // 表示上の基準スケール(pulse はこれに掛ける)
+  function makeBulletView(type) {
+    var bmp = new createjs.Bitmap(orbSprite(type));
+    bmp.regX = bmp.regY = bmp.image.width / 2;
+    bmp.scaleX = bmp.scaleY = BULLET_BASE;
+    bmp.compositeOperation = "lighter";
+    return bmp;
   }
 
   // 扇状に発射。狙いは「発射した瞬間の大砲の位置」で固定(=横に逃げれば躱せる。
   // boss.js の barrage と同じフェアネスの作法)
-  function fireFan(x, y) {
+  function fireFan(x, y, type) {
     var S = PP.SKULL;
+    var T = TYPES[type];
     var aimX = PP.cannon.x, aimY = PP.cannon.y - 20;
     var base = Math.atan2(aimY - y, aimX - x);
     var spread = S.spreadDeg * Math.PI / 180;
@@ -70,37 +136,39 @@
     var spd = Math.min(S.speedMax, Math.max(S.speedMin, dist / S.travelTime));
     for (var i = 0; i < S.fan; i++) {
       var ang = S.fan > 1 ? base - spread / 2 + spread * (i / (S.fan - 1)) : base;
-      var view = makeBulletView();
+      var view = makeBulletView(type);
       view.x = x; view.y = y;
       cont.addChild(view);
       bullets.push({
         x: x, y: y,
         vx: Math.cos(ang) * spd,
         vy: Math.sin(ang) * spd,
-        r: S.orbR, view: view, t: Math.random() * 6.28
+        r: S.orbR, type: type, view: view, t: Math.random() * 6.28
       });
     }
-    PP.fx.ring(x, y, "#ff4d4d", 10, 70, 400);
+    // 発射口の閃光もデバフ色で(二重リング+白閃で「撃った」を大きく)
+    PP.fx.flash(x, y, "rgba(255,255,255,0.85)", 40);
+    PP.fx.ring(x, y, T.color, 10, 80, 420);
+    PP.fx.ring(x, y, T.color, 4, 44, 300);
+    PP.fx.burst(x, y, T.color, 8, 1.3);
     PP.audio.darkMagic();   // 暗黒魔法の発射音
   }
 
-  // 妖弾が大砲に命中: 停止か操作反転のどちらかがかかる(50/50)。
+  // 妖弾が大砲に命中: 弾の種類どおりのデバフがかかる(種類は予兆時に決定済み。
+  // 弾の色=かかるデバフなので、どれを避けるかの取捨選択ができる)。
   // 直後の無敵(hitIFrames)で扇の残りが多段ヒットしないようにする
-  function applyHit() {
+  function applyHit(type) {
     var g = PP.game;
     var S = PP.SKULL;
+    var T = TYPES[type];
     playerHitCd = S.hitIFrames;
     PP.fx.shake(8, 0.25);
     PP.audio.debuff();   // 状態異常がかかった合図
-    if (Math.random() < 0.5) {
-      g.bossFx.freeze = S.freezeDur;
-      PP.fx.ring(PP.cannon.x, PP.cannon.y - 40, "#ffd24a", 10, 90, 500);
-      PP.fx.floatText("⛓ 動けない!", PP.cannon.x, PP.cannon.y - 70, "#ffd24a", 18);
-    } else {
-      g.bossFx.addle = S.addleDur;
-      PP.fx.ring(PP.cannon.x, PP.cannon.y - 40, "#ff5d8f", 10, 90, 500);
-      PP.fx.floatText("🌀 操作が逆に!", PP.cannon.x, PP.cannon.y - 70, "#ff5d8f", 18);
-    }
+    if (type === "freeze") g.bossFx.freeze = S.freezeDur;
+    else g.bossFx.addle = S.addleDur;
+    PP.fx.ring(PP.cannon.x, PP.cannon.y - 40, T.color, 10, 90, 500);
+    PP.fx.screenFlash(T.color, 0.1, 220);   // 画面縁も薄く同色に染めて被弾を強調
+    PP.fx.floatText(T.label, PP.cannon.x, PP.cannon.y - 70, T.color, 18);
   }
 
   function removeBullet(i) {
@@ -134,7 +202,7 @@
         if (fx) fx.ring.alpha = 0.55 + 0.45 * Math.sin(t * 18);
         if (b.skullTele <= 0) {
           lane.rail.posAtInto(b.d + (b.slide || 0), tmpPos);
-          fireFan(tmpPos.x, tmpPos.y);
+          fireFan(tmpPos.x, tmpPos.y, b.skullType || pickType());
           b.skullCd = S.cooldownMin + Math.random() * (S.cooldownMax - S.cooldownMin);
           if (fx) fx.ring.alpha = 0.4;
         }
@@ -145,10 +213,14 @@
       if (fx) fx.ring.alpha = 0.3 + 0.15 * Math.sin(t * 3);
       b.skullCd = (b.skullCd === undefined ? S.firstDelay : b.skullCd) - dt;
       if (b.skullCd <= 0) {
+        // どのデバフを撃つかは予兆の時点で決め、予兆リングをその色で出す
+        // (=飛んでくる前から種類が読める)。警告音の高さも種類で変える
+        b.skullType = pickType();
+        var T = TYPES[b.skullType];
         b.skullTele = S.telegraph;
         lane.rail.posAtInto(b.d + (b.slide || 0), tmpPos);
-        PP.fx.ring(tmpPos.x, tmpPos.y, "#ff4d4d", 8, 50, S.telegraph * 1000);
-        PP.audio.beep(140, 0.3, "sawtooth", 0.08);
+        PP.fx.ring(tmpPos.x, tmpPos.y, T.color, 8, 50, S.telegraph * 1000);
+        PP.audio.beep(T.teleBeep, 0.3, "sawtooth", 0.08);
       }
     });
   }
@@ -166,10 +238,13 @@
       b.y += b.vy * dt;
       b.t += dt;
       b.view.x = b.x; b.view.y = b.y;
-      var pulse = 1 + 0.12 * Math.sin(b.t * 10);
-      b.view.scaleX = b.view.scaleY = pulse;
-      // 尾を引く残光(軌道が線で読める=避けやすい)
-      if (Math.random() < dt * 20) PP.fx.burst(b.x, b.y, "#ff4d4d", 1, 0.5);
+      // 脈動 + 衛星粒の回転(弾幕STGらしい「生きてる弾」。回転は見た目だけで
+      // 当たり判定 r は不変)。基準スケールは焼き込み解像度ぶんの縮小
+      var pulse = 1 + 0.14 * Math.sin(b.t * 10);
+      b.view.scaleX = b.view.scaleY = BULLET_BASE * pulse;
+      b.view.rotation = b.t * 160;
+      // 尾を引く残光をデバフ色で(軌道が色の線で読める=何が来るか分かる)
+      if (Math.random() < dt * 26) PP.fx.burst(b.x, b.y, TYPES[b.type].color, 1, 0.5);
 
       // 迎撃: 自分の弾をぶつけると相殺して消せる(通常弾は1発と交換、
       // ミサイルは貫通なので消費せずに薙ぎ払える)
@@ -179,7 +254,7 @@
         var dx = sh.x - b.x, dy = sh.y - b.y;
         var rr = b.r + PP.R * 0.9;
         if (dx * dx + dy * dy < rr * rr) {
-          PP.fx.burst(b.x, b.y, "#ff4d4d", 10, 1.2);
+          PP.fx.burst(b.x, b.y, TYPES[b.type].color, 10, 1.2);
           PP.fx.flash(b.x, b.y, "rgba(255,255,255,0.8)", 34);
           PP.fx.floatText("迎撃!", b.x, b.y - 26, "#8ef0d0", 18);
           PP.audio.beep(720, 0.1, "square", 0.08);
@@ -198,7 +273,7 @@
       if (playerHitCd <= 0 &&
           Math.abs(b.x - cx) <= O.catchW &&
           b.y >= cy - O.catchTop && b.y <= cy + O.catchBottom) {
-        applyHit();
+        applyHit(b.type);
         removeBullet(i);
         continue;
       }

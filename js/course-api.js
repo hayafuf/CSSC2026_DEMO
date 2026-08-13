@@ -43,91 +43,13 @@
   var LS_PREFIX = "pp.course.";   // 各コースの保存キー
   var LS_INDEX = "pp.course.index"; // スロット名の一覧
 
-  // ---- 内部ユーティリティ ----
-  function isNum(v) { return typeof v === "number" && isFinite(v); }
-
-  // 制御点1つの複製。オプションの3要素目 = その角の角丸半径(直角の道のとき有効。
-  // 0=直角、未指定=コース既定の corner)を保つ。
-  function copyPt(p) {
-    return (p.length > 2 && isNum(+p[2])) ? [+p[0], +p[1], +p[2]] : [+p[0], +p[1]];
-  }
-
-  // 入力を [[x,y],...](または [[x,y,r],...])の素直な配列へ正規化する。
-  // ctrl 直指定でも、本体と同じ lanes:[{ctrl}] 形でも受け付ける。
-  function normalizeCtrl(spec) {
-    var ctrl = spec.ctrl;
-    if (!ctrl && spec.lanes && spec.lanes[0]) ctrl = spec.lanes[0].ctrl;
-    if (!Array.isArray(ctrl)) return [];
-    return ctrl.map(function (p) {
-      if (Array.isArray(p)) return copyPt(p);
-      if (p && isNum(p.x) && isNum(p.y)) return [+p.x, +p.y]; // {x,y} も許容
-      return [NaN, NaN];
-    });
-  }
-
-  // 区間指定(tunnels / raised)を {from,to}(全長比 0..1)の配列へ正規化する。
-  // {from,to} でも [from,to] でも受け付ける。1つも無ければ undefined。
-  function normalizeSpans(spec) {
-    if (!Array.isArray(spec)) return undefined;
-    var out = [];
-    for (var i = 0; i < spec.length; i++) {
-      var t = spec[i];
-      var a = (t && t.from !== undefined) ? t.from : (t && t[0]);
-      var b = (t && t.to !== undefined) ? t.to : (t && t[1]);
-      if (isNum(+a) && isNum(+b)) out.push({ from: +a, to: +b });
-    }
-    return out.length ? out : undefined;
-  }
-
-  // レーンの raisedOver:[相手レーンindex,…](その相手と交差する所では自分が橋=上)を
-  // 整数の配列へ。1つも無ければ undefined。
-  function normalizeRaisedOver(spec) {
-    if (!Array.isArray(spec)) return undefined;
-    var out = [];
-    for (var i = 0; i < spec.length; i++) {
-      var n = Math.round(+spec[i]);
-      if (isNum(n) && n >= 0 && out.indexOf(n) < 0) out.push(n);
-    }
-    return out.length ? out : undefined;
-  }
-
-  // コースの速度プロファイル(部分指定可)を数値項目だけ拾って複製する。
-  // 1つも無ければ undefined = そのコースは既定の速度(PP.SPEED)で走る。
-  function normalizeSpeed(spec) {
-    if (!spec || typeof spec !== "object") return undefined;
-    var out = null;
-    for (var k in PP.SPEED) {
-      if (isNum(+spec[k])) { out = out || {}; out[k] = +spec[k]; }
-    }
-    return out || undefined;
-  }
-
-  // 入力を lanes 配列 [{ctrl, tunnels?, raised?, raisedOver?}, …] へ正規化する。
-  // ctrl 直指定(単一レーン)は要素1の lanes に包む。旧来の保存形式(ctrl のみ)も
-  // 新形式(lanes 付き・多レーン・raised)もこれで同じ内部表現になる。
-  function normalizeLanes(spec) {
-    var lanesIn = (spec.lanes && spec.lanes.length) ? spec.lanes : null;
-    if (!lanesIn) return [{ ctrl: normalizeCtrl(spec) }];
-    return lanesIn.map(function (ln) {
-      var lane = { ctrl: normalizeCtrl(ln) };
-      var tun = normalizeSpans(ln.tunnels);
-      var rai = normalizeSpans(ln.raised);
-      var rov = normalizeRaisedOver(ln.raisedOver);
-      if (tun) lane.tunnels = tun;
-      if (rai) lane.raised = rai;
-      if (rov) lane.raisedOver = rov;
-      return lane;
-    });
-  }
-
-  // レーン1本の複製(ctrl は角丸半径ごと、tunnels/raised は {from,to} を複製)。
-  function copyLane(ln) {
-    var out = { ctrl: ln.ctrl.map(copyPt) };
-    if (ln.tunnels) out.tunnels = ln.tunnels.map(function (s) { return { from: s.from, to: s.to }; });
-    if (ln.raised) out.raised = ln.raised.map(function (s) { return { from: s.from, to: s.to }; });
-    if (ln.raisedOver) out.raisedOver = ln.raisedOver.slice();
-    return out;
-  }
+  // ---- コースデータ操作(course-utils.js) ----
+  var courseUtils = PP.courseUtils;
+  var isNum = courseUtils.isNumber;
+  var copyPt = courseUtils.copyPoint;
+  var copyLane = courseUtils.copyLane;
+  var normalizeSpeed = courseUtils.normalizeSpeed;
+  var normalizeLanes = courseUtils.normalizeLanes;
 
   // ---- Course: 作りかけ/完成のコース1つを表す ----
   function Course(spec) {

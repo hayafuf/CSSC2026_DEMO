@@ -273,6 +273,8 @@
   </script>
   <!-- 依存順に読み込む(config が PP 名前空間を作り、main が起動する) -->
   <script src="js/config.js"></script>
+  <!-- コース API / エディタで共有する純粋なデータ操作 -->
+  <script src="js/course-utils.js"></script>
   <script src="js/background.js"></script>
   <script src="js/audio.js"></script>
   <script src="js/rail.js"></script>
@@ -290,6 +292,8 @@
   <!-- ボス戦(クラーケンの海域)。main より先に読む(startLevel が PP.boss を呼ぶ) -->
   <script src="js/boss.js"></script>
   <script src="js/skull.js"></script>
+  <!-- 入力イベントを main のゲーム進行から分離。main の初期化時に接続する -->
+  <script src="js/input.js"></script>
   <script src="js/main.js"></script>
   <!-- ポーズ機能(main の後: PP.game / PP.hud / PP.audio を使う) -->
   <script src="js/pause.js"></script>
@@ -306,59 +310,7 @@
       });
     }
   </script>
-  <!-- 全画面表示(F キー or 右上ボタン)。ラップ要素ごと全画面にして
-       キャンバスを画面いっぱいに収める。CreateJS は表示サイズから座標を
-       換算するので、拡大しても大砲の狙いはズレない。 -->
-  <script>
-    (function () {
-      var wrap = document.getElementById("stageWrap");
-      var btn = document.getElementById("fsBtn");
-      function fsEl() { return document.fullscreenElement || document.webkitFullscreenElement; }
-      function toggleFs() {
-        if (fsEl()) {
-          (document.exitFullscreen || document.webkitExitFullscreen).call(document);
-        } else if (wrap.requestFullscreen || wrap.webkitRequestFullscreen) {
-          (wrap.requestFullscreen || wrap.webkitRequestFullscreen).call(wrap);
-        }
-      }
-      function sync() { btn.textContent = fsEl() ? "🗗" : "⛶"; }
-      btn.addEventListener("click", toggleFs);
-      document.addEventListener("fullscreenchange", sync);
-      document.addEventListener("webkitfullscreenchange", sync);
-      window.addEventListener("keydown", function (e) {
-        if (e.code !== "KeyF") return;
-        var t = e.target;
-        if (t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable)) return;
-        e.preventDefault();
-        toggleFs();
-      });
-
-      // ---------- スマホ: 最初のタップで全画面 + 横向き固定を試みる ----------
-      // 全画面や画面方向の固定は「ユーザー操作の中」でしか許可されないので、
-      // タイトル画面の最初のタップ(=出航のタップを兼ねる)で試みる。
-      // どの API が失敗してもゲーム開始は止めない:
-      //   - iPhone Safari は全画面 API 自体が無い → そのまま通常表示で遊べる
-      //   - iPad Safari は全画面は出来るが横固定は不可 → CSS の縦向き案内で誘導
-      if (window.matchMedia && matchMedia("(pointer: coarse)").matches) {
-        wrap.addEventListener("pointerdown", function goFs() {
-          wrap.removeEventListener("pointerdown", goFs);
-          function lockLandscape() {
-            try {
-              if (screen.orientation && screen.orientation.lock)
-                screen.orientation.lock("landscape").catch(function () {});
-            } catch (e2) {}
-          }
-          try {
-            if (fsEl()) { lockLandscape(); return; }
-            var req = wrap.requestFullscreen || wrap.webkitRequestFullscreen;
-            if (!req) return;                      // 全画面 API なし: 何もしない
-            var p = req.call(wrap);
-            if (p && p.then) p.then(lockLandscape).catch(function () {});
-            else lockLandscape();
-          } catch (e1) {}
-        });
-      }
-    })();
-  </script>
+  <!-- 全画面表示(F キー / 右上ボタン)とモバイル横向き固定 -->
+  <script src="js/fullscreen.js"></script>
 </body>
 </html>

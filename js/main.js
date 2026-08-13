@@ -1,5 +1,5 @@
 /* =========================================================
- * main.js — 初期化・ゲーム進行・メインループ・入力
+ * main.js — 初期化・ゲーム進行・メインループ
  *
  * ゲーム進行は原作 Arcade モード式:
  * 生存ゲージ(秒数)が空になるまで耐えればレベルクリア。
@@ -130,6 +130,7 @@
     g.specialLoaded = false;
     g.finishing = false;
     PP.powerups.clear();
+    PP.chain.resetWind();   // 風の物理も仕切り直す(吹いてる最中のリトライで凪が誤発火しないように)
     PP.upgrades.onLevelStart();   // 【強化】自動系タイマー・救済を仕切り直す(段数は維持)
     // 骸骨玉の弾・墨と状態異常を仕切り直す(リトライ・再出航もここを通る)。
     // ボス戦は boss.setActive → reset → clearStatusFx が別途ゼロ化するが、
@@ -273,6 +274,7 @@
     PP.fx.screenFlash("rgba(255,214,110,0.28)", 0.28, 450);
     PP.fx.shake(14, 0.4);
     PP.fx.floatText("✨ 距離ボーナス!", PP.W / 2, PP.H / 2 - 60, "#ffd24a", 30);
+    PP.audio.sweepStart();   // 発進の巻き上げライザー + 号砲
     sweep = { t: 0, parts: parts };
   }
 
@@ -297,9 +299,12 @@
         // 飽和しても超過分が捨てられるだけ=重くならない)
         PP.fx.burst(p.x, p.y, (pt.n & 1) ? "#fff3c0" : "#ffd24a", 7, 1.4);
         if ((pt.n & 1) === 0) PP.fx.ring(p.x, p.y, "#ffd24a", 4, 52, 260);
-        if ((pt.n & 3) === 0) {
-          // 音程が駆け上がるチクタク音(全段鳴らすとうるさいので4段に1回)
-          PP.audio.beep(480 + (pt.n % 32) * 14, 0.05, "square", 0.05);
+        if ((pt.n & 1) === 0) {
+          // 駆け上がる多層のジッパー音(audio.js の sweepTick)。2段に1回で
+          // 毎秒40発近く鳴るので1発は小さめに作ってある。うるさければ
+          // (pt.n & 3) に戻せば密度が半分になる。マルチレーンで音が飽和する
+          // ようなら i === 0 のパートだけ鳴らすのも手
+          PP.audio.sweepTick(pt.n);
         }
         if ((pt.n & 7) === 0) {   // 8個ごとの節目は大きく光って小さく揺れる
           PP.fx.flash(p.x, p.y, "#ffe9a0", 40);
@@ -321,6 +326,7 @@
         PP.fx.burst(pe.x, pe.y, "#ffd24a", 22, 2.4);
         PP.fx.burst(pe.x, pe.y, "#fff3c0", 12, 1.6);
         PP.fx.shake(16, 0.35);
+        PP.audio.sweepFinish();   // 終点の花火に音を付ける(低音の腹 + アルペジオ)
         PP.fx.floatText("距離ボーナス +" + pt.bonus, pe.x, pe.y - 26, "#ffd24a", 26);
       }
     }
@@ -524,17 +530,7 @@
     var g = PP.game;
 
     if (g.state === "playing") {
-      // 携帯の ◀▶ ボタン: 短押しは低速で微調整、押し続けると加速して横断も速い
-      if (touchMoveDir) {
-        touchMoveHeld += dt;
-        var mv = TOUCH_MOVE_V0 + (TOUCH_MOVE_V1 - TOUCH_MOVE_V0) *
-                 Math.min(1, touchMoveHeld / TOUCH_MOVE_RAMP);
-        // ボスの Addle!!(操作反転)中は ◀▶ ボタンの向きも反転する
-        var tDir = g.bossFx.addle > 0 ? -touchMoveDir : touchMoveDir;
-        PP.cannon.setX(PP.cannon.x + tDir * mv * dt);
-      } else {
-        touchMoveHeld = 0;
-      }
+      PP.input.update(dt);
       if (g.comboTimer > 0) {
         g.comboTimer -= dt;
         if (g.comboTimer <= 0) { g.combo = 0; PP.hud.update(); }
@@ -766,119 +762,12 @@
   // 【課題5】の復帰(ステージ最初からやり直し)。main.js 内では retryLevel() で呼べる
   PP.retryLevel = retryLevel;
 
-  // ---------- 入力 ----------
-  // タッチ操作は画面の仮想ボタン(index.html の #touchUI)に一本化:
-  //   ◀ ▶ ボタン(押しっぱなし) … 大砲の移動(押し続けると加速)
-  //   FIRE ボタン               … 発射(長押しで連射)
-  //   ⇄ ボタン / 大砲をタップ  … 玉の交換
-  // 盤面を指で触っても大砲は動かない(誤操作防止。ボタンだけで遊ぶ)。
-  // マウスは従来どおり「動かして照準、クリックした瞬間に発射」。
-  var touchAiming = false;   // タッチで盤面に触れている最中か(大砲タップ交換の判定用)
-  var touchDownX = 0, touchDownT = 0, touchOnCannon = false;
-  var touchMoveDir = 0;               // ◀▶ ボタンで押されている方向(-1/0/+1)
-  var TOUCH_MOVE_V0 = 600;            // ◀▶ 押し始めの速さ px/s(微調整用)
-  var TOUCH_MOVE_V1 = 1800;           // ◀▶ 押し続けたときの最高速 px/s
-  var TOUCH_MOVE_RAMP = 0.45;         // 最高速に達するまでの秒数
-  var touchMoveHeld = 0;              // ◀▶ を押し続けている秒数
-  function isTouchEv(e) {
-    var n = e && e.nativeEvent;
-    return !!(n && n.type && n.type.indexOf("touch") === 0);
-  }
-
-  // ボスの Addle!!(操作反転)中は、マウスの狙い位置を左右反転して返す。
-  // cannon.setX の中ではなくマウス入力の入り口で反転する: ◀▶ ボタンは
-  // 「今の位置 + 差分」で setX を呼ぶので、setX 内で反転すると毎フレーム
-  // 鏡写しに往復するフィードバックになってしまう(あちらは tick 側で反転)。
-  function aimStageX(sx) {
-    return PP.game.bossFx.addle > 0 ? PP.W - sx : sx;
-  }
-
-  function onStageDown(e) {
-    if (PP.editor && PP.editor.active) return;
-    if (e.nativeEvent && e.nativeEvent.button === 2) return;   // 右ボタンは交換専用
-    var g = PP.game;
-    if (g.state === "loading") return;
-    PP.audio.unlock();
-    // ポーズ中のクリックは「再開」専用。このクリックで発射はしない
-    if (PP.pauseCtl && PP.pauseCtl.active) {
-      PP.pauseCtl.resume();
-      return;
-    }
-    // 難易度ボタン(【課題1】)のクリックを先に調べる。難易度は「1回の出航」単位
-    // なので、ボタンが出る画面(タイトル/ゲームオーバー/全制覇後)でだけ当たる。
-    // ボタンに当たったら難易度を変えるだけで、ゲームは始めない。
-    var diffHit = PP.hud.hitDifficulty(e.stageX, e.stageY);
-    if (diffHit) {
-      g.difficulty = diffHit;
-      PP.hud.setDifficulty(diffHit);
-      return;
-    }
-    // 【強化】宝玉の力の3択中はカードの選択だけを受け付ける。
-    // カード外のクリックでも return して、再開直後の誤発射を防ぐ
-    if (g.state === "choosing") {
-      var upId = PP.upgrades.hitChoice(e.stageX, e.stageY);
-      if (upId) PP.upgrades.choose(upId);
-      return;
-    }
-    if (g.state === "title") {
-      PP.hud.hideOverlay();
-      startLevel();
-    } else if (g.state === "playing") {
-      // ⏸ ボタンへのクリックは発射ではなくポーズ
-      if (PP.hud.hitPauseBtn(e.stageX, e.stageY)) {
-        PP.pauseCtl.pause("manual");
-        return;
-      }
-      // ⇄ 交換ボタン(タッチ端末用。右クリック/Space の代わり)は発射ではなく交換
-      if (PP.hud.hitSwapBtn(e.stageX, e.stageY)) {
-        PP.cannon.swap();
-        return;
-      }
-      // 特殊弾ストックスロットへのクリックは発射ではなく交換
-      if (PP.cannon.hitStock(e.stageX, e.stageY)) {
-        PP.cannon.toggleSpecial();
-        return;
-      }
-      if (isTouchEv(e)) {
-        // タッチで盤面を触っても大砲は動かさない(操作は ◀▶/FIRE/⇄ ボタン)。
-        // 「大砲を動かさず短くタップ」だけは玉交換の合図として拾う(stagemouseup 側)
-        touchAiming = true;
-        touchDownX = e.stageX; touchDownT = Date.now();
-        touchOnCannon = Math.abs(e.stageX - PP.cannon.x) < 80 && e.stageY > PP.cannon.y - 90;
-      } else {
-        PP.cannon.setX(aimStageX(e.stageX));
-        PP.cannon.fire();
-      }
-    } else if (g.state === "clear") {
-      g.level++;
-      PP.hud.hideOverlay();
-      startLevel();
-    } else if (g.state === "gameclear") {
-      // 全ステージ制覇。スコアを畳んで最初の海からもう一周
-      g.level = DBG_LEVEL || 1;       // ?level=N のデバッグ中は同じレベルから再開
-      g.score = 0;
-      g.coins = 0;
-      g.lives = PP.LIFE.startLives;   // 新しいランは所持ライフから始まる【課題5】
-      PP.upgrades.onRunReset();       // 【強化】宝玉の力もランと一緒に畳む
-      PP.hud.hideOverlay();
-      startLevel();
-    } else if (g.state === "over") {
-      g.level = DBG_LEVEL || 1;       // ?level=N のデバッグ中は同じレベルから再開
-      g.score = 0;
-      g.coins = 0;
-      g.lives = PP.LIFE.startLives;   // 新しいランは所持ライフから始まる【課題5】
-      PP.upgrades.onRunReset();       // 【強化】宝玉の力もランと一緒に畳む
-      PP.hud.hideOverlay();
-      startLevel();
-    }
-  }
-
   // ---------- 初期化 ----------
   function init() {
     stage = PP.stage = new createjs.Stage("gameCanvas");
     // スマホ/タブレット対応: タッチを CreateJS のマウスイベントに変換する。
-    // これでタップが stagemousedown、指のドラッグが stagemousemove として届く
-    // (タップ = その位置へ照準して発射。既存の onStageDown がそのまま使える)。
+    // これでタップが stagemousedown、指のドラッグが stagemousemove として
+    // input.js に届く。入力側はタッチとマウスの操作体系を分けて扱う。
     if (createjs.Touch.isSupported()) createjs.Touch.enable(stage);  // シングルタッチで十分
 
     // 玉は立体交差・トンネルのために層を分ける:
@@ -953,134 +842,18 @@
       }
     );
 
-    stage.on("stagemousedown", onStageDown);
-    // 盤面のタッチは離しても発射しない(発射は FIRE ボタン)。
-    // 大砲の上で「動かさず短く」タップしたときだけ、玉の交換
-    stage.on("stagemouseup", function (e) {
-      if (!touchAiming) return;
-      touchAiming = false;
-      if (PP.game.state !== "playing") return;
-      if (PP.pauseCtl && PP.pauseCtl.active) return;
-      var moved = Math.abs(e.stageX - touchDownX) > 24;
-      var quick = Date.now() - touchDownT < 350;
-      if (touchOnCannon && !moved && quick) PP.cannon.swap();
-    });
-    // 音の解錠の保険: ブラウザの自動再生制限は「ユーザー操作の中」でしか
-    // 解けない。タッチ変換が効かない環境でも最初の1タップで確実に解く
-    document.addEventListener("pointerdown", function () { PP.audio.unlock(); }, { once: true });
-
-    // ---- 携帯用の操作ボタン(index.html の #touchUI)の配線 ----
-    // 表示/非表示は CSS(pointer: coarse)が決めるので、ここでは配線だけ行う
-    (function wireTouchButtons() {
-      function canPlay() {
-        return PP.game.state === "playing" && !(PP.pauseCtl && PP.pauseCtl.active);
-      }
-      // 押しっぱなしで効く移動ボタン。指が滑って外れても止まるように
-      // pointercancel / lostpointercapture でも解除する
-      function bindHold(id, dir) {
-        var el = document.getElementById(id);
-        if (!el) return;
-        el.addEventListener("pointerdown", function (ev) {
-          ev.preventDefault();
-          PP.audio.unlock();
-          if (el.setPointerCapture) { try { el.setPointerCapture(ev.pointerId); } catch (e2) {} }
-          touchMoveDir = dir;
-        });
-        function stop() { if (touchMoveDir === dir) touchMoveDir = 0; }
-        el.addEventListener("pointerup", stop);
-        el.addEventListener("pointercancel", stop);
-        el.addEventListener("lostpointercapture", stop);
-        el.addEventListener("contextmenu", function (ev) { ev.preventDefault(); });
-      }
-      // 押した瞬間に1回だけ効くボタン。ポーズ中は「再開」として働く
-      function bindTap(id, action) {
-        var el = document.getElementById(id);
-        if (!el) return;
-        el.addEventListener("pointerdown", function (ev) {
-          ev.preventDefault();
-          PP.audio.unlock();
-          if (PP.pauseCtl && PP.pauseCtl.active) { PP.pauseCtl.resume(); return; }
-          if (canPlay()) action();
-        });
-        el.addEventListener("contextmenu", function (ev) { ev.preventDefault(); });
-      }
-      // FIRE は押した瞬間に1発 + 押しっぱなしで連射。指が滑って外れても止まる
-      function bindFire(id) {
-        var el = document.getElementById(id);
-        if (!el) return;
-        var timer = null;
-        function stop() { if (timer) { clearInterval(timer); timer = null; } }
-        el.addEventListener("pointerdown", function (ev) {
-          ev.preventDefault();
-          PP.audio.unlock();
-          if (PP.pauseCtl && PP.pauseCtl.active) { PP.pauseCtl.resume(); return; }
-          if (!canPlay()) return;
-          PP.cannon.fire();
-          if (el.setPointerCapture) { try { el.setPointerCapture(ev.pointerId); } catch (e2) {} }
-          stop();
-          timer = setInterval(function () {
-            if (!canPlay()) { stop(); return; }
-            PP.cannon.fire();
-          }, 180);
-        });
-        el.addEventListener("pointerup", stop);
-        el.addEventListener("pointercancel", stop);
-        el.addEventListener("lostpointercapture", stop);
-        el.addEventListener("contextmenu", function (ev) { ev.preventDefault(); });
-      }
-      bindHold("tLeft", -1);
-      bindHold("tRight", 1);
-      bindFire("tFire");
-      bindTap("tSwap", function () { PP.cannon.swap(); });
-    })();
-
-    stage.on("stagemousemove", function (e) {
-      if (PP.pauseCtl && PP.pauseCtl.active) return;   // ポーズ中は大砲も動かさない
-      if (isTouchEv(e)) return;   // タッチでは大砲を動かさない(◀▶ ボタンで移動)
-      PP.cannon.setX(aimStageX(e.stageX));
-    });
-    // 右クリックで玉を交換(メニューは出さない)
-    document.getElementById("gameCanvas").addEventListener("contextmenu", function (e) {
-      e.preventDefault();
-      if (PP.editor && PP.editor.active) return;   // エディタ中は右クリック=点の削除
-      if (PP.pauseCtl && PP.pauseCtl.active) return;
-      PP.cannon.swap();
-    });
-    window.addEventListener("keydown", function (e) {
-      if (PP.editor && PP.editor.active) return;   // エディタ中はゲームのキー操作を止める
-      PP.audio.unlock();
-      if (e.code === "KeyP") {
-        // ポーズの切り替え(プレイ中のみ有効。pause.js 側でガードしている)
-        if (PP.pauseCtl) PP.pauseCtl.toggle();
-        return;
-      }
-      // ポーズ中は P 以外のゲーム操作を受け付けない
-      if (PP.pauseCtl && PP.pauseCtl.active) return;
-      if (e.code === "Space") {
-        e.preventDefault();
-        PP.cannon.swap();
-      } else if (e.code === "KeyM") {
-        PP.fx.floatText(PP.audio.toggleMute() ? "🔇 消音" : "🔊 音あり",
-          PP.W / 2, 88, "#f0e6c8", 22);
-      } else if (/^Digit[1-3]$/.test(e.code) && PP.game.state === "choosing") {
-        // 【強化】宝玉の力の3択は 1〜3 キーでも選べる
-        PP.upgrades.chooseIndex(parseInt(e.code.charAt(5), 10) - 1);
-      } else if (/^Digit[1-4]$/.test(e.code)) {
-        // 1〜4 キーでも難易度(【課題1】)を選べる。難易度ボタンが出ている画面
-        // (タイトル/ゲームオーバー/全制覇後)だけ有効。ステージの合間は変えられない
-        var st = PP.game.state;
-        if (st === "title" || st === "over" || st === "gameclear") {
-          var key = PP.DIFFICULTY_ORDER[parseInt(e.code.charAt(5), 10) - 1];
-          if (key) {
-            PP.game.difficulty = key;
-            PP.hud.setDifficulty(key);
-          }
-        }
-      }
+    // 入力状態とイベント配線は input.js に集約する。ゲーム進行に必要な
+    // コールバックだけを渡し、入力モジュールから main の内部状態へは触れさせない。
+    PP.input.attach(stage, {
+      startLevel: startLevel,
+      restartLevel: function () { return DBG_LEVEL || 1; }
     });
 
     createjs.Ticker.timingMode = createjs.Ticker.RAF;
     createjs.Ticker.on("tick", tick);
+    // headless smoke test でも確認できる、全同期初期化の完了マーカー。
+    // audio preload の完了前でも stage・各モジュール・入力配線は利用可能になっている。
+    document.documentElement.setAttribute("data-pp-ready", "true");
   }
 
   if (typeof createjs !== "undefined") init();

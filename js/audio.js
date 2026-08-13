@@ -102,6 +102,26 @@
     } catch (e) { /* 無音でも続行 */ }
   }
 
+  // beep の兄弟: 周波数が f0 から f1 へ滑らかに動く(ライザー/フォール用)
+  function gliss(f0, f1, dur, type, vol) {
+    if (muted) return;
+    try {
+      var ctx = ensureCtx();
+      if (!ctx) return;
+      var t = ctx.currentTime;
+      var osc = ctx.createOscillator();
+      var gain = ctx.createGain();
+      osc.type = type || "sawtooth";
+      osc.frequency.setValueAtTime(f0, t);
+      osc.frequency.linearRampToValueAtTime(f1, t + dur);
+      gain.gain.setValueAtTime(vol || 0.1, t);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
+      osc.connect(gain).connect(seBus || ctx.destination);
+      osc.start(t);
+      osc.stop(t + dur);
+    } catch (e) { /* 無音でも続行 */ }
+  }
+
   // ---------- 効果音(mp3) ----------
   var sources = [];   // preload() で読み込み完了を待つ音源
   var sfxAll = [];    // sfx() が作った再生関数(携帯対応の解錠で使う)
@@ -566,6 +586,29 @@
     // 生存ゲージの時間切れ(掃討フェーズ移行)
     timeOver: seTimeOver,
     swap: function () { beep(440, 0.08, "sine", 0.06); },
+    // ---- クリア走査(距離ボーナス)の音 ----
+    // 発進: 巻き上がるライザー + 腹に来る号砲(樽口の flash/ring/burst と同時に鳴らす)
+    sweepStart: function () {
+      gliss(180, 760, 0.5, "sawtooth", 0.12);
+      beep(90, 0.4, "sine", 0.2);
+    },
+    // 走査のチクタク(n = 通過した玉数)。折り返さず頭打ちまで駆け上がり続ける。
+    // 毎秒40発近く重なる前提なので1発は小さく、主音+1オクターブ下の胴の2層。
+    // 8個ごとの節目(視覚の flash と同じ拍)にだけ上の煌めきを足す
+    sweepTick: function (n) {
+      var f = 480 + Math.min(n * 12, 1300);
+      beep(f, 0.06, "square", 0.06);
+      beep(f * 0.5, 0.1, "sawtooth", 0.045);
+      if ((n & 7) === 0) beep(f * 2, 0.16, "triangle", 0.05);
+    },
+    // 走査の終点(レーンごと): 低音の腹 + 立ちのぼるアルペジオで大花火に音を付ける
+    sweepFinish: function () {
+      beep(70, 0.5, "sawtooth", 0.2);
+      beep(140, 0.28, "square", 0.1);
+      [784, 1047, 1319, 1568].forEach(function (f, i) {
+        setTimeout(function () { beep(f, 0.18, "square", 0.08); }, i * 45);
+      });
+    },
     catchItem: function () {
       beep(660, 0.08, "triangle", 0.1);
       setTimeout(function () { beep(990, 0.14, "triangle", 0.1); }, 70);
