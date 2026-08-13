@@ -13,13 +13,16 @@
  * 手詰まりの本体は「危機レーンの先頭グループ(樽に食い込んでいる塊)に、狙える
  * 同色の隣接ペアが1つも無い」状態。挿入の重なり解消は常に樽側へ押すので
  * (chain.js insertShot)、ペアを自作する行為自体が先頭を死線へ押し込む。
- * そこで危機レーンの局所ペア枯渇が一定時間続いたら:
+ * そこで「先頭が樽直前(PP.RESCUE.start)まで来ていて、かつ局所ペア枯渇」と
+ * 判定されたら、その場で(時間条件なしに):
  *   1) 装填玉が万能玉(🌈)になる … 当たった玉の色を継承して挿入される
  *      (chain.js insertShot)ので、どこに撃っても必ずペアが成立する
  *   2) 撃った弾の割り込みに限り2個で消える(chain.js resolveMatchAt)
  *   3) ドロップ率と ⚓💣 の出現重みが上がる(powerups.js)
  * 「+1D 挿入 → 即 -2D 消去+反動」が常に成立し、どこへ当てるかは腕への報酬。
- * ペアが盤面に戻った瞬間に解除される。しきい値は config.js の PP.RESCUE。
+ * 回復(ペアあり/樽直前から脱出)が recover 秒続いたら解除される(即時解除だと
+ * 発動⇄解除の明滅が起きる)。解除されても装填済みの万能玉は撃つまで残す。
+ * しきい値は config.js の PP.RESCUE。
  * ========================================================= */
 (function () {
   "use strict";
@@ -58,7 +61,6 @@
   var rescue = {
     active: false,   // 救済(2個消し・ドロップブースト)発動中か
     wild: false,     // 万能玉が装填されているか
-    droughtT: 0,     // ペア枯渇が続いている秒数
     recoverT: 0,     // 発動中、回復(枯渇でない)が続いている秒数(解除のデバウンス)
     scanT: 0,        // 次のペア走査までの秒数
     rearmT: 0,       // 万能玉の再武装までの秒数
@@ -427,7 +429,7 @@
   }
 
   // ---------- 手詰まり救済(海神の加護) ----------
-  // 局所判定: 危機レーン(先頭が樽際 PP.CRISIS.start を越えた)に限り、
+  // 局所判定: 樽直前のレーン(先頭が PP.RESCUE.start を越えた)に限り、
   // 「先頭の連結グループ(樽に食い込んでいる塊)」の狙える玉 frontBalls 個の中に
   // 同色の隣接ペアがあるかだけを見る。危機の解消に効くのは先頭グループを
   // 消すことだけなので、後方の離れたペアは数えない(全域判定だと塊率35%の
@@ -442,8 +444,9 @@
       var balls = lane.balls;
       if (!balls.length) return;
       var holeD = lane.rail.holeD;
-      // このレーンは危機か(先頭が樽際ゾーンに入っているか)
-      if (balls[0].d < holeD * PP.CRISIS.start) return;
+      // このレーンは樽直前か(危機演出のライン PP.CRISIS.start より、さらに
+      // 樽側の専用しきい値 PP.RESCUE.start。呑まれる寸前だけを救済の対象にする)
+      if (balls[0].d < holeD * PP.RESCUE.start) return;
       var prev = null, seen = 0, pair = false;
       for (var i = 0; i < balls.length && seen < PP.RESCUE.frontBalls; i++) {
         var b = balls[i];
@@ -478,13 +481,11 @@
       rescue.droughted = scanCrisisDrought();
     }
 
-    // なだれ込み中・危機レーン無し・先頭グループにペアあり → 枯渇ではない
+    // なだれ込み中・樽直前レーン無し・先頭グループにペアあり → 枯渇ではない
     if (!g.rolloutDone || !rescue.droughted) {
-      rescue.droughtT = 0;
-      // 発動中でも即時には解除しない: 反動で先頭が危機ラインを行き来したり、
+      // 発動中でも即時には解除しない: 反動で先頭が樽直前ラインを行き来したり、
       // 万能玉の着弾で一瞬だけペアが生まれたりするたびに解除⇄再発動が起きると、
-      // 装填玉が虹⇄通常色で明滅してしまう。「回復が recover 秒続いたら解除」
-      // (発動側の drought と対称のデバウンス)に均す
+      // 装填玉が虹⇄通常色で明滅してしまう。「回復が recover 秒続いたら解除」に均す
       if (rescue.active) {
         rescue.recoverT += dt;
         if (rescue.recoverT >= RS.recover) deactivateRescue();
@@ -493,8 +494,9 @@
     }
     rescue.recoverT = 0;
 
-    rescue.droughtT += dt;
-    if (!rescue.active && rescue.droughtT >= RS.drought) activateRescue();
+    // 枯渇は玉の並びで決まる「状態」なので、時間条件は重ねない:
+    // 樽直前+先頭グループにペア無し、と判定されたその場で発動する
+    if (!rescue.active) activateRescue();
 
     if (rescue.active) {
       // 万能玉を消費(発射)してもまだ枯渇が続くなら再武装(外した場合の保険)
@@ -528,10 +530,9 @@
     // 3個ルールに戻り、約束の2個消しが起きない」レースが生まれる
     // (飛行 ~0.3秒 + 割り込みアニメ 0.14秒 を覆う長さ)
     rescue.grace = 0.5;
-    if (rescue.wild) {
-      rescue.wild = false;
-      PP.cannon.refreshBalls();   // 装填玉の見た目を通常色へ戻す
-    }
+    // 装填済みの万能玉は取り上げない: 一度授けた玉を没収すると、狙いを
+    // 定めている間に虹⇄通常色が入れ替わって理不尽に見える。撃つまで有効の
+    // まま残し、解除は「以後の再武装をやめる」ことだけを意味する
     PP.fx.floatText("加護が解けた", PP.W / 2, 96, "#b0d8cc", 16);
   }
 
@@ -560,7 +561,6 @@
     autoloadT = has("autoload") ? val("autoload") : 0;
     rescue.active = false;
     rescue.wild = false;
-    rescue.droughtT = 0;
     rescue.recoverT = 0;
     rescue.scanT = 0;
     rescue.rearmT = 0;

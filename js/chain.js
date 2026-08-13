@@ -31,7 +31,11 @@
 
   // 逆風(reverse)の風速。発動から加速し、進行方向の速度から引き算して使う。
   // 全レーン共通の風なので、風速の更新は update のフレーム先頭で1回だけ行う。
-  var reverseV = 0, reverseWasActive = false;
+  // reverseDist は今回の発動で「実際に後退した」累計距離(PP.REVERSE_RANGE で凪ぐ)。
+  // 風の吹いた時間ではなく実後退で数える: 前進の速い区間では風が勝つまで
+  // 列が動かないので、時間で数えると戻らないまま上限だけ消費してしまう。
+  // reverseFrameRet はこのフレームの後退量(advance が書き、update が積む)
+  var reverseV = 0, reverseWasActive = false, reverseDist = 0, reverseFrameRet = 0;
 
   // 波の効果音を鳴らした直近の時刻(ms)。マルチレーンではレベル開始時に全レーンが
   // 同時に波を湧かせるので、この窓の間に重なった波は音を1回にまとめる(N重奏を防ぐ)。
@@ -269,14 +273,26 @@
     // 逆風の風速はフレーム先頭で1回だけ更新する(全レーンへ同じ風速を適用)。
     // 初速から加速し、固定の最大風速 PP.REVERSE_MAX で頭打ち(config.js)。
     if (eff.reverse > 0) {
-      if (!reverseWasActive) reverseV = PP.REVERSE_SPEED;   // 発動の瞬間に初速へ
-      reverseV = Math.min(reverseV + PP.REVERSE_ACCEL * dt, PP.REVERSE_MAX);
+      if (!reverseWasActive) { reverseV = PP.REVERSE_SPEED; reverseDist = 0; }  // 発動の瞬間に初速へ
+      if (reverseDist >= PP.REVERSE_RANGE) {
+        // 玉およそ15個ぶん(REVERSE_RANGE)戻し切ったら、残り秒数を待たずに
+        // 効果ごと終了する=そのまま前進を再開する。「距離で終わる」アイテム。
+        // 効果時間(PP.POWERUPS の dur)は、風が流れに勝てず戻し切れない
+        // 場合の保険の上限としてだけ働く
+        eff.reverse = 0;
+        reverseV = 0;
+      } else {
+        reverseV = Math.min(reverseV + PP.REVERSE_ACCEL * dt, PP.REVERSE_MAX);
+      }
     }
     reverseWasActive = eff.reverse > 0;
 
+    reverseFrameRet = 0;
     for (var li = 0; li < g.lanes.length; li++) {
       updateLane(g.lanes[li], dt);
     }
+    // このフレームの実後退(全レーン・全グループの最大値)を累計へ積む
+    reverseDist += reverseFrameRet;
   }
 
   // ---- レーン1本ぶんの更新 ----
@@ -342,6 +358,7 @@
         var re = (ri + 1 < starts.length) ? starts[ri + 1] : balls.length;
         var net = Math.min(0, speedAt(lane, balls[rs].d) - reverseV) * dt;  // 負なら後退
         if (net === 0) continue;
+        if (-net > reverseFrameRet) reverseFrameRet = -net;   // 実後退量(上限の計上用)
         for (i = rs; i < re; i++) balls[i].d += net;
       }
     } else if (g.bossMode && starts.length > 1) {
