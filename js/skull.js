@@ -4,8 +4,11 @@
  * チェーンの一部の玉に骸骨マークが付く(chain.js spawnBalls)。
  * 放置すると予兆(明滅+警告音)のあと、大砲を狙った扇状の妖弾を撃つ。
  * 被弾で停止(freeze)か操作反転(addle)。デバフの種類は予兆の時点で
- * 決まっていて、予兆リングと弾の色で読める(弾幕シューティングの作法。
- * 色はボスの妖弾 ATTACKS と同じ言語: freeze=金 / addle=桃)。
+ * 決まっていて、予兆リングと弾の色、そして弾道で読める(弾幕シューティング
+ * の作法。色はボスの妖弾 ATTACKS と同じ言語: freeze=金 / addle=桃)。
+ * 弾道も性質と揃える: freeze(錨)は重力で落下加速する重い弾、
+ * addle(渦)は撃ち出し直後だけ波打ち、減衰して直線に収束する蛇行弾
+ * (揺れっぱなしだと軌道が読めず理不尽。パラメータは config.js PP.SKULL)。
  * 破壊すればパワーアップ確定ドロップ+ボーナススコア(chain.js)。
  *
  * 弾の動き・迎撃・大砲ヒットの作法は boss.js の妖弾に合わせてある
@@ -122,36 +125,94 @@
     return bmp;
   }
 
-  // 扇状に発射。狙いは「発射した瞬間の大砲の位置」で固定(=横に逃げれば躱せる。
-  // boss.js の barrage と同じフェアネスの作法)
-  function fireFan(x, y, type) {
+  // 弾1発の生成(全パターン共通の実弾)
+  function spawnBullet(x, y, ang, spd, type, ph) {
+    var view = makeBulletView(type);
+    view.x = x; view.y = y;
+    cont.addChild(view);
+    bullets.push({
+      x: x, y: y,
+      bx: x, by: y,                    // 蛇行の基準点(直進する芯。addle が使う)
+      nx: -Math.sin(ang), ny: Math.cos(ang),   // 進路と直交の単位ベクトル
+      ph: ph || 0,                     // 蛇行の位相
+      vx: Math.cos(ang) * spd,
+      vy: Math.sin(ang) * spd,
+      r: PP.SKULL.orbR, type: type, view: view,
+      t: Math.random() * 6.28,         // 脈動・回転用(初期値ランダムで揃い踏み防止)
+      st: 0                            // 蛇行用の経過秒(0 始まりで発射口から滑らかに振れる)
+    });
+  }
+
+  // 次の発射までのクールダウンを引き直す
+  function nextCd() {
+    var S = PP.SKULL;
+    return S.cooldownMin + Math.random() * (S.cooldownMax - S.cooldownMin);
+  }
+
+  // 予兆明け: 弾幕パターンの開始。狙い(base)と弾速は開始の瞬間に固定する
+  // (=横に逃げれば躱せる。boss.js の barrage と同じフェアネスの作法。
+  // 発射中に狙い直すとホーミングじみて理不尽になるのでやらない)。
+  // 発射口だけは骸骨玉に追従し、撃っている骸骨玉を消せば弾幕は打ち切られる
+  // =撃たれ始めてからも迎撃する価値がある
+  function startVolley(b, lane, type) {
     var S = PP.SKULL;
     var T = TYPES[type];
+    lane.rail.posAtInto(b.d + (b.slide || 0), tmpPos);
     var aimX = PP.cannon.x, aimY = PP.cannon.y - 20;
-    var base = Math.atan2(aimY - y, aimX - x);
-    var spread = S.spreadDeg * Math.PI / 180;
     // 弾速は距離から逆算: どこから撃たれても着弾までほぼ travelTime 秒。
     // 近い骸骨の弾は遅く、遠い骸骨の弾は速くなり、回避猶予が一定になる
-    var dist = Math.sqrt((aimX - x) * (aimX - x) + (aimY - y) * (aimY - y));
+    var dist = Math.sqrt((aimX - tmpPos.x) * (aimX - tmpPos.x) +
+                         (aimY - tmpPos.y) * (aimY - tmpPos.y));
     var spd = Math.min(S.speedMax, Math.max(S.speedMin, dist / S.travelTime));
-    for (var i = 0; i < S.fan; i++) {
-      var ang = S.fan > 1 ? base - spread / 2 + spread * (i / (S.fan - 1)) : base;
-      var view = makeBulletView(type);
-      view.x = x; view.y = y;
-      cont.addChild(view);
-      bullets.push({
-        x: x, y: y,
-        vx: Math.cos(ang) * spd,
-        vy: Math.sin(ang) * spd,
-        r: S.orbR, type: type, view: view, t: Math.random() * 6.28
-      });
-    }
-    // 発射口の閃光もデバフ色で(二重リング+白閃で「撃った」を大きく)
-    PP.fx.flash(x, y, "rgba(255,255,255,0.85)", 40);
-    PP.fx.ring(x, y, T.color, 10, 80, 420);
-    PP.fx.ring(x, y, T.color, 4, 44, 300);
-    PP.fx.burst(x, y, T.color, 8, 1.3);
+    // freeze(錨)は重い弾: 出だしを遅くするかわりに重力(updateBullets)で
+    // 落下加速する。初速で減らしたぶんは加速で取り返すので到達時間は近い
+    if (type === "freeze") spd *= S.freezeSpeedMul;
+    b.skullVolley = {
+      type: type,
+      base: Math.atan2(aimY - tmpPos.y, aimX - tmpPos.x),
+      spd: spd,
+      step: 0,
+      steps: type === "freeze" ? S.freezeWaves : S.addleCount,
+      gap: type === "freeze" ? S.freezeWaveGap : S.addleEmitGap,
+      timer: 0,                              // 0 始まり=最初のステップは即発射
+      dir: Math.random() < 0.5 ? 1 : -1      // 渦の巻き方向(addle)
+    };
+    // 号砲はパターン開始の1回だけ(白閃+デバフ色の二重リング)
+    PP.fx.flash(tmpPos.x, tmpPos.y, "rgba(255,255,255,0.85)", 40);
+    PP.fx.ring(tmpPos.x, tmpPos.y, T.color, 10, 80, 420);
+    PP.fx.ring(tmpPos.x, tmpPos.y, T.color, 4, 44, 300);
     PP.audio.darkMagic();   // 暗黒魔法の発射音
+  }
+
+  // 弾幕の1ステップぶんを発射(freeze=三叉1波 / addle=渦巻きの1発)
+  function volleyStep(b, lane) {
+    var S = PP.SKULL;
+    var v = b.skullVolley;
+    var T = TYPES[v.type];
+    lane.rail.posAtInto(b.d + (b.slide || 0), tmpPos);
+    var x = tmpPos.x, y = tmpPos.y;
+    if (v.type === "freeze") {
+      // 三叉の斉射。2波目は弾間の半分だけ角度をずらす「奇偶弾」:
+      // 1波目の隙間に立って避けた場所を塞ぐ(立ち位置を変え続けさせる)
+      var spread = S.spreadDeg * Math.PI / 180;
+      var off = v.step === 0 ? 0 : spread / (S.fan - 1) / 2;
+      for (var i = 0; i < S.fan; i++) {
+        var ang = (S.fan > 1 ? v.base - spread / 2 + spread * (i / (S.fan - 1)) : v.base) + off;
+        spawnBullet(x, y, ang, v.spd, "freeze", 0);
+      }
+      PP.fx.ring(x, y, T.color, 6, 56, 320);
+      if (v.step > 0) PP.audio.beep(150, 0.12, "sawtooth", 0.08);   // 追い波の重い手応え
+    } else {
+      // 渦巻きの掃射: 掃射角 addleSweepDeg を弾数で割って1発ずつ回す。
+      // 位相も1発ずつずらすので、蛇行と合わさって螺旋がうねって見える
+      var sweep = S.addleSweepDeg * Math.PI / 180;
+      var k = v.steps > 1 ? v.step / (v.steps - 1) : 0.5;
+      var ang2 = v.base + v.dir * (-sweep / 2 + sweep * k);
+      spawnBullet(x, y, ang2, v.spd, "addle", v.step * 0.9);
+      PP.fx.burst(x, y, T.color, 2, 0.9);
+      if ((v.step & 1) === 0) PP.audio.beep(560 + v.step * 45, 0.05, "square", 0.045);
+    }
+    v.step++;
   }
 
   // 妖弾が大砲に命中: 弾の種類どおりのデバフがかかる(種類は予兆時に決定済み。
@@ -192,7 +253,30 @@
 
       if (crisisNow || !canFire(b, lane)) {
         b.skullTele = 0;    // 隠れたら予兆は仕切り直し
+        if (b.skullVolley) {
+          // 撃っている最中に隠れた/危機が来た: 弾幕は打ち切り(出た弾は残る)
+          b.skullVolley = null;
+          b.skullCd = nextCd();
+        }
         if (fx) fx.ring.alpha = 0.4;
+        return;
+      }
+
+      if (b.skullVolley) {
+        // 発射中: パターンの続きを撃つ(発射口は玉に追従)。マークは最速で明滅。
+        // 処理落ちフレームでは while で複数ステップまとめて撃つ
+        var v = b.skullVolley;
+        if (fx) fx.ring.alpha = 0.7 + 0.3 * Math.sin(t * 24);
+        v.timer -= dt;
+        while (v.timer <= 0 && v.step < v.steps) {
+          volleyStep(b, lane);
+          v.timer += v.gap;
+        }
+        if (v.step >= v.steps) {
+          b.skullVolley = null;
+          b.skullCd = nextCd();
+          if (fx) fx.ring.alpha = 0.4;
+        }
         return;
       }
 
@@ -201,10 +285,7 @@
         b.skullTele -= dt;
         if (fx) fx.ring.alpha = 0.55 + 0.45 * Math.sin(t * 18);
         if (b.skullTele <= 0) {
-          lane.rail.posAtInto(b.d + (b.slide || 0), tmpPos);
-          fireFan(tmpPos.x, tmpPos.y, b.skullType || pickType());
-          b.skullCd = S.cooldownMin + Math.random() * (S.cooldownMax - S.cooldownMin);
-          if (fx) fx.ring.alpha = 0.4;
+          startVolley(b, lane, b.skullType || pickType());
         }
         return;
       }
@@ -230,13 +311,32 @@
   function updateBullets(dt) {
     if (bullets.length === 0) return;
     var g = PP.game;
+    var S = PP.SKULL;
     var O = PP.BOSS.orb;    // 大砲へのヒット箱はボスの妖弾と同じ寸法感
     var cx = PP.cannon.x, cy = PP.cannon.y;
     for (var i = bullets.length - 1; i >= 0; i--) {
       var b = bullets[i];
-      b.x += b.vx * dt;
-      b.y += b.vy * dt;
       b.t += dt;
+      b.st += dt;
+      if (b.type === "freeze") {
+        // 錨の弾: 重力で落下加速しながら直進(遅く出て速く落ちる。横に逃げて躱す)
+        b.vy += S.freezeGravity * dt;
+        b.x += b.vx * dt;
+        b.y += b.vy * dt;
+      } else {
+        // 渦の弾: 直進する芯(bx, by)の周りを進路と直交に正弦で蛇行。
+        // 発射時の位相ぶんを引いて、発射口からは必ず滑らかに振れ始める。
+        // 蛇行は addleSwayFade 秒かけて減衰し、以降は直線に収束する
+        // (渦巻きの本体は回転する発射角。弾まで揺れ続けると軌道が読めない)。
+        // 当たり判定も見た目どおり蛇行後の位置(x, y)で取る
+        b.bx += b.vx * dt;
+        b.by += b.vy * dt;
+        var fade = Math.max(0, 1 - b.st / S.addleSwayFade);
+        var w = 6.2832 * S.addleWaveHz;
+        var sway = (Math.sin(b.st * w + b.ph) - Math.sin(b.ph)) * S.addleWaveAmp * fade;
+        b.x = b.bx + b.nx * sway;
+        b.y = b.by + b.ny * sway;
+      }
       b.view.x = b.x; b.view.y = b.y;
       // 脈動 + 衛星粒の回転(弾幕STGらしい「生きてる弾」。回転は見た目だけで
       // 当たり判定 r は不変)。基準スケールは焼き込み解像度ぶんの縮小
