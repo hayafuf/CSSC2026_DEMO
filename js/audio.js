@@ -676,20 +676,22 @@
     bossAddle: seBossAddle,       // 惑乱の逆潮(ピンクの同心円リング)の展開
     // ボスの咆哮(重攻撃の予兆・怒りフェーズ突入)。落ちるグリス+腹の底の持続音
     bossRoar: function () {
-      gliss(110, 45, 0.7, "sawtooth", 0.16);
-      beep(55, 0.9, "sine", 0.14);
-      setTimeout(function () { gliss(90, 40, 0.5, "sawtooth", 0.08); }, 120);
+      gliss(110, 45, 0.7, "sawtooth", 0.2);
+      beep(55, 0.9, "sine", 0.18);
+      beep(38, 1.1, "sine", 0.14);
+      setTimeout(function () { gliss(90, 40, 0.5, "sawtooth", 0.1); }, 120);
     },
     // 隕石の落下ホイッスル(ボレーごとに1回)
     meteorFall: function () {
       gliss(900, 200, 0.8, "sine", 0.07);
       gliss(1200, 300, 0.7, "triangle", 0.04);
     },
-    // 隕石の着弾爆発
+    // 隕石の着弾爆発(地面を割る重さ: 超低音の腹+破裂の中音)
     meteorBoom: function () {
-      beep(55, 0.3, "sawtooth", 0.2);
-      beep(40, 0.45, "sine", 0.12);
-      setTimeout(function () { beep(160, 0.12, "square", 0.05); }, 40);
+      beep(55, 0.35, "sawtooth", 0.26);
+      beep(40, 0.55, "sine", 0.2);
+      beep(30, 0.7, "sine", 0.14);
+      setTimeout(function () { beep(160, 0.14, "square", 0.07); }, 40);
     },
     // ---- 危機(crisis.js が毎フレーム呼ぶ) ----
     crisis: crisis,            // 0〜1 の深さで警報ループの音量/ピッチを決める

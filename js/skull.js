@@ -179,12 +179,11 @@
     var spd = Math.min(S.speedMax, Math.max(S.speedMin, dist / S.travelTime));
     // 弾幕STG変種の抽選: 各タイプに A(既存の強化)/B(新パターン)の2種。
     // A: freeze=二連斉射+追い錨 / addle=渦巻き掃射(奇数弾が蛇行)
-    // B: freeze=二重螺旋の錨鎖(逆位相の蛇行ペア連射) / addle=三連の波紋(呼吸する扇)
+    // B: freeze=連環の錨輪(回転する抜け穴リング) / addle=三連の波紋(呼吸する扇)
     var variant = Math.random() < S.variantChance ? "B" : "A";
     // freeze A(錨)は重い弾: 出だしを遅くするかわりに重力(updateBullets)で
     // 落下加速する。初速で減らしたぶんは加速で取り返すので到達時間は近い。
-    // B(二重螺旋)は無重力(grav:0)なので初速をそのまま使う(遅くすると
-    // 網が画面に居座りすぎる)
+    // B(錨輪)は無重力(grav:0)なので初速をそのまま使う
     if (type === "freeze" && variant === "A") spd *= S.freezeSpeedMul;
     b.skullVolley = {
       type: type,
@@ -192,9 +191,9 @@
       base: Math.atan2(aimY - tmpPos.y, aimX - tmpPos.x),
       spd: spd,
       step: 0,
-      steps: type === "freeze" ? (variant === "B" ? S.helixSteps : S.freezeWaves + 1)
+      steps: type === "freeze" ? (variant === "B" ? S.ringCount : S.freezeWaves + 1)
                                : (variant === "B" ? S.addlePulses : S.addleCount),
-      gap: type === "freeze" ? (variant === "B" ? S.helixGap : S.freezeWaveGap)
+      gap: type === "freeze" ? (variant === "B" ? S.ringInterval : S.freezeWaveGap)
                              : (variant === "B" ? S.addlePulseGap : S.addleEmitGap),
       timer: 0,                              // 0 始まり=最初のステップは即発射
       dir: Math.random() < 0.5 ? 1 : -1      // 渦の巻き方向(addle)
@@ -214,17 +213,28 @@
     lane.rail.posAtInto(b.d + (b.slide || 0), tmpPos);
     var x = tmpPos.x, y = tmpPos.y;
     if (v.type === "freeze" && v.variant === "B") {
-      // 二重螺旋の錨鎖: 開始時の狙い線に沿って、逆位相で蛇行する2発を
-      // ステップごとに連射する(DNAの縄目)。grav:0 の明示で freeze 既定の
-      // 重力を殺す=純粋なサイン蛇行の網。2本が交差する「節」が周期的な
-      // 安全地帯になる(節に立つか、横に一歩ずれれば抜けられる)
-      var ph = v.step * 0.9;   // ステップごとに位相を進める=網がねじれて見える
-      spawnBullet(x, y, v.base, v.spd, "freeze",
-        { grav: 0, wave: { amp: S.helixWave.amp, freq: S.helixWave.freq, ph: ph } });
-      spawnBullet(x, y, v.base, v.spd, "freeze",
-        { grav: 0, wave: { amp: S.helixWave.amp, freq: S.helixWave.freq, ph: ph + Math.PI } });
-      PP.fx.ring(x, y, T.color, 4, 40, 280);
-      if ((v.step & 1) === 0) PP.audio.beep(200 + v.step * 18, 0.06, "sawtooth", 0.05);
+      // 連環の錨輪: 弾幕STGの定番「回転する抜け穴リング」。
+      // 全周リングを1環ずつ撃つ。抜け穴(ringGapBullets 個ぶんの欠け)は
+      // 1環目が大砲を向き、環ごとに ringGapStepDeg ずつ回る=穴を追って
+      // 動き続けるしかない。環ごとに速度も変える(遅い環を速い環が
+      // 追い抜いて交差)ので、穴の中で居座ると前後から挟まれる。
+      // grav:0 の明示で freeze 既定の重力を殺す=真円のまま広がる
+      var n = S.ringBullets;
+      var gapCenter = v.base + v.step * S.ringGapStepDeg * Math.PI / 180 * v.dir;
+      var halfGap = Math.PI * S.ringGapBullets / n;   // 穴の半幅(rad)
+      var spdR = v.spd * S.ringSpeedMuls[Math.min(v.step, S.ringSpeedMuls.length - 1)];
+      for (var bi = 0; bi < n; bi++) {
+        var angR = (Math.PI * 2 / n) * bi;
+        // 穴との角度差を [-π, π] に正規化して、穴の中は撃たない
+        var dAng = angR - gapCenter;
+        dAng = Math.atan2(Math.sin(dAng), Math.cos(dAng));
+        if (Math.abs(dAng) < halfGap) continue;
+        spawnBullet(x, y, angR, spdR, "freeze", { grav: 0 });
+      }
+      PP.fx.ring(x, y, T.color, 8, 70, 380);
+      PP.fx.ring(x, y, T.color, 4, 44, 300);
+      PP.audio.beep(160 - v.step * 25, 0.14, "sawtooth", 0.1);   // 環ごとに音程が沈む
+      PP.audio.gliss(500, 200, 0.25, "square", 0.05);
     } else if (v.type === "freeze") {
       if (v.step >= S.freezeWaves) {
         // 追い錨: 2波目の後、開始時の狙い角のまま1発だけ重く速く落とす。
@@ -443,8 +453,9 @@
         continue;
       }
 
-      // 画面外(重力持ちの上昇中ロブは頂点で戻ってくるので上端では消さない)
-      if (b.y > PP.H + 40 || (b.y < -60 && !(b.grav !== undefined && b.vy < 0)) ||
+      // 画面外(重力持ちの上昇中ロブは頂点で戻ってくるので上端では消さない。
+      // grav:0 の無重力弾(連環の錨輪の上向き成分)は戻ってこないので消してよい)
+      if (b.y > PP.H + 40 || (b.y < -60 && !(b.grav > 0 && b.vy < 0)) ||
           b.x < -60 || b.x > PP.W + 60) removeBullet(i);
     }
   }
