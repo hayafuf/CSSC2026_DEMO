@@ -13,8 +13,9 @@
  * 手詰まりの本体は「危機レーンの先頭グループ(樽に食い込んでいる塊)に、狙える
  * 同色の隣接ペアが1つも無い」状態。挿入の重なり解消は常に樽側へ押すので
  * (chain.js insertShot)、ペアを自作する行為自体が先頭を死線へ押し込む。
- * そこで「先頭が樽直前(PP.RESCUE.start)まで来ていて、かつ局所ペア枯渇」と
- * 判定されたら、その場で(時間条件なしに):
+ * そこで「先頭が実際に樽へ呑まれ始めていて(PP.RESCUE.start=1.0 なので
+ * 先頭の玉が樽の口以深)、かつ局所ペア枯渇」と判定されたら、その場で
+ * (時間条件なしに):
  *   1) 装填玉が万能玉(🌈)になる … 当たった玉の色を継承して挿入される
  *      (chain.js insertShot)ので、どこに撃っても必ずペアが成立する
  *   2) 撃った弾の割り込みに限り2個で消える(chain.js resolveMatchAt)
@@ -57,7 +58,21 @@
   // ---------- 揮発状態(段数以外はランに残さない=レベル開始で仕切り直し) ----------
   var queued = 0;                // 未消化の 💎(選択の権利)。リトライを跨いで残す
   var autogunT = 0;              // 自動機銃の次弾までの残り秒
-  var autoloadT = 0;             // 自動装填の次着荷までの残り秒
+  // 自動装填(ボム/ミサイル別カード)の次着荷までの残り秒。
+  // 両方持っていても待機スロット(g.special)は1つなので、先に満了した方が
+  // 勝ち、負けた方は 0 で待つ=合計スループットに自然な上限がかかる(意図)
+  var autoDeliverT = { autobomb: 0, automissile: 0 };
+  // 強化圧(動的難易度)用: 全カードの合計段数から事前計算した倍率。
+  // speedAt は毎フレーム×玉数で呼ばれるホットパスなので、カード取得時にだけ
+  // 再計算してここに置く(chain.js は関数呼び出し1回で読むだけ)
+  var pressureSpeedMul = 1, pressureSkullMul = 1;
+  function recalcPressure() {
+    var P = PP.UPGRADE_PRESSURE;
+    var total = 0, ups = PP.game.upgrades;
+    for (var k in ups) total += ups[k];
+    pressureSpeedMul = 1 + Math.min(P.speedCap, P.speedPer * total);
+    pressureSkullMul = 1 + Math.min(P.skullCap, P.skullPer * total);
+  }
   var rescue = {
     active: false,   // 救済(2個消し・ドロップブースト)発動中か
     wild: false,     // 万能玉が装填されているか
@@ -77,7 +92,7 @@
     var m = val("droprate");
     m *= 1 + 0.08 * (level("bombw") + level("missw"));
     if (rescueActive()) m *= PP.RESCUE.dropBoost;
-    return Math.min(3.0, m);   // 全部盛りでも上限3倍(道具の仕事にしすぎない)
+    return Math.min(2.5, m);   // 全部盛りでも上限2.5倍(道具の仕事にしすぎない)
   }
 
   // パワーアップ抽選プールの重み補正(powerups.js drop / dropPower)。
@@ -156,7 +171,10 @@
     // 自動系: 初取得は満タンから数え始め(即発動させない)、重ね取りは
     // 「新しい短い間隔の方が先に来るなら」残り時間を詰める
     if (id === "autogun") autogunT = (g.upgrades[id] === 1) ? val(id) : Math.min(autogunT, val(id));
-    if (id === "autoload") autoloadT = (g.upgrades[id] === 1) ? val(id) : Math.min(autoloadT, val(id));
+    if (id === "autobomb" || id === "automissile") {
+      autoDeliverT[id] = (g.upgrades[id] === 1) ? val(id) : Math.min(autoDeliverT[id], val(id));
+    }
+    recalcPressure();   // 強化を取るほど海も牙を剥く(chain.js が読む倍率を更新)
     closeChoiceUI();
     g.state = "playing";
     PP.audio.catchItem();
@@ -328,7 +346,8 @@
   // ---------- 自動機銃 / 自動装填 / 救済(playing 中の毎 tick) ----------
   function update(dt) {
     if (has("autogun")) tickAutogun(dt);
-    if (has("autoload")) tickAutoload(dt);
+    if (has("autobomb")) tickAutoDeliver(dt, "autobomb", "bomb", "💣");
+    if (has("automissile")) tickAutoDeliver(dt, "automissile", "missile", "🚀");
     tickRescue(dt);
   }
 
@@ -411,20 +430,20 @@
     });
   }
 
-  function tickAutoload(dt) {
+  // 自動装填の共通ロジック(autobomb / automissile の2カードで共用)
+  function tickAutoDeliver(dt, id, kind, icon) {
     var g = PP.game;
-    autoloadT -= dt;
-    if (autoloadT > 0) return;
+    autoDeliverT[id] -= dt;
+    if (autoDeliverT[id] > 0) return;
     // 特殊弾を所持中は「完成品を持って待つ」(空いた瞬間に届く)
-    if (g.special) { autoloadT = 0; return; }
-    autoloadT = val("autoload");
+    if (g.special) { autoDeliverT[id] = 0; return; }
+    autoDeliverT[id] = val(id);
     // loadSpecial は使わない: あちらは砲身へ押し込み(specialLoaded=true)、
     // 狙い中の色玉を勝手に引っ込めてしまう。待機スロットへ静かに届ける
-    g.special = Math.random() < 0.5 ? "bomb" : "missile";
+    g.special = kind;
     g.specialLoaded = false;
     PP.cannon.refreshBalls();
-    PP.fx.floatText("⚙️ 自動装填! " + (g.special === "bomb" ? "💣" : "🚀"),
-      86, PP.H - 120, "#8ef0d0", 18);
+    PP.fx.floatText(icon + " 自動装填!", 86, PP.H - 120, "#8ef0d0", 18);
     PP.audio.catchItem();
   }
 
@@ -444,8 +463,8 @@
       var balls = lane.balls;
       if (!balls.length) return;
       var holeD = lane.rail.holeD;
-      // このレーンは樽直前か(危機演出のライン PP.CRISIS.start より、さらに
-      // 樽側の専用しきい値 PP.RESCUE.start。呑まれる寸前だけを救済の対象にする)
+      // このレーンは呑まれ始めているか(PP.RESCUE.start=1.0 なので先頭の玉が
+      // 樽の口以深=実際に飲み込みが始まったレーンだけを救済の対象にする)
       if (balls[0].d < holeD * PP.RESCUE.start) return;
       var prev = null, seen = 0, pair = false;
       for (var i = 0; i < balls.length && seen < PP.RESCUE.frontBalls; i++) {
@@ -558,7 +577,8 @@
   // レベル開始(startLevel)ごと: タイマーと救済を仕切り直す。段数と queued は残す
   function onLevelStart() {
     autogunT = has("autogun") ? val("autogun") : 0;
-    autoloadT = has("autoload") ? val("autoload") : 0;
+    autoDeliverT.autobomb = has("autobomb") ? val("autobomb") : 0;
+    autoDeliverT.automissile = has("automissile") ? val("automissile") : 0;
     rescue.active = false;
     rescue.wild = false;
     rescue.recoverT = 0;
@@ -574,6 +594,7 @@
   function onRunReset() {
     PP.game.upgrades = {};
     queued = 0;
+    recalcPressure();   // 段数が消えたので強化圧も平常へ戻す
     onLevelStart();
   }
 
@@ -596,6 +617,9 @@
     rescueActive: rescueActive,
     wildArmed: wildArmed,
     consumeWild: consumeWild,
+    // 強化圧(動的難易度)。chain.js が毎フレーム読むので事前計算値を返すだけ
+    speedPressure: function () { return pressureSpeedMul; },
+    skullPressure: function () { return pressureSkullMul; },
     onLevelStart: onLevelStart,
     onRunReset: onRunReset
   };

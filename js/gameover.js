@@ -25,6 +25,8 @@
   var onFinish = null;
   var desatMax = 0.95;
   var vortexes = [];  // 樽ごとの渦 { shape, mouth }
+  var splats = [];          // 画面に貼り付いた血しぶき Bitmap
+  var splatCanvases = null; // 焼き置きした血しぶき画像(3種を使い回す)
 
   function canBlend(mode) {
     try {
@@ -117,6 +119,81 @@
     built = true;
   }
 
+  // ---------- 血しぶき(アイワナ式・画面に貼り付くスプラッタ) ----------
+  // 呑まれた瞬間、カメラのガラス面に血がベッタリ付く。彩度抜き(desat)より
+  // 上・血の帳(vignette)より下に置くので、灰色に落ちた盤面の上でも赤いまま
+  // 残り、暗黒フェーズでは自然に闇へ沈む。
+  // 巨大な放射グラデを毎回描くと重いので、3種だけ焼いてスケール違いで使い回す
+  // (boss.js bakeInk と同じ焼き置きイディオム)
+  function bakeOneSplat(seed) {
+    var sh = new createjs.Shape();
+    var g = sh.graphics;
+    var rnd = function () {   // 焼き置きは毎回同じでよいので簡易の擬似乱数
+      seed = (seed * 9301 + 49297) % 233280;
+      return seed / 233280;
+    };
+    // 本体: 放射グラデの円を5〜7個重ねて不定形の塊にする
+    var blobs = 5 + Math.floor(rnd() * 3);
+    for (var i = 0; i < blobs; i++) {
+      var bx = (rnd() - 0.5) * 90, by = (rnd() - 0.5) * 70;
+      var br = 45 + rnd() * 55;
+      g.beginRadialGradientFill(
+        ["rgba(150,8,8,0.95)", "rgba(110,4,4,0.85)", "rgba(80,0,0,0)"], [0, 0.6, 1],
+        bx, by, 0, bx, by, br)
+        .drawCircle(bx, by, br);
+    }
+    // 衛星滴: 周囲に飛び散った小さな粒(重力を感じるよう下方向へ寄せる)
+    var drops = 6 + Math.floor(rnd() * 5);
+    for (var j = 0; j < drops; j++) {
+      var ang = rnd() * Math.PI * 2;
+      var dist = 90 + rnd() * 70;
+      var dx = Math.cos(ang) * dist, dy = Math.sin(ang) * dist + 25;
+      g.beginFill("rgba(120,5,5,0.85)").drawCircle(dx, dy, 4 + rnd() * 10);
+    }
+    // 垂れ筋: 下へ伸びる細長い雫
+    var streaks = 1 + Math.floor(rnd() * 2);
+    for (var k = 0; k < streaks; k++) {
+      var sx = (rnd() - 0.5) * 70;
+      g.beginFill("rgba(110,4,4,0.8)")
+        .drawEllipse(sx - 4, 30 + rnd() * 30, 8, 60 + rnd() * 60);
+    }
+    sh.cache(-160, -160, 320, 320);
+    return sh.cacheCanvas;
+  }
+
+  function bakeSplats() {
+    if (splatCanvases) return;
+    splatCanvases = [bakeOneSplat(11), bakeOneSplat(47), bakeOneSplat(83)];
+  }
+
+  function addSplats() {
+    bakeSplats();
+    var L = PP.layers.doom;
+    var S = PP.OVER.splat;
+    var n = S.countMin + Math.floor(Math.random() * (S.countMax - S.countMin + 1));
+    for (var i = 0; i < n; i++) {
+      var bmp = new createjs.Bitmap(splatCanvases[i % splatCanvases.length]);
+      bmp.regX = bmp.regY = 160;
+      bmp.x = 80 + Math.random() * (PP.W - 160);
+      bmp.y = 80 + Math.random() * (PP.H - 160);
+      bmp.rotation = Math.random() * 360;
+      bmp.scaleX = bmp.scaleY = S.scaleMin + Math.random() * (S.scaleMax - S.scaleMin);
+      bmp.alpha = 0;
+      // desat(saturation 合成)より上に挿す。下だと血まで灰色に抜けてしまう
+      L.addChildAt(bmp, L.getChildIndex(vignette));
+      splats.push(bmp);
+      // ベチャッ…ベチャッと1枚ずつ時間差で貼り付く
+      createjs.Tween.get(bmp).wait(i * S.stagger).to({ alpha: S.alpha }, 90);
+      (function (x, y, delay, playSnd) {
+        setTimeout(function () {
+          if (!st) return;   // すでに片付いていたら何もしない
+          if (PP.fx.particleLoad() < 0.75) PP.fx.burst(x, y, "#a01010", 8, 1.6);
+          if (playSnd) PP.audio.bloodSplat();
+        }, delay);
+      })(bmp.x, bmp.y, i * S.stagger, i < 3);
+    }
+  }
+
   // 心音の波形(ドッ…ドッ という二拍)
   function heart(t) {
     var p = (t % PP.OVER.beat) / PP.OVER.beat;
@@ -138,10 +215,11 @@
            ash: 0, lunged: false, done: false };
 
     PP.audio.overCut();          // ここで音楽が消える。これが一番怖い
-    PP.fx.shake(15, 0.5);
+    PP.fx.shake(24, 0.6);
     PP.powerups.clear();         // 落下中のご褒美も道連れ
 
-    flash.alpha = 0.75;
+    addSplats();                 // 画面に血しぶきがベッタリ貼り付く
+    flash.alpha = 0.85;
     createjs.Tween.get(flash).to({ alpha: 0 }, 420);
     createjs.Tween.get(desat).to({ alpha: desatMax }, 900);
     for (var i = 0; i < vortexes.length; i++) {
@@ -300,6 +378,12 @@
       vortexes[vi].shape.rotation = 0;
       vortexes[vi].shape.scaleX = vortexes[vi].shape.scaleY = 0.25;
     }
+    // 血しぶきを跡形もなく剥がす(焼き置き canvas は使い回すので残す)
+    for (var si = 0; si < splats.length; si++) {
+      createjs.Tween.removeTweens(splats[si]);
+      if (splats[si].parent) splats[si].parent.removeChild(splats[si]);
+    }
+    splats.length = 0;
     bigSkull.scaleX = bigSkull.scaleY = 0.5;
     bigSkull.x = PP.W / 2; bigSkull.y = PP.H / 2 - 8;
     forEachSkull(function (sk) {

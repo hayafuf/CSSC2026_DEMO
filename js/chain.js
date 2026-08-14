@@ -140,6 +140,8 @@
       // コース定義の skullMult で出現率をコース単位で増減できる(コース5は 0.5)
       var skullChance = PP.SKULL.chance *
         ((PP.game.builtCourse && PP.game.builtCourse.skullMult) || 1);
+      // 強化圧: 強化を取るほど骸骨玉も湧きやすくなる(PP.UPGRADE_PRESSURE)
+      if (PP.upgrades && PP.upgrades.skullPressure) skullChance *= PP.upgrades.skullPressure();
       if (!PP.game.bossMode && PP.skull && PP.SKULL &&
           Math.random() < skullChance &&
           PP.skull.countActive() < PP.SKULL.maxActive) {
@@ -218,6 +220,9 @@
     var v = hole + (entry - hole) * Math.pow(1 - t, curve);
     v *= 1 + (g.level - 1) * sp.levelStep;     // レベルで底上げ
     v *= 1 + sp.rollout * g.rolloutBoost;      // 開始直後のなだれ込み
+    // 強化圧: 強化を取るほど巡航速度が少し上がる(PP.UPGRADE_PRESSURE)。
+    // ロード順の保険で upgrades の存在を見る(倍率は upgrades.js が事前計算)
+    if (PP.upgrades && PP.upgrades.speedPressure) v *= PP.upgrades.speedPressure();
     if (g.effects.slow > 0) v *= 0.5;
     return v;
   }

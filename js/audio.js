@@ -674,6 +674,23 @@
     bossSweep: seBossSweep,       // 運命のルーレット(水色の掃射)の発動
     bossTentacle: seBossTentacle, // 海淵の大触腕(触手突き上げ)の発動
     bossAddle: seBossAddle,       // 惑乱の逆潮(ピンクの同心円リング)の展開
+    // ボスの咆哮(重攻撃の予兆・怒りフェーズ突入)。落ちるグリス+腹の底の持続音
+    bossRoar: function () {
+      gliss(110, 45, 0.7, "sawtooth", 0.16);
+      beep(55, 0.9, "sine", 0.14);
+      setTimeout(function () { gliss(90, 40, 0.5, "sawtooth", 0.08); }, 120);
+    },
+    // 隕石の落下ホイッスル(ボレーごとに1回)
+    meteorFall: function () {
+      gliss(900, 200, 0.8, "sine", 0.07);
+      gliss(1200, 300, 0.7, "triangle", 0.04);
+    },
+    // 隕石の着弾爆発
+    meteorBoom: function () {
+      beep(55, 0.3, "sawtooth", 0.2);
+      beep(40, 0.45, "sine", 0.12);
+      setTimeout(function () { beep(160, 0.12, "square", 0.05); }, 40);
+    },
     // ---- 危機(crisis.js が毎フレーム呼ぶ) ----
     crisis: crisis,            // 0〜1 の深さで警報ループの音量/ピッチを決める
     swallowed: swallowed,      // 玉が1個ぶん樽に落ちた
@@ -685,6 +702,12 @@
     overSnap: overSnap,        // 樽が呑み込んだ衝撃
     overBgm: overBgm,          // ゲームオーバー BGM
     sting: sting,              // ドクロが飛び込んでくる刺し音
+    // 血しぶきが画面に貼り付く音(湿った低いスラップ)
+    bloodSplat: function () {
+      gliss(220, 60, 0.12, "sawtooth", 0.12);
+      beep(90, 0.1, "square", 0.06);
+      setTimeout(function () { beep(50, 0.18, "sine", 0.1); }, 30);
+    },
     heartbeat: heartbeat,      // 無音の底で打つ心音
     // 玉が1個ずつ呑まれるときの鈍い音(深いほど低く)
     swallow: function (t) {

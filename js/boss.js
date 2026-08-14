@@ -98,6 +98,14 @@
   var tentPending = [];    // 追撃波の突き上げ予定X座標
   var sweepLeft = 0, sweepT = 0, sweepTotal = 0;   // 運命のルーレットの回転スイープ
   var curtainLeft = 0, curtainT = 0, curtainTotal = 0;   // 時凪のカーテンの残り枚数
+  // 両舷斉射(cross): 左右両舷からの超高密度ドット線の掃引
+  var crossActive = false;  // 掃引中か
+  var crossT = 0;           // 掃引の経過秒(戻りパスの間は負から数え直す)
+  var crossPass = 0;        // 1=右→左 / 2=怒りの戻りパス(左→右)
+  var crossEmitAcc = 0;     // 発射レートの端数繰り越し
+  var crossHitCd = 0;       // 被弾直後のクールダウン(密度線での多段スタン防止)
+  var crossTele = [];       // 予兆の交差線(telegraph 中だけ表示)
+  var rageVin = null;       // 怒りフェーズの全画面赤ビネット(alpha だけ動かす)
 
   // ランダマイズ(色ルーレット)は攻撃状態と独立に回す
   var rndSpinT = 0, rndStepT = 0, rndOrig = 0;
@@ -111,10 +119,11 @@
     randomize: { name: "―― 運命のルーレット ――", color: "#8ef0d0" },
     tentacle:  { name: "―― 海淵の大触腕 ――",     color: "#ff5030" },
     tsunami:   { name: "―― 終焉の大海嘯 ――",     color: "#4ac8e8" },
-    barrage:   { name: "―― 妖星の豪雨 ――",       color: "#ffa040" }
+    barrage:   { name: "―― 妖星の豪雨 ――",       color: "#ffa040" },
+    cross:     { name: "―― 両舷斉射 ――",         color: "#9fd8ff" }
   };
   var ATTACK_KEYS = ["ink", "addle", "freeze", "shotSlow", "randomize",
-                     "tentacle", "tsunami", "barrage"];
+                     "tentacle", "tsunami", "barrage", "cross"];
 
   // ---------- クラーケンの作画 ----------
   // 既存の砲台・玉と同じ「ベクター+グラデーション」の文法で描く。
@@ -347,6 +356,18 @@
     banner.visible = false;
     cont.addChild(banner);
 
+    // 怒りフェーズの赤ビネット: gameover の血の帳と同レシピの放射グラデを
+    // 一度だけ焼き、phase2 中だけ alpha を脈動させる(毎フレームのコストは
+    // キャッシュ済み1枚のブリットだけ。墨の cache と同じ思想)
+    rageVin = new createjs.Shape();
+    rageVin.graphics.beginRadialGradientFill(
+      ["rgba(120,0,0,0)", "rgba(90,0,0,0.35)", "rgba(40,0,0,0.8)"], [0, 0.55, 1],
+      PP.W / 2, PP.H / 2, 120, PP.W / 2, PP.H / 2, 700)
+      .drawRect(0, 0, PP.W, PP.H);
+    rageVin.cache(0, 0, PP.W, PP.H);
+    rageVin.alpha = 0;
+    cont.addChild(rageVin);
+
     // fx レイヤーの最背面へ: 粒子・リング等の演出はボスより手前に出る。
     // fx は玉より上・大砲/危機/HUD より下なので、墨・妖弾は盤面の上を通るが
     // 操作系(大砲・HUD)は隠さない
@@ -478,6 +499,7 @@
                                   rings: opts.hover.rings ? opts.hover.rings.slice() : null,
                                   burst: opts.hover.burst || null, done: false };
       if (opts.hp) b.hitsLeft = opts.hp;   // 迎撃に複数発が必要な大玉(耐久値)
+      if (opts.meteor) b.meteor = true;    // 隕石: 炎トレイル+地面着弾で爆発
       // 時限分裂(多段分裂の中玉): t 秒後に count 発の同心円リングへ割れる。
       // hp=子の耐久 / spin=子のらせん回転(中玉の証) / child=子がさらに
       // 割れるときの分裂スペック(入れ子)。
@@ -631,8 +653,15 @@
       b.view.x = b.x; b.view.y = b.y;
       var pulse = 1 + 0.12 * Math.sin(b.t * 10);
       b.view.scaleX = b.view.scaleY = pulse * b.view.baseScale;
-      // 尾を引く残光(妖弾の軌道が線で読める=避けやすく、画面も華やぐ)
-      if (trailBudget > 0 && Math.random() < dt * 26) {
+      // 尾を引く残光(妖弾の軌道が線で読める=避けやすく、画面も華やぐ)。
+      // 隕石は炎の尾を濃く引く(橙と黄をちらつかせる)
+      if (b.meteor) {
+        if (trailBudget > 0 && Math.random() < dt * 40) {
+          trailBudget--;
+          PP.fx.burst(b.x - b.vx * 0.02, b.y - b.vy * 0.02,
+                      Math.random() < 0.5 ? "#ffa040" : "#ffd24a", 2, 1.1);
+        }
+      } else if (trailBudget > 0 && Math.random() < dt * 26) {
         trailBudget--;
         PP.fx.burst(b.x, b.y, ATTACKS[b.type].color, 1, 0.5);
       }
@@ -682,8 +711,11 @@
       }
       if (blocked) { removeBullet(i); continue; }
 
-      // 大砲への命中(powerups のキャッチ箱と同じ寸法感)
-      if (Math.abs(b.x - cx) <= O.catchW &&
+      // 大砲への命中(powerups のキャッチ箱と同じ寸法感)。
+      // cross 弾は被弾直後(crossHitCd)の間だけ当たらない: 密度線なので
+      // スタン中に毎フレーム多段ヒットして抜けられなくなるのを防ぐ
+      if (!(b.type === "cross" && crossHitCd > 0) &&
+          Math.abs(b.x - cx) <= O.catchW &&
           b.y >= cy - O.catchTop && b.y <= cy + O.catchBottom) {
         applyOrbHit(b);
         removeBullet(i);
@@ -693,6 +725,16 @@
       // 墨玉は大砲の高さまで落ちたら着弾(外れても足元に墨だまりが残る)
       if (b.type === "ink" && b.y >= cy - 30) {
         splatInk(b.x, Math.min(b.y, cy - 30), false);
+        removeBullet(i);
+        continue;
+      }
+      // 隕石は地面(大砲の高さ)で爆発する(大砲キャッチ判定が先に走るので
+      // 直撃はちゃんと被弾になる)
+      if (b.meteor && b.y >= cy - 20) {
+        PP.fx.ring(b.x, cy - 20, "#ffa040", 16, 110, 420);
+        PP.fx.burst(b.x, cy - 20, "#ffd24a", 12, 1.8);
+        PP.fx.shake(PP.BOSS.barrage.impactShake, 0.18);
+        PP.audio.meteorBoom();
         removeBullet(i);
         continue;
       }
@@ -738,8 +780,19 @@
       PP.audio.debuff();            // ink は applyDebuff を通らないのでここで鳴らす
     } else if (b.type === "addle" || b.type === "freeze" || b.type === "shotSlow") {
       applyDebuff(b.type, 1);
-    } else if (b.type === "randomize" || b.type === "barrage") {
-      // barrage 弾も当たれば色ルーレット(弾幕を全部は捌けない前提の軽いペナルティ)
+    } else if (b.type === "barrage") {
+      // 隕石の直撃はスタン。applyDebuff は freeze.dur に倍率を掛ける方式なので
+      // 通さず、barrage 専用の秒数を Math.max で直接盛る(重ね掛けは伸びるだけ)
+      g.bossFx.freeze = Math.max(g.bossFx.freeze, B.barrage.stun);
+      PP.audio.debuff();
+      PP.fx.ring(PP.cannon.x, PP.cannon.y - 40, "#ffa040", 12, 100, 500);
+    } else if (b.type === "cross") {
+      // 両舷斉射の被弾もスタン。hitCd の間は cross 弾に当たらない(スタンロック防止)
+      g.bossFx.freeze = Math.max(g.bossFx.freeze, B.cross.stun);
+      crossHitCd = B.cross.hitCd;
+      PP.audio.debuff();
+      PP.fx.ring(PP.cannon.x, PP.cannon.y - 40, "#9fd8ff", 12, 100, 500);
+    } else if (b.type === "randomize") {
       rndSpinT = B.randomize.spin;
       rndStepT = 0;
       rndOrig = g.currentColor;
@@ -852,6 +905,8 @@
       if (k === "ink" && fx.ink > 0) continue;
       // ⚠系の大技は開幕からは撃たない(初見殺し防止)。進行中の同系統も避ける
       if ((k === "tentacle" || k === "tsunami" || k === "barrage") && attackCount < 1) continue;
+      // 両舷斉射は最重量級なので2手目以降・進行中は重ねない
+      if (k === "cross" && (attackCount < 2 || crossActive)) continue;
       if (k === "tsunami" && wave) continue;
       if (k === "barrage" && barrageLeft > 0) continue;
       if (k === "tentacle" && tentWavesLeft > 0) continue;   // 追撃波の進行中は重ねない
@@ -960,6 +1015,12 @@
     showBanner(a.name, a.color, stateT + 0.4);
     PP.audio.beep(140, 0.3, "sawtooth", 0.1);
     PP.audio.beep(110, 0.45, "sine", 0.09);
+    // 予兆の間、画面全体に薄い血の色を差す(「来るぞ」の圧)
+    PP.fx.screenFlash("rgba(140,0,0,0.10)", 0.10, stateT * 1000);
+    // 重量級の攻撃はボスが咆哮する
+    if (key === "tentacle" || key === "tsunami" || key === "barrage" || key === "cross") {
+      PP.audio.bossRoar();
+    }
 
     if (key === "tentacle") {
       // 大砲の高さに⚠を置く(1個は現在の大砲位置=「動け」という圧)
@@ -982,7 +1043,33 @@
       tsuDir = Math.random() < 0.5 ? 1 : -1;
       showSafePillar(tsuSafeX, S.gapW);
       PP.audio.tsunamiCharge();   // 引き波の溜め(予兆の間ずっと不穏に響く)
+    } else if (key === "cross") {
+      // 両舷斉射の予兆: 両舷から初期掃引点(右端)への2本の線を点滅表示。
+      // 左舷は掃引点の右側・右舷は左側を狙うので、線は途中で X 字に交差する
+      var C = PP.BOSS.cross;
+      var aimX0 = PP.W - 90, iy0 = PP.CANNON_Y - 20;
+      var emitters = [
+        { x: body.x - C.emitDX, y: body.y + C.emitDY, tx: aimX0 + C.aimCrossGap },
+        { x: body.x + C.emitDX, y: body.y + C.emitDY, tx: aimX0 - C.aimCrossGap }
+      ];
+      for (var ci = 0; ci < emitters.length; ci++) {
+        var e = emitters[ci];
+        var lnSh = new createjs.Shape();
+        lnSh.graphics.setStrokeStyle(3).beginStroke("rgba(159,216,255,0.55)")
+          .moveTo(e.x, e.y).lineTo(e.tx, iy0);
+        warnCont.addChild(lnSh);
+        crossTele.push(lnSh);
+      }
+      addWarning(aimX0, iy0, 70, stateT);   // 掃引の始点(右端)に⚠
     }
+  }
+
+  // 両舷斉射の予兆線を跡形なく片付ける(発射・阻止・リセットの全経路から呼ぶ)
+  function clearCrossTele() {
+    for (var i = 0; i < crossTele.length; i++) {
+      if (crossTele[i].parent) crossTele[i].parent.removeChild(crossTele[i]);
+    }
+    crossTele.length = 0;
   }
 
   // 怒りフェーズは全弾速がこの倍率で上がる
@@ -998,6 +1085,7 @@
     var tx = PP.cannon.x, ty = PP.cannon.y - 20;
     PP.audio.beep(200, 0.15, "square", 0.1);
     PP.fx.flash(sx, sy, "rgba(120,220,180,0.7)", 40);
+    PP.fx.shake(5, 0.18);   // 攻撃の発射は毎回ドンと響く
     if (key === "ink") {
       // 漆黒の墨獄: 等間隔の弧を描いて降り注ぐ墨玉のカーテン(中央は大砲狙い)
       var K = B.ink;
@@ -1099,9 +1187,17 @@
       PP.audio.tsunami();   // 水壁が走り出す轟音
       startWave();
     } else if (key === "barrage") {
-      // 弾幕: ボレー発射は update 側のタイマーで刻む(1発目はすぐ)
+      // 隕石: ボレー発射は update 側のタイマーで刻む(1発目はすぐ)
       barrageLeft = B.barrage.volleys + (phase2 ? 1 : 0);
       barrageT = 0;
+    } else if (key === "cross") {
+      // 両舷斉射: 予兆線を消して掃引開始(実際の発射は updateCross が刻む)
+      clearCrossTele();
+      crossActive = true;
+      crossT = 0;
+      crossPass = 1;
+      crossEmitAcc = 0;
+      PP.audio.bossSweep();
     } else {
       // 単発の狙い撃ち(addle=速い / shotSlow=大きく遅い / randomize=中速)
       var spec = B[key];
@@ -1227,7 +1323,8 @@
         PP.audio.beep(Math.max(50, 78 - s.wave * 7), 0.42, "sawtooth", 0.2);
         if (Math.abs(PP.cannon.x - s.x) < K.r + 25) {
           var pool = ["freeze", "addle", "shotSlow"];
-          applyDebuff(pool[Math.floor(Math.random() * pool.length)], 0.7);
+          // フル時間のデバフ(0.7 倍では軽すぎて触手が怖くなかった)
+          applyDebuff(pool[Math.floor(Math.random() * pool.length)], 1.0);
           PP.fx.shake(10, 0.3);
         }
       }
@@ -1347,7 +1444,11 @@
     }
   }
 
-  // ---------- 妖星の豪雨(画面上端から降り注ぐ流星の雨) ----------
+  // ---------- 妖星の豪雨(画面上端から降り注ぐ本物の隕石) ----------
+  // 1発ごとに弾道を閉形式で先読みして着弾点へ⚠を置く(⚠の収束リングが
+  // そのまま着弾タイマーになる)。地面に落ちれば爆発+シェイク、
+  // 大砲に直撃すればスタン(applyOrbHit)。弾道は重力のみで発射後は不変なので
+  // ⚠は嘘をつかない(途中で軌道を変える改造をしたら予告も直すこと)
   function updateBarrage(dt) {
     if (barrageLeft <= 0) return;
     barrageT -= dt;
@@ -1355,16 +1456,64 @@
     var Q = PP.BOSS.barrage;
     barrageT = Q.interval;
     barrageLeft--;
-    var n = Q.perVolley + (phase2 ? 2 : 0);
+    var n = Q.perVolley + (phase2 ? 1 : 0);
+    var iy = PP.CANNON_Y - 20;
     for (var i = 0; i < n; i++) {
-      // 画面幅いっぱいのランダムな位置から、大砲の方へ緩く傾いて落ちる流星。
-      // 重力で加速するので「上はまばら、下は速い」雨の密度勾配ができる
       var mx = 80 + Math.random() * (PP.W - 160);
-      var mvx = Math.max(-120, Math.min(120, (PP.cannon.x - mx) * 0.15));
-      spawnBullet("barrage", mx, -30 - Math.random() * 60,
-        mvx * spdMul(), 200 * spdMul(), 330, PP.BOSS.orb.r * 0.8);
+      var my = -30 - Math.random() * 60;
+      var mvx = Math.max(-120, Math.min(120, (PP.cannon.x - mx) * 0.15)) * spdMul();
+      var vy0 = Q.vy0 * spdMul();
+      // 落下時間(放物線の閉形式。ink のロブと同じ式)→ 着弾X を先読み
+      var tImp = (Math.sqrt(vy0 * vy0 + 2 * Q.grav * (iy - my)) - vy0) / Q.grav;
+      addWarning(mx + mvx * tImp, iy, 60, tImp);
+      spawnBullet("barrage", mx, my, mvx, vy0, Q.grav, Q.meteorR,
+        { viewScale: Q.viewScale, meteor: true });
     }
-    PP.audio.beep(240 + barrageLeft * 40, 0.08, "square", 0.08);
+    PP.audio.meteorFall();   // 落下ホイッスル(ボレーごと)
+  }
+
+  // ---------- 両舷斉射(超高密度ドット線のX字掃引) ----------
+  // 左右の発射口から「掃引点」へ向けて毎秒 emitHz 発ずつ小弾を撃ち続ける。
+  // ドット間隔 = speed/emitHz ≈ 17px なので2本の実線に見える。
+  // 左舷は掃引点の右側・右舷は左側を狙う=線は必ず途中で交差(X字)。
+  // 掃引点は右端→左端へ単調に動くので、線の通過は予測できる:
+  // 左側で待てば危険窓(約0.65秒)が通り過ぎて終わる。怒りフェーズは
+  // 高速化+左→右の戻りパスで1回の再配置を強制する
+  function emitCrossDot(ex, ey, txx, tyy, C) {
+    var dx = txx - ex, dy = tyy - ey;
+    var len = Math.sqrt(dx * dx + dy * dy) || 1;
+    spawnBullet("cross", ex, ey,
+      dx / len * C.speed, dy / len * C.speed, 0, C.r,
+      { viewScale: C.r / PP.BOSS.orb.r });
+  }
+
+  function updateCross(dt) {
+    if (!crossActive) return;
+    var C = PP.BOSS.cross;
+    var dur = C.dur / (phase2 ? C.p2SweepMul : 1);
+    crossT += dt;
+    if (crossT < 0) return;                       // 戻りパスまでの間(p2PassGap)
+    var k = Math.min(1, crossT / dur);
+    if (crossPass === 2) k = 1 - k;               // 怒りの二段目は左→右へ返す
+    var aimX = (PP.W - 90) + (90 - (PP.W - 90)) * k;   // 右端→左端へ掃引
+    var iy = PP.CANNON_Y - 20;
+    var eL = { x: body.x - C.emitDX, y: body.y + C.emitDY };
+    var eR = { x: body.x + C.emitDX, y: body.y + C.emitDY };
+    crossEmitAcc += dt * C.emitHz;
+    while (crossEmitAcc >= 1) {
+      crossEmitAcc--;
+      emitCrossDot(eL.x, eL.y, aimX + C.aimCrossGap, iy, C);   // 左舷 → 掃引点の右側
+      emitCrossDot(eR.x, eR.y, aimX - C.aimCrossGap, iy, C);   // 右舷 → 掃引点の左側
+    }
+    if (crossT >= dur) {
+      if (phase2 && C.p2SecondPass && crossPass === 1) {
+        crossPass = 2;
+        crossT = -C.p2PassGap;                    // ひと呼吸置いて戻りパス
+        PP.audio.bossRoar();
+      } else {
+        crossActive = false;
+      }
+    }
   }
 
   // ---------- 時凪の呪縛(時間差で降る互い違いのカーテン) ----------
@@ -1536,6 +1685,7 @@
       queuedAttack = null;
       charge.graphics.clear();
       clearWarnings();
+      clearCrossTele();
       hideSafePillar();
       hideBanner();
       PP.fx.floatText("攻撃を阻止した!!", body.x, body.y + 96, "#8ef0d0", 24);
@@ -1554,6 +1704,7 @@
     PP.fx.shake(20, 0.5);
     PP.fx.screenFlash("rgba(200,30,20,0.25)", 0.25, 700);
     showBanner("クラーケンが怒り狂う!!", "#ff5030", 2.0);
+    PP.audio.bossRoar();
     PP.audio.beep(80, 0.5, "sawtooth", 0.16);
     PP.audio.beep(60, 0.7, "sawtooth", 0.12);
     if (rageRim) createjs.Tween.get(rageRim, { override: true }).to({ alpha: 1 }, 600);
@@ -1600,6 +1751,12 @@
     tentWavesLeft = 0;
     tentPending.length = 0;
     queuedAttack = null;
+    crossActive = false;
+    crossT = 0;
+    crossPass = 0;
+    crossEmitAcc = 0;
+    crossHitCd = 0;
+    clearCrossTele();
     removeInk();
     clearBullets();
     clearWarnings();
@@ -1641,9 +1798,17 @@
     updateTentacleWaves(dt);
     updateWave(dt);
     updateBarrage(dt);
+    updateCross(dt);
     updateSweep(dt);
     updateCurtain(dt);
     updateChips(dt);
+    if (crossHitCd > 0) crossHitCd -= dt;
+    // 両舷斉射の予兆線は⚠と同じリズムで明滅させる
+    for (var cti = 0; cti < crossTele.length; cti++) {
+      crossTele[cti].alpha = 0.55 + 0.35 * Math.sin(t * 12);
+    }
+    // 怒りフェーズの赤ビネット(ゆっくり脈打つ圧迫感)
+    if (rageVin) rageVin.alpha = phase2 ? 0.10 + 0.05 * Math.sin(t * 4) : 0;
 
     if (state === "dead") return;
     if (state === "dying") { updateDying(dt); drawTentaclesThrottled(1, dt); return; }
@@ -1732,6 +1897,7 @@
       body.x = PP.W / 2; body.y = PP.BOSS.y;
       hurt.alpha = 0;
       if (rageRim) { createjs.Tween.removeTweens(rageRim); rageRim.alpha = 0; }
+      if (rageVin) rageVin.alpha = 0;
       if (shield) shield.alpha = 0;
       drawHpBar();
     }

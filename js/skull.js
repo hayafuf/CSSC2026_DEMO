@@ -177,28 +177,27 @@
     var dist = Math.sqrt((aimX - tmpPos.x) * (aimX - tmpPos.x) +
                          (aimY - tmpPos.y) * (aimY - tmpPos.y));
     var spd = Math.min(S.speedMax, Math.max(S.speedMin, dist / S.travelTime));
-    // freeze(錨)は重い弾: 出だしを遅くするかわりに重力(updateBullets)で
-    // 落下加速する。初速で減らしたぶんは加速で取り返すので到達時間は近い
-    if (type === "freeze") spd *= S.freezeSpeedMul;
     // 弾幕STG変種の抽選: 各タイプに A(既存の強化)/B(新パターン)の2種。
     // A: freeze=二連斉射+追い錨 / addle=渦巻き掃射(奇数弾が蛇行)
-    // B: freeze=落錨の簾(山なりロブのカーテン) / addle=三連の波紋(呼吸する扇)
+    // B: freeze=二重螺旋の錨鎖(逆位相の蛇行ペア連射) / addle=三連の波紋(呼吸する扇)
     var variant = Math.random() < S.variantChance ? "B" : "A";
+    // freeze A(錨)は重い弾: 出だしを遅くするかわりに重力(updateBullets)で
+    // 落下加速する。初速で減らしたぶんは加速で取り返すので到達時間は近い。
+    // B(二重螺旋)は無重力(grav:0)なので初速をそのまま使う(遅くすると
+    // 網が画面に居座りすぎる)
+    if (type === "freeze" && variant === "A") spd *= S.freezeSpeedMul;
     b.skullVolley = {
       type: type,
       variant: variant,
       base: Math.atan2(aimY - tmpPos.y, aimX - tmpPos.x),
       spd: spd,
       step: 0,
-      steps: type === "freeze" ? (variant === "B" ? 1 : S.freezeWaves + 1)
+      steps: type === "freeze" ? (variant === "B" ? S.helixSteps : S.freezeWaves + 1)
                                : (variant === "B" ? S.addlePulses : S.addleCount),
-      gap: type === "freeze" ? S.freezeWaveGap
+      gap: type === "freeze" ? (variant === "B" ? S.helixGap : S.freezeWaveGap)
                              : (variant === "B" ? S.addlePulseGap : S.addleEmitGap),
       timer: 0,                              // 0 始まり=最初のステップは即発射
-      dir: Math.random() < 0.5 ? 1 : -1,     // 渦の巻き方向(addle)
-      // 落錨の簾: 着弾X(大砲を中心に rainSpreadX 間隔)は開始時に固定
-      // =横に一歩ずれれば必ず隙間に入れる
-      rainCenterX: aimX
+      dir: Math.random() < 0.5 ? 1 : -1      // 渦の巻き方向(addle)
     };
     // 号砲はパターン開始の1回だけ(白閃+デバフ色の二重リング)
     PP.fx.flash(tmpPos.x, tmpPos.y, "rgba(255,255,255,0.85)", 40);
@@ -215,19 +214,17 @@
     lane.rail.posAtInto(b.d + (b.slide || 0), tmpPos);
     var x = tmpPos.x, y = tmpPos.y;
     if (v.type === "freeze" && v.variant === "B") {
-      // 落錨の簾: 上向きロブを一斉に放ち、大砲の周囲へ rainSpreadX 間隔の
-      // カーテン状に降らせる。着弾Xは開始時固定=隙間に立てば安全
-      for (var ri = 0; ri < S.rainCount; ri++) {
-        var tx = v.rainCenterX + (ri - (S.rainCount - 1) / 2) * S.rainSpreadX;
-        // 放物線: vy0 で打ち上げて grav で落とす。大砲の高さへの到達時間から vx を逆算
-        var fallT = (Math.sqrt(S.rainVy0 * S.rainVy0 +
-                     2 * S.rainGrav * Math.max(40, PP.cannon.y - 20 - y)) - S.rainVy0) / S.rainGrav;
-        spawnBullet(x, y, 0, 0, "freeze",
-          { vx: (tx - x) / fallT, vy: S.rainVy0, grav: S.rainGrav });
-      }
-      PP.fx.ring(x, y, T.color, 8, 64, 360);
-      PP.audio.beep(180, 0.16, "sawtooth", 0.09);
-      PP.audio.gliss(320, 140, 0.5, "sine", 0.06);   // 打ち上げの重いうねり
+      // 二重螺旋の錨鎖: 開始時の狙い線に沿って、逆位相で蛇行する2発を
+      // ステップごとに連射する(DNAの縄目)。grav:0 の明示で freeze 既定の
+      // 重力を殺す=純粋なサイン蛇行の網。2本が交差する「節」が周期的な
+      // 安全地帯になる(節に立つか、横に一歩ずれれば抜けられる)
+      var ph = v.step * 0.9;   // ステップごとに位相を進める=網がねじれて見える
+      spawnBullet(x, y, v.base, v.spd, "freeze",
+        { grav: 0, wave: { amp: S.helixWave.amp, freq: S.helixWave.freq, ph: ph } });
+      spawnBullet(x, y, v.base, v.spd, "freeze",
+        { grav: 0, wave: { amp: S.helixWave.amp, freq: S.helixWave.freq, ph: ph + Math.PI } });
+      PP.fx.ring(x, y, T.color, 4, 40, 280);
+      if ((v.step & 1) === 0) PP.audio.beep(200 + v.step * 18, 0.06, "sawtooth", 0.05);
     } else if (v.type === "freeze") {
       if (v.step >= S.freezeWaves) {
         // 追い錨: 2波目の後、開始時の狙い角のまま1発だけ重く速く落とす。
