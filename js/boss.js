@@ -1084,6 +1084,8 @@
     for (var i = 0; i < warnings.length; i++) removeWarningViews(warnings[i]);
     warnings.length = 0;
     pendingZones.length = 0;
+    // ⚠が消えるとき(攻撃キャンセル・ボス撃破・後片付け)は警報SEも道連れに
+    PP.audio.bossDangerStop();
   }
 
   // ⚠マーカーの毎フレーム描画(進行で赤リングが収束+脈動、⚠が明滅)
@@ -1298,6 +1300,7 @@
       // 追撃波を刻む(波状のドラム。常に⚠2個分しか塞がない=必ず逃げ場がある)
       var KT = B.tentacle;
       tentWaveIdx = 0;
+      PP.audio.bossDangerStop();   // 触手が出たら警報(⚠のSE)は断ち切る
       for (var z = 0; z < pendingZones.length; z++) spawnStrike(pendingZones[z], 0);
       pendingZones.length = 0;
       tentWavesLeft = phase2 ? KT.extraWavesP2 : KT.extraWaves;
@@ -1366,6 +1369,7 @@
     } else {
       // ⚠満了 → 突き上げ。振り下ろしのフォール音+シェイク
       tentWaveIdx++;
+      PP.audio.bossDangerStop();   // 触手が出たら警報(⚠のSE)は断ち切る
       for (var j = 0; j < tentPending.length; j++) spawnStrike(tentPending[j], tentWaveIdx);
       tentPending.length = 0;
       tentWavesLeft--;

@@ -259,10 +259,9 @@
   //    カラーボムの発動音が変わる(例: sfx("SE/自分の音.mp3", 0.8))
   // ================================================================
   var seColorBomb = sfx("SE/broken_treasure.mp3", 0.8);
-  // 追加SE: ボスの⚠警告マーカー群の出現(1グループにつき1回) /
-  //          初回消し(コンボ1=コンボなしの消し)の炸裂音
+  // 追加SE: ボスの⚠警告マーカー群の出現(1グループにつき1回)。
+  // 警報なので単一インスタンス運用: 新しい⚠で鳴らし直し、触手が出たら止める
   var seBossDanger = sfx("SE/Boss_denger.mp3", 0.7);
-  var seFirstCombo = sfx("SE/1_Combo.mp3", 0.55);
 
   // ---------- 危機のループ音 ----------
   // 樽に呑まれかけている間ずっと鳴らし続ける。深さ(0〜1)で音量とピッチが
@@ -589,11 +588,11 @@
     // 新しい波が洞窟から湧いた
     newWave: seNewChain,
     pop: function (n) { beep(500 + Math.min(n, 8) * 40, 0.18); },
-    // 初回消し(コンボ1)。従来のピッチ連動ビープに 1_Combo.mp3 を重ねる。
-    // ※ pop はリコイル衝突の手応え音(chain.js)としても使われるので触らない
-    firstCombo: function (n) { beep(500 + Math.min(n, 8) * 40, 0.18); seFirstCombo(); },
-    // ボスの⚠警告マーカー群の出現(boss.js が1グループにつき1回呼ぶ)
-    bossDanger: seBossDanger,
+    // ボスの⚠警告マーカー群の出現(boss.js が1グループにつき1回呼ぶ)。
+    // 警報は1本だけ: 前の鳴り残しを止めてから鳴らす(⚠3回=3回鳴るが重ならない)
+    bossDanger: function () { seBossDanger.stop(); seBossDanger(); },
+    // 触手が実際に出た瞬間・攻撃キャンセル時に警報を断ち切る(boss.js が呼ぶ)
+    bossDangerStop: function () { seBossDanger.stop(); },
     // コンボ: 元の合成音を重厚化(主音 + 重低音の芯 + さらに下のサブ + 上の煌めき)
     // し、ユーザー追加の combo_SE.mp3 を重ねて鳴らす
     combo: function (c) {

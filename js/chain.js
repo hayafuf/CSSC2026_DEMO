@@ -741,8 +741,7 @@
       PP.fx.floatText("コンボ x" + g.combo + "!", mp.x, mp.y - 48, "#ff5d8f", 20);
       PP.audio.combo(g.combo);
     } else {
-      // コンボなしの消し(初回消し)は専用SE(1_Combo.mp3 入り)
-      PP.audio.firstCombo(n);
+      PP.audio.pop(n);
     }
 
     destroyRange(lane, i, j);
