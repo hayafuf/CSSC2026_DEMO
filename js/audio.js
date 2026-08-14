@@ -242,6 +242,15 @@
   var seBossSweep = sfx("SE/ボス_水色の攻撃.mp3", 0.7);
   var seBossTentacle = sfx("SE/ボス_触手攻撃.mp3", 0.75);
   var seBossAddle = sfx("SE/ボス_魅惑の攻撃_ピンク色の同心円攻撃.mp3", 0.7);
+  // 追加SE: 大砲の発射(通常弾・爆弾)/ 手持ち玉の交換(手動操作のみ)/
+  //          特殊弾💣🚀の装填(アイテムキャッチ・強化の自動装填)
+  var seFire = sfx("SE/Fire.mp3", 0.45);
+  var seSwap = sfx("SE/swap.mp3", 0.5);
+  var seSpecialLoad = sfx("SE/special_bomb_missile_reload.mp3", 0.6);
+  // 追加SE: ボスの攻撃(時凪の呪縛=上から落ちる大弾カーテン /
+  //          両舷斉射=振り子掃引で降り注ぐ弾の幕)
+  var seBossBallSlow = sfx("SE/boss_ball_slow_attack.mp3", 0.7);
+  var seBossWaveAttack = sfx("SE/boss_wave_attack.mp3", 0.8);
   // カラーボム発動: 選ばれた色が盤面から一掃されるときの炸裂音
   // ================================================================
   // TODO【課題4】カラーボムで再生するSEファイルを指定してみよう
@@ -566,7 +575,9 @@
     toggleMute: function () { return setMuted(!muted); },
     isMuted: function () { return muted; },
 
-    fire: function () { beep(220, 0.1, "square", 0.06); },
+    // 大砲の発射(通常弾・爆弾)。合成音の芯に Fire.mp3 を重ねる。
+    // ミサイルだけは cannon.js 側で missile.mp3 を鳴らす(二重鳴り回避)
+    fire: function () { beep(220, 0.1, "square", 0.06); seFire(); },
     // 発射玉がチェーンに刺さった
     hit: seHit,
     // 宝を持たない分断チェーンが停止した
@@ -590,7 +601,13 @@
     wind: seWind,
     // 生存ゲージの時間切れ(掃討フェーズ移行)
     timeOver: seTimeOver,
-    swap: function () { beep(440, 0.08, "sine", 0.06); },
+    // 手持ち玉の交換(手動操作: 交換キー・特殊弾トグル)
+    swap: function () { beep(440, 0.08, "sine", 0.06); seSwap(); },
+    // 盤面から消えた色の自動引き直し(cannon.js syncColors)。
+    // プレイヤーの操作ではないので mp3 は鳴らさず従来の合成音のみ
+    swapAuto: function () { beep(440, 0.08, "sine", 0.06); },
+    // 特殊弾💣🚀の装填(アイテムキャッチ時 / 強化「自動装填」の着荷時)
+    specialLoad: function () { beep(180, 0.2, "square", 0.1); seSpecialLoad(); },
     // ---- クリア走査(距離ボーナス)の音 ----
     // 発進: 巻き上がるライザー + 腹に来る号砲(樽口の flash/ring/burst と同時に鳴らす)
     sweepStart: function () {
@@ -674,6 +691,8 @@
     bossSweep: seBossSweep,       // 運命のルーレット(水色の掃射)の発動
     bossTentacle: seBossTentacle, // 海淵の大触腕(触手突き上げ)の発動
     bossAddle: seBossAddle,       // 惑乱の逆潮(ピンクの同心円リング)の展開
+    bossBallSlow: seBossBallSlow, // 時凪の呪縛(大弾カーテン)の発動
+    bossWaveAttack: seBossWaveAttack, // 両舷斉射(振り子掃引)の発動
     // ボスの咆哮(重攻撃の予兆・怒りフェーズ突入)。落ちるグリス+腹の底の持続音
     bossRoar: function () {
       gliss(110, 45, 0.7, "sawtooth", 0.2);

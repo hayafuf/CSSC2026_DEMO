@@ -43,12 +43,17 @@
   //   3) 再読み込みして、その難易度で開始すると曲が変わる
   //   (危機のとき Denger.mp3、ゲームオーバー時 gameover_BGM.mp3 に切り替わるのは
   //    全難易度共通。仕組みは js/audio.js の gameStart / setDanger を読んでみよう)
+  // bossHpMult: ボス(クラーケン)の HP 倍率。ボス戦の唯一の難易度スケール
+  // (実 HP = round(PP.BOSS.hp × bossHpMult)。参照は boss.js の maxHp())
   PP.DIFFICULTY = {
-    easy:     { name: "みならい海賊", entryMult: 0.85, holeMult: 0.95, curveMult: 1.15, timeMult: 0.85, colorAdd: 0, colorMin: 4, colorMax: 6, barrelBonus: 2,  useLives: true,  bgm: "BGM/Easy.mp3" },
-    normal:   { name: "一人前の海賊", entryMult: 1.00, holeMult: 1.00, curveMult: 1.00, timeMult: 1.00, colorAdd: 0, colorMin: 4, colorMax: 6, barrelBonus: 0,  useLives: true,  bgm: "BGM/Game_music.mp3" },
-    hard:     { name: "海賊船長",     entryMult: 1.10, holeMult: 1.02, curveMult: 0.95, timeMult: 1.00, colorAdd: 1, colorMin: 4, colorMax: 7, barrelBonus: 0,  useLives: true,  bgm: "BGM/Hard.mp3" },
-    hardcore: { name: "深海の悪魔",   entryMult: 1.12, holeMult: 1.02, curveMult: 0.92, timeMult: 1.10, colorAdd: 1, colorMin: 4, colorMax: 7, barrelBonus: 0, useLives: false, bgm: "BGM/HardCore.mp3" }
+    easy:     { name: "みならい海賊", entryMult: 0.85, holeMult: 0.90, curveMult: 1.15, timeMult: 0.85, colorAdd: 0, colorMin: 4, colorMax: 6, barrelBonus: 2,  useLives: true,  bossHpMult: 0.8,  bgm: "BGM/Easy.mp3" },
+    normal:   { name: "一人前の海賊", entryMult: 1.00, holeMult: 1.00, curveMult: 1.00, timeMult: 1.00, colorAdd: 0, colorMin: 4, colorMax: 6, barrelBonus: 0,  useLives: true,  bossHpMult: 1.0,  bgm: "BGM/Game_music.mp3" },
+    hard:     { name: "海賊船長",     entryMult: 1.10, holeMult: 1.06, curveMult: 0.92, timeMult: 1.00, colorAdd: 1, colorMin: 4, colorMax: 7, barrelBonus: 0,  useLives: true,  bossHpMult: 1.2,  bgm: "BGM/Hard.mp3" },
+    hardcore: { name: "深海の悪魔",   entryMult: 1.15, holeMult: 1.10, curveMult: 0.88, timeMult: 1.10, colorAdd: 1, colorMin: 4, colorMax: 7, barrelBonus: 0, useLives: false, bossHpMult: 1.35, bgm: "BGM/HardCore.mp3" }
   };
+  // (holeMult/curveMult 改定: easy は速度全体の底上げ(SPEED.levelStep・コース hole)を
+  //  相殺して従来の体感を維持、hard/hardcore は normal との差が +2% しかなく
+  //  段差が見えなかったので明確な階段にした)
   // タイトル画面のボタンの並び順(1〜4 キーもこの順)
   PP.DIFFICULTY_ORDER = ["easy", "normal", "hard", "hardcore"];
   // 現在の難易度プリセットを引くヘルパ(反映ロジック側が使う。ここは触らない)
@@ -76,7 +81,7 @@
   // 消費側(powerups.js / hud.js)は PP.LIFE.coinsPerLife ではなくこちらを読む
   PP.coinsPerLife = function () {
     var up = (PP.game && PP.game.upgrades && PP.game.upgrades.coin) || 0;
-    return Math.max(2, PP.LIFE.coinsPerLife - up);
+    return Math.max(3, PP.LIFE.coinsPerLife - up);   // 下限 2 → 3: 後半のドロップ増と重なるとライフが常に満タンだった
   };
 
   // ---------- タッチ端末の判定 ----------
@@ -120,7 +125,7 @@
     entry:800,        // 洞窟付近の速度 px/s
     hole: 22,          // 樽の直前の速度 px/s
     curve: 1.3,        // 減速カーブの指数(大きいほど早めに減速する。小さいほど樽の奥まで速度を保つ)
-    levelStep: 0.06,   // レベルごとの速度倍率の加算
+    levelStep: 0.075,  // レベルごとの速度倍率の加算(0.06 → 0.075: 後半コースの hole 引き下げに負けて実効速度が下がっていたのを是正)
     rollout: 2.2,      // レベル開始時のなだれ込み加算倍率(減衰する)
     rolloutDecay: 0.5  // なだれ込み倍率の減衰時定数(秒)
   };
@@ -225,14 +230,14 @@
   PP.ARCADE = {
     baseTime: 60,         // レベル1の生存秒数
     timePerLevel: 10,     // レベルごとの加算秒数
-    maxTime: 90           // 上限
+    maxTime: 100          // 上限(90 → 100: Lv4 で頭打ちになり Stage5 が伸びなかった)
   };
   // 次の波のトリガ: 経過時間ではなく「前の波の最後尾(締めの宝玉)が樽へ
   // どこまで近づいたか」で湧かせる。上手く堰き止めるほど次の波が遅れる=
   // 盤面の押され具合がそのまま補給ペースになる(ボス戦だけは演出上、
   // PP.BOSS.waveInterval の時間駆動で絶え間なく補給する)。
   PP.WAVE_NEXT = {
-    progress: 0.75,//j尾がレール全長(洞窟→樽)のこの割合を越えたら次の波
+    progress: 0.65,//j尾がレール全長(洞窟→樽)のこの割合を越えたら次の波
     maxWait: 45      // 保険(秒): 最後尾が宝を失って停止しても補給が途絶えないための上限
   };
   // 1つの波で補給する玉の数(末尾の宝玉は別)
@@ -253,7 +258,7 @@
   // クリアするほど走る距離が伸びる = 安全マージンがそのまま報酬になる。
   PP.CLEAR_SWEEP = {
     speed: 3600,       // 爆発の走る速さ px/s
-    pointsPerBall: 5,  // 玉1個ぶん(D)ごとの加点
+    pointsPerBall: 8,  // 玉1個ぶん(D)ごとの加点(5 → 8: 前線を洞窟側に留める「攻めた消し」の報酬を太らせる)
     afterglow: 1.5     // 走査完了からクリア画面までの余韻(秒)。金粉が舞い落ちる間
   };
 
@@ -332,7 +337,7 @@
   //   ・持続の長い妨害も pickAttack が「効果中の技」を候補から外すので、
   //     同種の重ね掛けは起きない(異種の重なりは怒りフェーズの意図的なリスク)。
   PP.BOSS = {
-    hp: 20,             // 必要ヒット数(通常弾=1)。まずはここを動かして調整する
+    hp: 22,             // 必要ヒット数(通常弾=1)の基準値。実 HP はこれ×難易度の bossHpMult(boss.js maxHp)
     y: 96,              // ボスの基準高さ(HUD の下・最上段レーンの上)
     moveAmp: 420,       // 左右往復の振幅 px
     moveSpeed: 0.35,    // 左右往復の角速度 rad/s
@@ -347,8 +352,8 @@
     gapCatchUp: 1.5,
     waveInterval: 3,    // ボス戦の波間隔(秒)。絶え間なく補給→玉列は常に連続
     waveSize: 40,       // ボス戦の1波の玉数(洞窟が空くまで次波は待つので溢れない)
-    cooldownMin: 3.2,   // 攻撃間隔の最小(秒)
-    cooldownMax: 5.0,   // 攻撃間隔の最大(秒)
+    cooldownMin: 3.0,   // 攻撃間隔の最小(秒)(3.2 → 3.0: 自動兵器で待つだけでも削れていたので手数を微増)
+    cooldownMax: 4.6,   // 攻撃間隔の最大(秒)(5.0 → 4.6: 同上)
     firstDelay: 3.0,    // 開戦から最初の攻撃までの猶予(秒)
     recover: 0.5,       // 攻撃後の隙(秒)
     iFrames: 0.08,      // 被弾後の無敵時間(1発のサブステップ多重ヒット防止)
@@ -361,7 +366,7 @@
     // hitIFrames: 被弾後の無敵秒数。攻撃が激しいので、多段ヒットで
     //   ハメられないようにする(骸骨玉の hitIFrames と同思想)
     orb: { catchW: 50, catchTop: 40, catchBottom: 20, r: 16,
-           hitStagger: 0.45, hitIFrames: 1.3 },
+           hitStagger: 0.45, hitIFrames: 2.0 },   // hitIFrames 1.3 → 2.0: 仰け反り+デバフ中の追撃が理不尽だったので延長。無敵中は大砲が点滅し、触れた弾はバリアで弾ける(boss.js)
     // 各攻撃: telegraph=予兆秒数 / dur=被弾時の効果秒数 / speed=妖弾の速さ px/s
     ink:       { telegraph: 1.0, dur: 4.5, lobs: 5, grav: 560, vy0: -40,   // dur: 7.0 は視界不良が長すぎたので短縮
                  rMin: 170, rMax: 280 },     // 漆黒の墨獄: 弧を描く墨玉のカーテン。着弾点に墨だまり
@@ -407,7 +412,10 @@
     // 「間 waveGap 秒 → ⚠ waveWarn 秒 → 突き上げ」のリズムで連続する。
     // holdTime は多段化で柱が画面に溜まりすぎないよう短め
     tentacle:  { telegraph: 1.6, zones: 2, r: 110, riseTime: 0.18, holdTime: 0.9,
-                 extraWaves: 2, extraWavesP2: 3, waveGap: 0.3, waveWarn: 0.7, waveWarnP2: 0.6 },
+                 extraWaves: 2, extraWavesP2: 3, waveGap: 0.3, waveWarn: 0.7, waveWarnP2: 0.6,
+                 // 触手専用の無敵秒数。orb.hitIFrames(2.0)だと追撃波(間隔≈1.0-1.3秒)が
+                 // 全部無効化されて触手が無力化するので、「連続ハメだけ防ぐ」短さにする
+                 hitIFrames: 1.2 },
     // 大津波: 安全地帯(光の柱)以外の低空を水壁が横断。柱の外にいると押し流される
     tsunami:   { telegraph: 1.8, speed: 520, gapW: 170, stun: 1.5, push: 200 },
     // 妖星の豪雨(改): 本物の隕石の豪雨。着弾で爆発+画面シェイク。
@@ -442,12 +450,12 @@
                                             // 通路幅が掃引位置に依らず一定になった(以前は
                                             // 端で線が斜めに太く判定され狭くなっていた)
                  ampMargin: 200,            // 振り子の振幅=W/2-ampMargin(端まで振り切らない)
-                 stun: 5, hitCd: 0.9,     // hitCd: 被弾直後は cross 弾に当たらない(スタンロック防止)
+                 stun: 5, hitCd: 1.5,     // hitCd: 被弾直後は cross 弾に当たらない(スタンロック防止。0.9 → 1.5: stun 5秒中の再被弾ループ緩和)
                  p2PeriodMul: 0.8 },        // 怒りフェーズは振り子が速くなる
     // 怒りフェーズ(HP が hpRatio 以下): 攻撃間隔短縮・弾速アップ・コンボ追撃
     // cooldown: 三段分裂の導入で1回の攻撃の「余韻」が長くなったので、
     // 攻撃間隔も通常フェーズ寄りに延ばして呼吸を作る(2.0/3.4 は忙しなかった)
-    phase2:    { hpRatio: 0.45, cooldownMin: 2.8, cooldownMax: 4.4, speedMul: 1.15,
+    phase2:    { hpRatio: 0.5, cooldownMin: 2.6, cooldownMax: 4.1, speedMul: 1.15,
                  comboChance: 0.35, comboDelay: 0.8, comboTelegraph: 0.6 }
   };
 
@@ -527,7 +535,7 @@
     freezeDur: 1.3,      // 被弾: 停止の秒数(危機中に長いと即死級なので短め)
     addleDur: 3.5,       // 被弾: 操作反転の秒数
     hitIFrames: 2.5,     // 被弾後の無敵秒数(扇の多段ヒット=スタンロック防止)
-    rewardScore: 300,    // 撃破ボーナススコア
+    rewardScore: 400,    // 撃破ボーナススコア(300 → 400: 後半の骸骨密度増に見合う報酬に)
     // 撃破時のパワーアップドロップ率。通常ドロップ(PP.ITEMS.dropChance 0.15)より
     // 高めだが確定ではない: 「必ず貰える」だと骸骨狩りが作業になるので、
     // スコアは確実+アイテムは期待値で釣る(コイン・パワーダウンは混ざらない)
@@ -735,7 +743,7 @@
     // 起きる。橋は最後に通る=d が大きいので上に描かれる。sharp:true で角丸の直角。
     {
       name: "橋を渡る道", overpass: true, sharp: true, corner: 20,
-      speed: { entry: 600, hole: 18, curve: 1.5 },   // 全長 4670px。洞窟→樽 約73秒
+      speed: { entry: 600, hole: 18.5, curve: 1.35 },   // 全長 4670px(hole 18/curve 1.5 → 18.5/1.35: 樽手前の圧を1段回復)
       lanes: [ { ctrl: BRIDGE_CTRL } ]
     },
 
@@ -747,7 +755,7 @@
     // 分散(交差はレーン1の raised で A が上=橋、レーン2は下をくぐる)。樽は互い違い(右上1250,450/左下50,550)。
     {
       name: "エディタのコース", overpass: true, sharp: false, corner: 24,
-      speed: { entry: 400, hole: 16, curve: 2.2},   // 2レーンとも 2570px。洞窟→樽 約59秒
+      speed: { entry: 400, hole: 17.5, curve: 1.9},   // 2レーンとも 2570px(hole 16/curve 2.2 → 17.5/1.9: 2レーン分散があるので控えめに引き上げ)
       lanes: [
         // レーン1(洞窟=左 → 左上ループ → 右の樽 y=450 へ)。中央交差では A が橋(上)。
         { ctrl: [ [-120, 450], [350, 450, 0], [350, 100, 0], [100, 100, 0], [100, 250, 0],
@@ -775,7 +783,7 @@
     // 6色化で既に跳ねるので、このステージの難しさは「速さ」でなく「先読み」に寄せる。
     {
       name: "洞窟の橋道", overpass: true, sharp: true, corner: 20,
-      speed: { entry: 500, hole: 16, curve: 2.1},   // 全長 4670px。洞窟→樽 約78秒
+      speed: { entry: 500, hole: 17.5, curve: 1.8},   // 全長 4670px(hole 16/curve 2.1 → 17.5/1.8: 「先読み」面にも速度圧を足す)
       // 中盤で強化が乗り始めるので骸骨玉を少し厚くして緊張を保つ
       skullMult: 1.2,
       lanes: [ { ctrl: BRIDGE_CTRL,
@@ -791,18 +799,22 @@
     // 動かしても実測し直し不要)。直角の道なので sharp:true(角丸の直角)。
     {
       name: "四叉の激流", overpass: false, sharp: true, corner: 26,
-      speed: { entry: 560, hole: 14, curve: 2.9 },   // 全長 1550-1930px。最短レーンで洞窟→樽 約55秒
+      speed: { entry: 560, hole: 16, curve: 2.2 },   // 全長 1550-1930px(hole 14/curve 2.9 → 16/2.2: 最終面が全ステージ最遅+最長の安全地帯だったのを是正)
       // 4レーンに注意が割れる+7色化で消しにくいので、このコースだけ同色の塊を
       // 濃くして補給する(既定 PP.SPAWN_CLUSTER=0.35 → 0.55。ball.js spawnColor)
-      // (0.75 → 0.65: 強化込みだと消しやすすぎて最終ステージが作業になっていた)
-      spawnCluster: 0.65,
+      // (0.75 → 0.65 → 0.50: 強化込みだと消しやすすぎて最終ステージが作業に
+      //  なっていた。cluster 強化 Lv4 込みの実効塊率 0.82 → 0.74)
+      spawnCluster: 0.50,
       // アイテムのドロップ率もこのコースだけ上乗せ(powerups.js maybeDrop)。
-      // (2.7 → 2.0: 強化 droprate と重なると道具が溢れていたので圧縮)
-      dropMult: 2.0,
-      // 骸骨玉の出現率はこのコースだけ半分(chain.js spawnBalls)。
+      // (2.7 → 2.0 → 1.4: 強化 droprate と重なるとマッチ毎ドロップが
+      //  100% を超えて道具が溢れていたので圧縮)
+      dropMult: 1.4,
+      // 骸骨玉の出現率はこのコースだけ抑える(chain.js spawnBalls)。
       // 4レーン同時防衛で手一杯のうえ、レーン総延長が長い=補給される玉数も
       // 多いので、既定の確率のままだと骸骨が他コースの倍近く湧いてしまう
-      skullMult: 0.5,
+      // (0.5 → 0.8: 半減では最終面からリスク=報酬機会がほぼ消えていた。
+      //  総量は maxActive:5 が安全弁)
+      skullMult: 0.8,
       lanes: [
         { ctrl: QUAD[0], raisedOver: [1, 3] },   // y=186 の直線が L1・L3 の縦棒を跨ぐ
         { ctrl: QUAD[1], raisedOver: [3] },      // y=272 の直線が L3 の大縦断を跨ぐ
@@ -856,16 +868,16 @@
   //     "add"      … 段数そのものを加算量に使う
   PP.UPGRADES = [
     { id: "autogun",    name: "自動機銃",     icon: "🔫", max: 6, w: 0.9,
-      kind: "interval", base: 8.0, decay: 0.85, floor: 3.5,
+      kind: "interval", base: 8.0, decay: 0.85, floor: 4.5,   // floor 3.5 → 4.5: 満載時に盤面が勝手に溶けていた
       desc: "数秒ごとに大砲の真上へ\n銃弾を自動発射する" },
     // 自動装填は2枚に分離(旧「自動装填機」は 50/50 でどちらかが届いた)。
     // 種類が確定するぶん 50/50 より強いので、基本間隔は旧45秒より長め。
     // ボムはボスに2ダメージ入るのでミサイルよりさらに長く
     { id: "autobomb",   name: "自動装填(ボム)",     icon: "💣", max: 4, w: 0.55,
-      kind: "interval", base: 60, decay: 0.85, floor: 30,
+      kind: "interval", base: 60, decay: 0.85, floor: 36,   // floor 30 → 36: 無料特殊弾だけでボス HP が削り切れていた
       desc: "数十秒ごとに爆弾が\nスロットへ届く" },
     { id: "automissile", name: "自動装填(ミサイル)", icon: "🚀", max: 4, w: 0.55,
-      kind: "interval", base: 50, decay: 0.85, floor: 26,
+      kind: "interval", base: 50, decay: 0.85, floor: 32,   // floor 26 → 32: 自動装填(ボム)と同じ理由
       desc: "数十秒ごとにミサイルが\nスロットへ届く" },
     { id: "droprate",   name: "戦利品の嗅覚", icon: "🧲", max: 4, w: 1.0,
       kind: "mult", steps: [0.25, 0.20, 0.20, 0.15],
@@ -879,14 +891,14 @@
     { id: "missw",      name: "火筒の目利き", icon: "🚀", max: 3, w: 0.8,
       kind: "mult", steps: [0.60, 0.60, 0.60],
       desc: "ドロップ率が少し上がり\nミサイルが出やすくなる" },
-    { id: "barrelcap",  name: "深い樽底",     icon: "🛢️", max: 3, w: 0.6,
+    { id: "barrelcap",  name: "深い樽底",     icon: "🛢️", max: 2, w: 0.6,   // max 3 → 2: 樽 4→7 個の「溢れない保険」は死の緊張を消しすぎた
       kind: "add",
       desc: "樽が呑み込める玉の数が\n1個増える" },
     { id: "recoil",     name: "砲撃の重み",   icon: "💥", max: 3, w: 0.9,
-      kind: "mult", steps: [0.20, 0.15, 0.10],
+      kind: "mult", steps: [0.15, 0.12, 0.08],   // ×1.45 → ×1.35: 押し戻しがチェーン前進をほぼ打ち消していた
       desc: "消したときの押し戻しが\n強くなる" },
     { id: "combo",      name: "コンボの余韻", icon: "🔥", max: 3, w: 0.9,
-      kind: "mult", steps: [0.25, 0.19, 0.12],
+      kind: "mult", steps: [0.20, 0.15, 0.10],   // 窓 2.5秒 → 2.3秒: 満載だと連鎖が途切れなさすぎた
       desc: "コンボの継続時間が\n延びる" },
     { id: "coin",       name: "換金術",       icon: "🪙", max: 3, w: 0.8,
       kind: "add",
@@ -902,9 +914,12 @@
   // 防ぐための逆風であって罰ではないので、上限(cap)は控えめに刻む。
   // 実装は upgrades.js(倍率の事前計算)と chain.js(speedAt / 骸骨抽選)。
   PP.UPGRADE_PRESSURE = {
-    speedPer: 0.010, speedCap: 0.15,   // チェーン速度 +1%/段(上限 +15%)
-    skullPer: 0.030, skullCap: 0.45    // 骸骨玉の出現率 +3%/段(上限 +45%)
+    speedPer: 0.012, speedCap: 0.25,   // チェーン速度 +1.2%/段(上限 +25%)
+    skullPer: 0.035, skullCap: 0.70    // 骸骨玉の出現率 +3.5%/段(上限 +70%)
   };
+  // (0.010/0.15・0.030/0.45 → 現行値: 強化は最大43段まで積めるのに、逆風が
+  //  合計15段でキャップに達して以降ノーリスクだった。約21段までに延長し、
+  //  「強化を積むほど骸骨=リスクと報酬機会が増える」構図を後半まで保つ)
 
   // ---------- 【強化】手詰まり救済(海神の加護)のしきい値 ----------
   // 樽直前のレーン(先頭が PP.RESCUE.start を越えたレーン)に限った「局所判定」:
@@ -948,10 +963,11 @@
     downCooldown: 15,
     // 危機ボーナス: 樽に呑まれ始めるほどドロップ率が「加算」で上がる。
     // PP.crisis.level()(0=平常〜2=あふれ寸前)に比例して 0 → crisisDropBonus。
-    // あふれ寸前で 15% → 20%。八百長(道具で勝手に助かる)にならないよう
-    // ひとまず控えめな +5% から様子を見る。調整はこの1行。
+    // 八百長(道具で勝手に助かる)にならないよう控えめから始めたが、
+    // 後半の圧を上げたぶん「危機で粘る」報酬も +5% → +8% へ引き上げた。
+    // 調整はこの1行。
     // パワーダウン(downChance)には掛けない(危機に罠を増やすのは本末転倒)
-    crisisDropBonus: 0.05,
+    crisisDropBonus: 0.08,
     // 落下加速度 px/s^2。アイテムは上向きにはじけてから落ちる(powerups.js popVel)
     // ので、重力は強めにして「短く跳ねて、スッと落ちる」テンポにする
     fallGravity: 620,

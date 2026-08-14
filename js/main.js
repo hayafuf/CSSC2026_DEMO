@@ -637,6 +637,7 @@
     PP.courseView.updateRailFlow(dt);   // 溝を流れる光(作画は course-view.js)
     PP.fx.updateShake(dt);
     PP.fx.updateParticles(dt);   // プール式パーティクルの前進(fx.js)
+    PP.cannon.updateHurt(dt);    // 被弾後の無敵の点滅(非プレイ時は自動で解除される)
     PP.cannon.updateAim();
 
     renderChains();

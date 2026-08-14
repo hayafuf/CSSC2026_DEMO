@@ -92,7 +92,7 @@
     var m = val("droprate");
     m *= 1 + 0.08 * (level("bombw") + level("missw"));
     if (rescueActive()) m *= PP.RESCUE.dropBoost;
-    return Math.min(2.5, m);   // 全部盛りでも上限2.5倍(道具の仕事にしすぎない)
+    return Math.min(2.2, m);   // 全部盛りでも上限2.2倍(2.5 → 2.2: コース倍率と重なると道具の仕事になりすぎた)
   }
 
   // パワーアップ抽選プールの重み補正(powerups.js drop / dropPower)。
@@ -444,7 +444,7 @@
     g.specialLoaded = false;
     PP.cannon.refreshBalls();
     PP.fx.floatText(icon + " 自動装填!", 86, PP.H - 120, "#8ef0d0", 18);
-    PP.audio.catchItem();
+    PP.audio.specialLoad();   // 特殊弾の装填音(手動キャッチの loadSpecial と同じ音)
   }
 
   // ---------- 手詰まり救済(海神の加護) ----------

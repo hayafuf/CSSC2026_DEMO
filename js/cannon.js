@@ -444,6 +444,21 @@
     root.x = PP.cannon.x;
   }
 
+  // ---------- 被弾後の無敵の見た目(点滅) ----------
+  // 無敵の当たり判定そのものは boss.js(orbHitCd)/ skull.js(playerHitCd)が
+  // 持つ。ここは「見た目」の一元管理: 被弾処理が setHurt(無敵秒数) を呼ぶと、
+  // 残り時間のあいだ大砲全体が明滅する(切れた瞬間に必ず元の濃さへ戻る)
+  var hurtT = 0;
+  function setHurt(sec) { hurtT = Math.max(hurtT, sec || 0); }
+  function clearHurt() { hurtT = 0; if (root) root.alpha = 1; }
+  function updateHurt(dt) {
+    // リトライ暗転・クリア画面などへ抜けたら点滅を残留させない
+    if (PP.game.state !== "playing") { if (hurtT > 0) clearHurt(); return; }
+    if (hurtT <= 0) return;
+    hurtT -= dt;
+    root.alpha = hurtT <= 0 ? 1 : 0.55 + 0.3 * Math.sin(hurtT * 25);   // 約4Hzの明滅
+  }
+
   // 特殊弾(爆弾/ミサイル)をキャッチした: 自動で装填する(装填中の色玉は温存)。
   // 持てるのは1個まで。すでに持っていたら新しい方に置き換える。
   function loadSpecial(kind) {
@@ -454,7 +469,7 @@
     g.special = kind;
     g.specialLoaded = true;
     refreshBalls();
-    PP.audio.beep(180, 0.2, "square", 0.1);
+    PP.audio.specialLoad();
   }
 
   // 互換ラッパ(既存呼び出し向け)
@@ -501,7 +516,6 @@
       wild: wild,           // 【強化】万能玉(着弾時に当てた玉の色を継承 = chain.js)
       color: g.currentColor, view: view
     });
-    PP.audio.fire();
     // 砲身の反動(下に沈む)
     createjs.Tween.get(barrel, { override: true })
       .to({ y: 6 }, 50).to({ y: 0 }, 120, createjs.Ease.quadOut);
@@ -518,6 +532,8 @@
       PP.fx.missileTrail(mx, 0, my, PP.MISSILE_HIT_HALF * 2);
       PP.fx.shake(12, 0.3);
     } else {
+      // 発射音は非ミサイルだけ(ミサイルは missile.mp3 が主役。Fire.mp3 と重ねない)
+      PP.audio.fire();
       PP.fx.flash(mx, my, "rgba(255,214,140,0.9)", 34);
       PP.fx.burst(mx, my, "rgba(190,196,204,0.45)", 6);
       PP.fx.shake(2, 0.12);
@@ -596,7 +612,7 @@
     }
     if (changed) {
       refreshBalls();
-      PP.audio.swap();
+      PP.audio.swapAuto();   // 自動引き直しはプレイヤー操作ではないので控えめな合成音のみ
     }
   }
 
@@ -883,6 +899,9 @@
     refreshBalls: refreshBalls,
     syncColors: syncColors,
     updateAim: updateAim,
-    updateShots: updateShots
+    updateShots: updateShots,
+    setHurt: setHurt,        // 被弾側(boss.js / skull.js)が無敵秒数を渡す
+    clearHurt: clearHurt,    // ステージリセット時の点滅解除
+    updateHurt: updateHurt   // main.js の tick が毎フレーム呼ぶ
   };
 })();

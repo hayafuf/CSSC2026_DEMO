@@ -107,6 +107,7 @@
   var crossCenterK = 0;     // 0→1: 両舷斉射のためにボスが中央へ寄っている度合い
   var meteorKnock = null;   // 隕石の爆風ノックバック {t, dur, fromX, toX}
   var orbHitCd = 0;         // プレイヤー被弾後の無敵秒(全妖弾共通。多段ヒット防止)
+  var parryBeepCd = 0;      // 無敵中の「弾いた」音の間引き(cross は毎秒30発来るため)
   var crossTele = [];       // 予兆の交差線(telegraph 中だけ表示)
   var crossSafe = null;     // 掃引点に追従する光の柱(2本の線の間=安全地帯の標示)
   var rageVin = null;       // 怒りフェーズの全画面赤ビネット(alpha だけ動かす)
@@ -410,13 +411,19 @@
   }
 
   var HP_X = 440, HP_Y = 72, HP_W = 420, HP_H = 16;
+  // ボスの最大HP = 基準値(PP.BOSS.hp)× 難易度の bossHpMult(config.js)。
+  // ボス戦の難易度スケールはこの1点のみ(攻撃パターンは全難易度共通)
+  function maxHp() {
+    return Math.round(PP.BOSS.hp * (PP.diff().bossHpMult || 1));
+  }
+
   function drawHpBar() {
     if (hp === lastHpDrawn) return;
     lastHpDrawn = hp;
     var g = hpBarSh.graphics;
     g.clear();
     g.beginFill("rgba(4,8,12,0.7)").drawRoundRect(HP_X, HP_Y, HP_W, HP_H, 8);
-    var ratio = Math.max(0, hp / PP.BOSS.hp);
+    var ratio = Math.max(0, hp / maxHp());
     if (ratio > 0) {
       g.beginLinearGradientFill(["#ff9a8a", "#e03838", "#7a1420"], [0, 0.5, 1],
           0, HP_Y, 0, HP_Y + HP_H)
@@ -760,8 +767,9 @@
       // また cross の小ドットは「見た目どおりの細さ」で判定する: 通常オーブ用の
       // 広いキャッチ箱(±50)だと、見た目は避けているのに当たる=2本の線の
       // 間の空間が実際より 60px 以上狭くなってしまう
-      // orbHitCd(被弾後の無敵)の間は全妖弾をすり抜ける(激しい弾幕での
-      // 連続被弾=ハメを防ぐ。骸骨玉の hitIFrames と同じ思想)。
+      // orbHitCd(被弾後の無敵)の間は素通りさせず、バリアで「弾いて」消す
+      // (激しい弾幕での連続被弾=ハメを防ぎつつ、無敵が目に見える。
+      //  骸骨玉の hitIFrames と同じ思想)。
       // cross の判定は縦60pxの箱ではなく「大砲の高さの線を横切った瞬間」の
       // 1回だけ: 箱判定だと、掃引が左右端で線が斜めになったとき箱の縦幅の
       // 中で線が横に~90px も動き、線が実際より太く判定されて通路が狭くなる
@@ -769,15 +777,25 @@
       var hitNow;
       if (b.type === "cross") {
         var crossLine = cy - 20;
-        hitNow = crossHitCd <= 0 &&
-                 b.lastY < crossLine && b.y >= crossLine &&
+        hitNow = b.lastY < crossLine && b.y >= crossLine &&
                  Math.abs(b.x - cx) <= b.r + 16;
       } else {
         hitNow = Math.abs(b.x - cx) <= O.catchW &&
                  b.y >= cy - O.catchTop && b.y <= cy + O.catchBottom;
       }
-      if (orbHitCd <= 0 && hitNow) {
-        applyOrbHit(b);
+      if (hitNow) {
+        var invuln = orbHitCd > 0 || (b.type === "cross" && crossHitCd > 0);
+        if (!invuln) {
+          applyOrbHit(b);
+        } else {
+          // 無敵中: 弾はバリアに弾かれて消える(小さな火花+軽い音)。
+          // cross は密度線なので音だけ parryBeepCd で間引く(火花は残す)
+          PP.fx.burst(b.x, b.y, "#9fd8ff", 4, 0.9);
+          if (parryBeepCd <= 0) {
+            PP.audio.beep(980, 0.05, "triangle", 0.05);
+            parryBeepCd = 0.12;
+          }
+        }
         removeBullet(i);
         continue;
       }
@@ -836,6 +854,7 @@
     // 被弾の共通リアクション: 仰け反りスタン+無敵時間+赤い被弾フラッシュ。
     // 攻撃が激しいぶん、「当たった」ことを体で分からせ、多段ヒットからは守る
     orbHitCd = B.orb.hitIFrames;
+    PP.cannon.setHurt(B.orb.hitIFrames);   // 無敵の残り時間だけ大砲が点滅する
     g.bossFx.freeze = Math.max(g.bossFx.freeze, B.orb.hitStagger);
     PP.fx.screenFlash("rgba(200,20,20,0.22)", 0.22, 300);
     PP.fx.burst(PP.cannon.x, PP.cannon.y - 30, "#ff5030", 10, 1.5);
@@ -1263,6 +1282,7 @@
       curtainTotal = phase2 ? 6 : 5;
       curtainLeft = curtainTotal;
       curtainT = 0;                                 // 1枚目はすぐ
+      PP.audio.bossBallSlow();   // 時凪の呪縛(大弾カーテン)の専用SE
     } else if (key === "randomize") {
       // 運命のルーレット: 左右から交差する2本の「回転する腕」が
       // 弧を掃くように弾を置いていく(ルーレットの針の回転)
@@ -1298,7 +1318,7 @@
       crossActive = true;
       crossT = 0;
       crossEmitAcc = 0;
-      PP.audio.bossSweep();
+      PP.audio.bossWaveAttack();   // 両舷斉射の専用SE(bossSweep はルーレット専用に戻した)
     } else {
       // 単発の狙い撃ち(addle=速い / shotSlow=大きく遅い / randomize=中速)
       var spec = B[key];
@@ -1423,10 +1443,19 @@
         // ドラムを追うだけで「まだ続く/終わりが近い」が耳で分かる
         PP.audio.beep(Math.max(50, 78 - s.wave * 7), 0.42, "sawtooth", 0.2);
         if (Math.abs(PP.cannon.x - s.x) < K.r + 25) {
-          var pool = ["freeze", "addle", "shotSlow"];
-          // フル時間のデバフ(0.7 倍では軽すぎて触手が怖くなかった)
-          applyDebuff(pool[Math.floor(Math.random() * pool.length)], 1.0);
-          PP.fx.shake(10, 0.3);
+          if (orbHitCd <= 0) {
+            var pool = ["freeze", "addle", "shotSlow"];
+            // フル時間のデバフ(0.7 倍では軽すぎて触手が怖くなかった)
+            applyDebuff(pool[Math.floor(Math.random() * pool.length)], 1.0);
+            // 触手専用の短い無敵(K.hitIFrames)。orb.hitIFrames だと追撃波が
+            // 全部無効化されて波状のドラムが死ぬ。「連続ハメだけ防ぐ」長さ
+            orbHitCd = K.hitIFrames;
+            PP.cannon.setHurt(K.hitIFrames);
+            PP.fx.shake(10, 0.3);
+          } else {
+            // 無敵中はバリアが掠める演出のみ(以前は無敵を無視して多段被弾していた)
+            PP.fx.burst(PP.cannon.x, PP.cannon.y - 40, "#9fd8ff", 6, 1.0);
+          }
         }
       }
       // リスクリターンの後段: 突き上げ後も holdTime の間は触手が居座る。
@@ -1527,9 +1556,17 @@
     if (!wave.hitDone &&
         ((wave.dir > 0 && wave.x >= PP.cannon.x) || (wave.dir < 0 && wave.x <= PP.cannon.x))) {
       wave.hitDone = true;
-      if (Math.abs(PP.cannon.x - tsuSafeX) > S.gapW / 2 - 10) {
+      if (Math.abs(PP.cannon.x - tsuSafeX) > S.gapW / 2 - 10 && orbHitCd > 0) {
+        // 被弾直後の無敵中は呑まれない(以前は無敵を無視して、仰け反り中に
+        // そのまま押し流される理不尽があった)。しぶきだけ浴びてやり過ごす
+        PP.fx.burst(PP.cannon.x, PP.CANNON_Y - 40, "rgba(190,230,246,0.9)", 10, 1.4);
+        PP.audio.beep(300, 0.15, "triangle", 0.08);
+      } else if (Math.abs(PP.cannon.x - tsuSafeX) > S.gapW / 2 - 10) {
         wave.carried = true;   // 波と一緒に端まで流されていく(updateWave が運ぶ)
         PP.game.bossFx.freeze = Math.max(PP.game.bossFx.freeze, S.stun);
+        // 呑まれた時点から無敵+点滅を開始(端に捨てられた後の立て直し猶予)
+        orbHitCd = Math.max(orbHitCd, PP.BOSS.orb.hitIFrames);
+        PP.cannon.setHurt(PP.BOSS.orb.hitIFrames);
         PP.fx.shake(16, 0.35);
         PP.fx.burst(PP.cannon.x, PP.CANNON_Y - 40, "#4ac8e8", 16, 1.8);
         PP.audio.beep(120, 0.3, "sawtooth", 0.14);
@@ -1547,7 +1584,12 @@
       }
     }
     if (wave.x < -100 || wave.x > PP.W + 100) {
-      if (wave.carried) PP.game.bossFx.freeze = Math.max(PP.game.bossFx.freeze, S.stun);
+      if (wave.carried) {
+        PP.game.bossFx.freeze = Math.max(PP.game.bossFx.freeze, S.stun);
+        // 端に捨てられて動けない間に次の攻撃で狩られないよう、無敵を張り直す
+        orbHitCd = Math.max(orbHitCd, PP.BOSS.orb.hitIFrames);
+        PP.cannon.setHurt(PP.BOSS.orb.hitIFrames);
+      }
       clearWave();
     }
   }
@@ -1803,7 +1845,7 @@
       PP.audio.beep(1175, 0.18, "triangle", 0.1);
     }
     // HP半分で怒りフェーズへ(1回だけ)
-    if (!phase2 && hp > 0 && hp <= Math.ceil(PP.BOSS.hp * PP.BOSS.phase2.hpRatio)) enterPhase2();
+    if (!phase2 && hp > 0 && hp <= Math.ceil(maxHp() * PP.BOSS.phase2.hpRatio)) enterPhase2();
     if (hp <= 0) startDying();
     return true;
   }
@@ -1869,6 +1911,8 @@
     crossCenterK = 0;
     meteorKnock = null;
     orbHitCd = 0;
+    parryBeepCd = 0;
+    PP.cannon.clearHurt();   // ステージリセットで点滅を残留させない
     if (crossSafe) crossSafe.alpha = 0;
     clearCrossTele();
     removeInk();
@@ -1918,6 +1962,7 @@
     updateChips(dt);
     if (crossHitCd > 0) crossHitCd -= dt;
     if (orbHitCd > 0) orbHitCd -= dt;
+    if (parryBeepCd > 0) parryBeepCd -= dt;
     // 時凪のカーテン: 全段出揃って dropDelay 秒後、「全弾同時」に一斉落下。
     // 凪いでいた画面全体の弾が同じ瞬間に流れ出すのが演出の芯なので、
     // 弾ごとではなくここで一括して速度を跳ね上げる
@@ -2043,7 +2088,7 @@
 
   // ---------- 開始・終了 ----------
   function reset() {
-    hp = PP.BOSS.hp;
+    hp = maxHp();
     lastHpDrawn = -1;
     state = "idle";
     stateT = PP.BOSS.firstDelay;

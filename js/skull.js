@@ -24,6 +24,7 @@
   var bullets = [];       // {x, y, vx, vy, r, view, t}
   var inkBlobs = [];      // {sh, bx, by, ph, life}(パワーダウン🦑の墨だまり)
   var playerHitCd = 0;    // 被弾後の無敵残り秒(扇の多段ヒット=スタンロック防止)
+  var parryBeepCd = 0;    // 無敵中の「弾いた」音の間引き(火花は毎回、音は0.12秒に1回)
   var t = 0;              // 明滅・墨の揺らぎ用の通し時間
   var tmpPos = {};        // rail.posAtInto 用の使い回しオブジェクト
 
@@ -294,6 +295,7 @@
     var S = PP.SKULL;
     var T = TYPES[type];
     playerHitCd = S.hitIFrames;
+    PP.cannon.setHurt(S.hitIFrames);   // 無敵の残り時間だけ大砲が点滅する
     PP.fx.shake(8, 0.25);
     PP.audio.debuff();   // 状態異常がかかった合図
     if (type === "freeze") g.bossFx.freeze = S.freezeDur;
@@ -444,11 +446,19 @@
       }
       if (blocked) { removeBullet(i); continue; }
 
-      // 大砲への命中(無敵中は素通り=多段ヒット防止)
-      if (playerHitCd <= 0 &&
-          Math.abs(b.x - cx) <= O.catchW &&
+      // 大砲への命中。無敵中(playerHitCd)は素通りさせず、バリアで
+      // 「弾いて」消す(多段ヒット防止+無敵が目に見える。boss.js と同じ作法)
+      if (Math.abs(b.x - cx) <= O.catchW &&
           b.y >= cy - O.catchTop && b.y <= cy + O.catchBottom) {
-        applyHit(b.type);
+        if (playerHitCd <= 0) {
+          applyHit(b.type);
+        } else {
+          PP.fx.burst(b.x, b.y, "#9fd8ff", 4, 0.9);
+          if (parryBeepCd <= 0) {
+            PP.audio.beep(980, 0.05, "triangle", 0.05);
+            parryBeepCd = 0.12;
+          }
+        }
         removeBullet(i);
         continue;
       }
@@ -509,6 +519,7 @@
     if (!cont) return;
     t += dt;
     if (playerHitCd > 0) playerHitCd -= dt;
+    if (parryBeepCd > 0) parryBeepCd -= dt;
     updateSkullBalls(dt);
     updateBullets(dt);
     updateInk(dt);
@@ -526,6 +537,8 @@
     }
     inkBlobs.length = 0;
     playerHitCd = 0;
+    parryBeepCd = 0;
+    PP.cannon.clearHurt();   // リトライ・レベル切替で点滅を残留させない
   }
 
   // デバッグ用: 最初の骸骨玉のクールダウンを飛ばして即予兆に入れる
