@@ -204,8 +204,10 @@
       var spIcon = g.special === "missile" ? "🚀" : "💣";
       parts.unshift(spIcon + (g.specialLoaded ? " 装填" : " 待機"));
     }
-    // 【強化】救済(海神の加護)で万能玉が装填されている合図
-    if (PP.upgrades.wildArmed()) parts.unshift("🌈 万能");
+    // 【新】虹玉のストック表示。装填中(加護で砲身に入っている)は「装填」表記、
+    // それ以外は残数のみ。0個のときは出さない(枠の圧迫を避ける)
+    if (PP.upgrades.wildArmed()) parts.unshift("🌈 装填 x" + PP.game.wildCharges);
+    else if ((PP.game.wildCharges || 0) > 0) parts.unshift("🌈x" + PP.game.wildCharges);
     // 表示文字列(残り秒は Math.ceil なので約1秒に1回しか変わらない)が同じなら、
     // 文字幅の計測(getMeasuredWidth はキャンバスでの実測=重い)とチップの
     // 再描画を丸ごと飛ばす。チップの形は文字列の幅だけで決まるので絵は同一。
@@ -388,10 +390,11 @@
     redrawDiffButtons();
   }
 
-  // 難易度を選び直せる画面か(= ここから新しいランが始まる画面か)
+  // 難易度を選び直せる画面か(= ここから新しいランが始まる画面か)。
+  // over 画面はコンティニュー(同ラン継続)になったので難易度は変えられない
   function canPickDifficulty() {
     var st = PP.game.state;
-    return st === "title" || st === "over" || st === "gameclear";
+    return st === "title" || st === "gameclear";
   }
 
   // 選択中のボタンだけ金縁で光らせる
@@ -494,6 +497,10 @@
     var O = PP.layers.overlay;
     createjs.Tween.removeTweens(O);
     O.alpha = 1;
+    // カード選択 UI とリトライ暗幕は stage 直下(overlay より上)に積まれる。
+    // それらの最中にポーズしても板が隠れないよう、overlay を最前面へ引き上げる
+    // (addChild は再追加=最前面への移動)
+    PP.stage.addChild(O);
   }
   function hidePause() { hideOverlay(); }
 

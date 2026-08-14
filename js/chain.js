@@ -741,7 +741,8 @@
       PP.fx.floatText("コンボ x" + g.combo + "!", mp.x, mp.y - 48, "#ff5d8f", 20);
       PP.audio.combo(g.combo);
     } else {
-      PP.audio.pop(n);
+      // コンボなしの消し(初回消し)は専用SE(1_Combo.mp3 入り)
+      PP.audio.firstCombo(n);
     }
 
     destroyRange(lane, i, j);
@@ -887,6 +888,48 @@
     }
   }
 
+  // 【新】虹玉(万能玉)の炸裂: 着弾した玉を中心に「接触している連なり」を
+  // 色に関係なく最大 PP.WILD.blastCap 個まで巻き込んで消す(マッチ判定は通さない)。
+  // 宝玉は境界: 巻き込まず、そこで連なりを打ち切る(お宝は守られる)。
+  // 骸骨玉の撃破報酬は destroyRange が一手に引き受ける。
+  // 消した跡の前後が同色接触なら joinAt が連鎖(chained)へ発展させる。
+  function wildBlast(lane, sh, hitIndex) {
+    var balls = lane.balls;
+    if (hitIndex < 0 || hitIndex >= balls.length) return;
+    var i = hitIndex, j = hitIndex;
+    // 接触している連なりを前後へ拡張(balls は先頭=樽側が d 大、後方ほど d 小)
+    while (i > 0 && !balls[i - 1].treasure &&
+           balls[i - 1].d - balls[i].d <= D + 1) i--;
+    while (j + 1 < balls.length && !balls[j + 1].treasure &&
+           balls[j].d - balls[j + 1].d <= D + 1) j++;
+    // 上限: 着弾点を中心に、遠い側から削って blastCap 個に収める
+    while (j - i + 1 > PP.WILD.blastCap) {
+      if (hitIndex - i > j - hitIndex) i++; else j--;
+    }
+    var g = PP.game;
+    var n = j - i + 1;
+    // コンボ規約は popRun と同じ: 窓が生きていれば積む、切れていれば1から
+    g.combo = g.comboTimer > 0 ? g.combo + 1 : 1;
+    g.comboTimer = PP.COMBO_WINDOW * PP.upgrades.val("combo");
+    var points = n * PP.WILD.scorePerBall * g.combo;
+    g.score += points;
+    var mp = lane.rail.posAt(balls[hitIndex].d);
+    // 大技の演出: 虹の閃光 + 二重リング + 大量の火花 + 揺れ + 炸裂音
+    PP.fx.screenFlash("rgba(142,240,208,0.30)", 0.30, 320);
+    PP.fx.flash(mp.x, mp.y, "rgba(255,255,240,1)", 60);
+    PP.fx.ring(mp.x, mp.y, "#8ef0d0", 10, 120, 420);
+    PP.fx.ring(mp.x, mp.y, "#ffd24a", 6, 80, 320);
+    PP.fx.burst(mp.x, mp.y, "#8ef0d0", 26, 2.0);
+    PP.fx.burst(mp.x, mp.y, "#ffd24a", 14, 1.5);
+    PP.fx.shake(Math.min(40, 10 + n * 2), 0.4);
+    PP.audio.colorBomb();
+    PP.fx.floatText("🌈 +" + points, mp.x, mp.y - 26, "#8ef0d0", 24);
+    destroyRange(lane, i, j);
+    PP.powerups.maybeDrop(mp.x, mp.y);
+    PP.hud.update();
+    joinAt(lane, i);
+  }
+
   // ミサイルの貫通: x を中心とする幅 MISSILE_HIT_HALF*2 の縦回廊のうち、
   // このフレームで通過した区間 [yTop, yBottom](yTop = 進んだ後の y)に
   // かかる玉を全レーンから消す。スイープ判定なので高速でもすり抜けない。
@@ -931,19 +974,10 @@
   }
 
   // 発射玉をチェーンに割り込ませる(レーン lane)。
+  // ※ 万能玉(wild)はここへ来ない: cannon.js が wildBlast へ振り分ける
   function insertShot(lane, sh, hitIndex) {
     var balls = lane.balls;
     var hit = balls[hitIndex];
-    // 【強化】万能玉(海神の加護): 当たった玉の色を継承して挿入する。
-    // マッチ判定・磁力の色比較(===)には一切手を入れずに
-    // 「どこに撃っても必ずペアが成立する」を実現するカメレオン方式。
-    // 宝玉は命中対象外(cannon.js)なので継承元が null になることはない
-    if (sh.wild && hit.color !== null && hit.color !== undefined) {
-      sh.color = hit.color;
-      var wq = lane.rail.posAt(hit.d);
-      PP.fx.ring(wq.x, wq.y, "#8ef0d0", 8, 60, 260);
-      PP.fx.burst(wq.x, wq.y, "#8ef0d0", 8);
-    }
     var p = lane.rail.posAt(hit.d);
     // レール接線との内積で、樽側(前)か補給側(後)かを決定
     var dot = (sh.x - p.x) * p.tx + (sh.y - p.y) * p.ty;
@@ -1032,6 +1066,7 @@
     popRun: popRun,
     destroySingle: destroySingle,
     explodeAt: explodeAt,
+    wildBlast: wildBlast,
     pierceSegment: pierceSegment,
     insertShot: insertShot,
     speedAt: speedAt

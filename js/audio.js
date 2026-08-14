@@ -259,6 +259,10 @@
   //    カラーボムの発動音が変わる(例: sfx("SE/自分の音.mp3", 0.8))
   // ================================================================
   var seColorBomb = sfx("SE/broken_treasure.mp3", 0.8);
+  // 追加SE: ボスの⚠警告マーカー群の出現(1グループにつき1回) /
+  //          初回消し(コンボ1=コンボなしの消し)の炸裂音
+  var seBossDanger = sfx("SE/Boss_denger.mp3", 0.7);
+  var seFirstCombo = sfx("SE/1_Combo.mp3", 0.55);
 
   // ---------- 危機のループ音 ----------
   // 樽に呑まれかけている間ずっと鳴らし続ける。深さ(0〜1)で音量とピッチが
@@ -585,6 +589,11 @@
     // 新しい波が洞窟から湧いた
     newWave: seNewChain,
     pop: function (n) { beep(500 + Math.min(n, 8) * 40, 0.18); },
+    // 初回消し(コンボ1)。従来のピッチ連動ビープに 1_Combo.mp3 を重ねる。
+    // ※ pop はリコイル衝突の手応え音(chain.js)としても使われるので触らない
+    firstCombo: function (n) { beep(500 + Math.min(n, 8) * 40, 0.18); seFirstCombo(); },
+    // ボスの⚠警告マーカー群の出現(boss.js が1グループにつき1回呼ぶ)
+    bossDanger: seBossDanger,
     // コンボ: 元の合成音を重厚化(主音 + 重低音の芯 + さらに下のサブ + 上の煌めき)
     // し、ユーザー追加の combo_SE.mp3 を重ねて鳴らす
     combo: function (c) {
@@ -630,6 +639,33 @@
       [784, 1047, 1319, 1568].forEach(function (f, i) {
         setTimeout(function () { beep(f, 0.18, "square", 0.08); }, i * 45);
       });
+    },
+    // ---- コース開始イントロの音 ----
+    // クリア走査(最後)は上昇ライザーなので、イントロ(最初)はその鏡像:
+    // 天から降りてくる下降ライザー。dur は彗星の走行時間(main.js が算出)
+    introStart: function (dur) {
+      dur = Math.max(0.8, dur || 2.5);
+      gliss(1600, 140, dur, "sawtooth", 0.06);         // 上から滑り落ちる主層
+      gliss(800, 70, dur, "sine", 0.09);               // 下支えの胴
+      gliss(2400, 500, dur * 0.55, "triangle", 0.045); // 先行して落ちる煌めき
+      beep(55, 0.7, "sine", 0.22);                     // 出航の腹に響く号砲
+    },
+    // レーン発進のきらめき(i = レーン番号。後発ほど少し低く落ちていく)
+    introLaunch: function (i) {
+      beep(Math.max(300, 900 - i * 140), 0.14, "triangle", 0.09);
+      beep(Math.max(150, 450 - i * 70), 0.22, "sine", 0.07);
+    },
+    // 彗星のチクタク(n = 通過数)。sweepTick の鏡像で、駆け上がらず駆け下りる
+    introTick: function (n) {
+      var f = Math.max(220, 1150 - n * 16);
+      beep(f, 0.06, "square", 0.05);
+      beep(f * 0.5, 0.1, "sawtooth", 0.04);
+    },
+    // 全レーン到達=戦闘開始の着水ドン(newWave と同時に鳴らす)
+    introGo: function () {
+      beep(75, 0.5, "sine", 0.22);
+      beep(150, 0.25, "sawtooth", 0.1);
+      setTimeout(function () { beep(50, 0.6, "sine", 0.18); }, 80);
     },
     catchItem: function () {
       beep(660, 0.08, "triangle", 0.1);

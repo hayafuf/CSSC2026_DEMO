@@ -16,8 +16,10 @@
  * そこで「先頭が実際に樽へ呑まれ始めていて(PP.RESCUE.start=1.0 なので
  * 先頭の玉が樽の口以深)、かつ局所ペア枯渇」と判定されたら、その場で
  * (時間条件なしに):
- *   1) 装填玉が万能玉(🌈)になる … 当たった玉の色を継承して挿入される
- *      (chain.js insertShot)ので、どこに撃っても必ずペアが成立する
+ *   1) 装填玉が万能玉(🌈)になる … 当たった連なりを色に関係なく炸裂で
+ *      吹き飛ばす(chain.js wildBlast。最大 PP.WILD.blastCap 個)。
+ *      ストック制(PP.game.wildCharges)で、在庫が無ければ装填されない。
+ *      回復はカード「七海の虹玉」(最大+1&全回復)とラン開始時のみ
  *   2) 撃った弾の割り込みに限り2個で消える(chain.js resolveMatchAt)
  *   3) ドロップ率と ⚓💣 の出現重みが上がる(powerups.js)
  * 「+1D 挿入 → 即 -2D 消去+反動」が常に成立し、どこへ当てるかは腕への報酬。
@@ -173,6 +175,11 @@
     if (id === "autogun") autogunT = (g.upgrades[id] === 1) ? val(id) : Math.min(autogunT, val(id));
     if (id === "autobomb" || id === "automissile") {
       autoDeliverT[id] = (g.upgrades[id] === 1) ? val(id) : Math.min(autoDeliverT[id], val(id));
+    }
+    // 【新】七海の虹玉: 最大ストック+1、そしてその場で全回復
+    if (id === "wildshot") {
+      g.wildMax = PP.WILD.baseMax + g.upgrades[id];
+      g.wildCharges = g.wildMax;
     }
     recalcPressure();   // 強化を取るほど海も牙を剥く(chain.js が読む倍率を更新)
     closeChoiceUI();
@@ -333,6 +340,9 @@
     if (id === "combo") {
       return (PP.COMBO_WINDOW * valAt(def, lv)).toFixed(1) + "秒 → " +
              (PP.COMBO_WINDOW * valAt(def, lv + 1)).toFixed(1) + "秒";
+    }
+    if (id === "wildshot") {
+      return "最大 " + (PP.WILD.baseMax + lv) + "個 → " + (PP.WILD.baseMax + lv + 1) + "個(全回復)";
     }
     return "×" + valAt(def, lv).toFixed(2) + " → ×" + valAt(def, lv + 1).toFixed(2);
   }
@@ -537,7 +547,12 @@
     rescue.pulseT = 0;
     rescue.recoverT = 0;
     armWild();
-    PP.fx.floatText("🌈 海神の加護! 万能玉!", PP.W / 2, 96, "#8ef0d0", 24);
+    // 虹玉の在庫が無いときは2個消しルールだけの加護になる(文言も合わせる)
+    if (rescue.wild) {
+      PP.fx.floatText("🌈 海神の加護! 万能玉!", PP.W / 2, 96, "#8ef0d0", 24);
+    } else {
+      PP.fx.floatText("🌊 海神の加護!", PP.W / 2, 96, "#8ef0d0", 24);
+    }
     PP.fx.floatText("⚔ 加護の間は2個で消える!", PP.W / 2, 128, "#8ef0d0", 17);
     PP.audio.treasure();
   }
@@ -556,6 +571,9 @@
   }
 
   function armWild() {
+    // 【新】虹玉はストック制: 在庫(PP.game.wildCharges)が無ければ装填しない。
+    // 加護の他の効果(2個消し・ドロップブースト)はそのまま続く
+    if ((PP.game.wildCharges || 0) <= 0) return;
     rescue.wild = true;
     rescue.rearmT = PP.RESCUE.rearm;
     PP.cannon.refreshBalls();   // 装填玉の見た目を虹へ(cannon.js が wildArmed を見る)
@@ -567,6 +585,9 @@
     if (!rescue.wild) return false;
     rescue.wild = false;
     rescue.rearmT = PP.RESCUE.rearm;
+    // 【新】発射した瞬間に在庫を1消費(残数は HUD の 🌈xN が見せる)
+    PP.game.wildCharges = Math.max(0, (PP.game.wildCharges || 0) - 1);
+    PP.hud.update();
     return true;
   }
 
@@ -590,10 +611,13 @@
     closeChoiceUI();
   }
 
-  // ランの終わり(ゲームオーバー / 全海域制覇のクリック)だけ: 段数ごと全部消す
+  // ランの終わり(全海域制覇のクリック / タイトルからの再出航)だけ: 段数ごと全部消す。
+  // ゲームオーバーからのコンティニューでは呼ばれない(強化・虹玉ストックは持ち越す)
   function onRunReset() {
     PP.game.upgrades = {};
     queued = 0;
+    PP.game.wildMax = PP.WILD.baseMax;
+    PP.game.wildCharges = PP.WILD.baseMax;
     recalcPressure();   // 段数が消えたので強化圧も平常へ戻す
     onLevelStart();
   }

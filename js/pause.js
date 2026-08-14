@@ -21,9 +21,13 @@
     reason: null,   // "manual"(Pキー/⏸ボタン) | "auto"(ウィンドウ切り替え)
 
     pause: function (reason) {
-      // プレイ中以外(タイトル・クリア・ゲームオーバー等)とエディタ中は何もしない
+      // 時間駆動の状態はすべて停泊できる。タイトル/クリア/オーバー画面は
+      // タイマーが無い(進んで困るものがない)ので停めず、BGM を流したままにする。
+      // ここを playing 限定にしていた頃は、カード選択・リトライ暗幕・ゲーム
+      // オーバー演出中にタブを離れると Tween だけが先に完走して画面が壊れていた
+      var PAUSABLE = { playing: 1, intro: 1, choosing: 1, retrying: 1, draining: 1 };
       if (ctl.active) return;
-      if (!PP.game || PP.game.state !== "playing") return;
+      if (!PP.game || !PAUSABLE[PP.game.state]) return;
       if (PP.editor && PP.editor.active) return;
       ctl.active = true;
       ctl.reason = reason || "manual";
@@ -51,7 +55,11 @@
   // 自動ポーズ: 他のウィンドウ/タブに切り替えたら錨を下ろす。
   // 戻ってきても自動では再開しない(課題を確認してからクリックで再開)
   document.addEventListener("visibilitychange", function () {
-    if (document.hidden) ctl.pause("auto");
+    if (!document.hidden) return;
+    // ポーズが拒否される画面(タイトル等)でも、揺れの途中オフセットだけは
+    // 残さない(戻ってきたとき盤面がズレたままになるため)
+    if (PP.fx && PP.fx.resetShake) PP.fx.resetShake();
+    ctl.pause("auto");
   });
   window.addEventListener("blur", function () {
     ctl.pause("auto");

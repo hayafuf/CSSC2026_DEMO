@@ -875,6 +875,7 @@
       if (bestI >= 0 && bestDist < HIT_R2) {
         var hitLane = _cache[bestLane].lane;
         if (sh.special === "bomb") PP.chain.explodeAt(sh.x, sh.y);
+        else if (sh.wild) PP.chain.wildBlast(hitLane, sh, bestI);   // 虹玉は炸裂(挿入しない)
         else PP.chain.insertShot(hitLane, sh, bestI);
         if (sh.view.spark) createjs.Tween.removeTweens(sh.view.spark);
         PP.layers.shot.removeChild(sh.view);

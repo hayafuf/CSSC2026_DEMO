@@ -119,6 +119,7 @@
       lane.leadD = 0;   // 先頭球の最終位置(クリア時の爆発走査の終点)も仕切り直す
     });
     killSweep();    // 走査の途中で試遊などが始まったときの保険(彗星の頭も片付ける)
+    killIntro();    // イントロの最中に再スタートが走ったときも彗星を残さない
     itemWaitHinted = false;
     g.shots.forEach(function (s) { PP.layers.shot.removeChild(s.view); });
     g.shots = [];
@@ -138,6 +139,7 @@
     if (PP.skull) PP.skull.clear();
     var bfx = g.bossFx;
     for (var bk in bfx) bfx[bk] = 0;
+    PP.input.resetAim();   // 逆転(addle)の照準ブレンド状態も仕切り直す
 
     // Arcade 式: 生存ゲージが尽きるまで波が補給され続ける。
     // 難易度(【課題1】config.js の timeMult)で耐える秒数が伸縮する
@@ -154,10 +156,15 @@
     g.nColors = Math.min(c.max,
       c.base + Math.floor((g.level - 1) / c.levelStep) * c.perLevel);
     g.nColors = Math.max(PP.diff().colorMin || 2, Math.min(colorCap, g.nColors + PP.diff().colorAdd));
-    // 最初の波の SE(startWave 内)は state が playing のときだけ鳴るので、
-    // 波を出す前に確定させておく
-    g.state = "playing";
-    // 全レーンで最初の波を湧かせる
+    // イントロ(各レーンの道筋を彗星がなぞる)。ライフ消費リトライは暗幕演出が
+    // あるので skipIntroOnce で飛ばす。"intro" 中は chain.startWave の SE ゲート
+    // (state === "playing" のときだけ鳴る)が閉じるので、出航の波音は
+    // イントロ明け(finishIntro)で1回だけ鳴らす。
+    var doIntro = !skipIntroOnce;
+    skipIntroOnce = false;
+    g.state = doIntro ? "intro" : "playing";
+    // 全レーンで最初の波を湧かせる(intro 中は chain.update が回らないので
+    // 実際に玉が流れ込むのはイントロ明けから)
     g.lanes.forEach(function (lane) { PP.chain.startWave(lane); });
 
     g.currentColor = Math.floor(Math.random() * g.nColors);
@@ -166,6 +173,7 @@
     PP.cannon.refreshBalls();
 
     PP.hud.update();
+    if (doIntro) startIntro();
   }
 
   // 生存ゲージが空になった瞬間。補給を打ち切り、残りの掃討に入る
@@ -187,6 +195,7 @@
     // ランが終わるため、権利はスコア +500 だけ残して畳まれる)
     PP.powerups.collectTreasures();
     g.score += 1000;
+    g.failStreak = 0;   // ステージを越えられた=連続失敗の記録を畳む(ピティ解除)
     if (PP.skull) PP.skull.clear();   // クリア画面に妖弾・墨を固めて残さない
     PP.crisis.stop();          // 警報と赤い帳を畳む
     PP.audio.setDanger(false);
@@ -195,8 +204,13 @@
       g.state = "gameclear";
       g.score += 5000;         // 全海域制覇ボーナス
       PP.hud.update();
+      // コンティニューの航海録: 一度も沈まなかったランには称号を、
+      // 沈んだランにはどの海域で立ち上がったかを添える
+      var honor = g.continues === 0
+        ? "🏅 ノーコンティニュー制覇!\n"
+        : "🔱 コンティニュー " + g.continues + "回 (ステージ " + g.continueStages.join(", ") + " で再起)\n";
       PP.hud.showOverlay(g.bossMode ? "🏆 クラーケン討伐! 全海域制覇!" : "🏆 全海域制覇!",
-        "全 " + total + " ステージを生き延びた! 秘宝は我らのものだ!\n" +
+        "全 " + total + " ステージを生き延びた! 秘宝は我らのものだ!\n" + honor +
         "制覇ボーナス +5000\n最終スコア " + g.score + " 点\n" + PP.TAP + "で最初の海へ");
       return;
     }
@@ -228,6 +242,9 @@
   var sweep = null;   // { t, parts: [{lane, d, to, nextBurst, n, bonus, done, comet}] }
   // 「残ったアイテムを回収せよ」の案内を出したか(クリアごとに1回だけ)
   var itemWaitHinted = false;
+  // コース開始イントロ(各レーンの道筋を彗星がなぞる)。sweep と同じ彗星を使う
+  var intro = null;           // { t, parts: [{lane, d, delay, nextSpark, done, comet}] }
+  var skipIntroOnce = false;  // 次の startLevel でイントロを飛ばす(ライフ消費リトライ用)
 
   // 走査の先頭で燃える「彗星の頭」。多層の放射グラデを一度だけ焼いて使い回し、
   // 毎フレームは位置と脈動スケールを書くだけ(ラスタライズは起きない)
@@ -252,6 +269,118 @@
       if (c && c.parent) c.parent.removeChild(c);
     }
     sweep = null;
+  }
+
+  // ---------- コース開始イントロ(各レーンの道筋を彗星がなぞる) ----------
+  // 出航の合図: 光の彗星が洞窟(d=0)から樽(holeD)まで各レーンを駆け抜け、
+  // 「玉がどこを通ってどこへ落ちるか」を見せてからコースが始まる。
+  // クリア走査(sweep)の逆走版で、彗星・火花・終点花火の道具立ても共有する。
+  // タップでスキップ可(input.js → PP.skipIntro)。数値は config.js の PP.INTRO。
+  function killIntro() {
+    if (!intro) return;
+    for (var i = 0; i < intro.parts.length; i++) {
+      var c = intro.parts[i].comet;
+      if (c && c.parent) c.parent.removeChild(c);
+    }
+    intro = null;
+  }
+
+  function startIntro() {
+    var g = PP.game;
+    var parts = [];
+    var maxT = 0;
+    g.eachLane(function (lane, i) {
+      var delay = i * PP.INTRO.stagger;
+      var pt = { lane: lane, d: 0, delay: delay, launched: false,
+                 nextSpark: 0, nextRing: 0, n: 0, done: false, comet: makeComet() };
+      var p0 = lane.rail.posAt(0);
+      pt.comet.x = p0.x; pt.comet.y = p0.y;
+      pt.comet.visible = false;   // 発進(delay 明け)まで隠しておく
+      parts.push(pt);
+      maxT = Math.max(maxT, delay + lane.rail.holeD / PP.INTRO.speed);
+    });
+    if (!parts.length) { g.state = "playing"; return; }
+    intro = { t: 0, parts: parts };
+    // 開幕の号砲: 天から降りてくる下降ライザー(クリア走査の上昇形の鏡像)を
+    // 彗星の走行時間ぴったりに合わせて鳴らし、画面は teal の閃光と揺れで幕を開ける
+    PP.audio.introStart(maxT);
+    PP.fx.screenFlash("rgba(142,240,208,0.30)", 0.30, 500);
+    PP.fx.shake(10, 0.35);
+    PP.fx.floatText("⚓ 出 航 !", PP.W / 2, PP.H / 2 - 84, "#ffd24a", 40);
+    PP.fx.floatText("玉の通り道を見極めよ", PP.W / 2, PP.H / 2 - 44, "#8ef0d0", 22);
+    PP.fx.floatText(PP.TAP + "でスキップ", PP.W / 2, PP.H / 2 - 14, "#b0d8cc", 15);
+  }
+
+  function updateIntro(dt) {
+    if (!intro) { PP.game.state = "playing"; return; }   // UI 無しの保険
+    intro.t += dt;
+    var allDone = true;
+    for (var i = 0; i < intro.parts.length; i++) {
+      var pt = intro.parts[i];
+      if (pt.done) continue;
+      allDone = false;
+      if (pt.delay > 0) { pt.delay -= dt; continue; }   // レーンごとの発進ずらし
+      if (!pt.launched) {
+        // 発進の瞬間: 洞窟の口で弾けてから走り出す(後発レーンほど音が低い)
+        pt.launched = true;
+        pt.comet.visible = true;
+        var c0 = pt.lane.rail.posAt(0);
+        PP.fx.flash(c0.x, c0.y, "#8ef0d0", 70);
+        PP.fx.ring(c0.x, c0.y, "#8ef0d0", 10, 110, 400);
+        PP.fx.burst(c0.x, c0.y, "#8ef0d0", 18, 1.8);
+        PP.fx.shake(6, 0.2);
+        PP.audio.introLaunch(i);
+      }
+      pt.d += PP.INTRO.speed * dt;
+      var end = pt.lane.rail.holeD;
+      var hp = pt.lane.rail.posAt(Math.min(pt.d, end));
+      pt.comet.x = hp.x; pt.comet.y = hp.y;
+      pt.comet.scaleX = pt.comet.scaleY = 1.2 + 0.35 * Math.sin(intro.t * 22 + i * 2);
+      // 彗星の尾: 毎フレーム頭の位置に teal / 金の火の粉を交互に撒く
+      // (パーティクルはプール制なので飽和しても重くならない)
+      PP.fx.burst(hp.x, hp.y, (pt.n & 1) ? "#ffd24a" : "#8ef0d0", 2, 0.8);
+      // D×sparkEvery ごとの火花 + チクタク(処理落ちでも while で追いつく)
+      while (pt.nextSpark <= pt.d && pt.nextSpark < end) {
+        var sp = pt.lane.rail.posAt(pt.nextSpark);
+        PP.fx.burst(sp.x, sp.y, (pt.n & 1) ? "#fff3c0" : "#8ef0d0", 5, 1.2);
+        if (i === 0) PP.audio.introTick(pt.n);   // 音は先頭レーンだけ(飽和防止)
+        pt.n++;
+        pt.nextSpark += PP.D * PP.INTRO.sparkEvery;
+      }
+      // 8個ごとの節目は波紋リングを残して「道筋」を刻む
+      while (pt.nextRing <= pt.d && pt.nextRing < end) {
+        var rp = pt.lane.rail.posAt(pt.nextRing);
+        PP.fx.ring(rp.x, rp.y, (pt.nextRing / (PP.D * 8) & 1) ? "#ffd24a" : "#8ef0d0", 4, 64, 320);
+        pt.nextRing += PP.D * 8;
+      }
+      if (pt.d >= end) {
+        // 樽(ゴール)へ到達: 大花火で「ここに入れたら負け」を目立たせる
+        pt.done = true;
+        if (pt.comet.parent) pt.comet.parent.removeChild(pt.comet);
+        PP.fx.flash(hp.x, hp.y, "#fff6d0", 90);
+        PP.fx.ring(hp.x, hp.y, "#ffd24a", 10, 150, 500);
+        PP.fx.ring(hp.x, hp.y, "#fff3c0", 5, 90, 380);
+        PP.fx.burst(hp.x, hp.y, "#ffd24a", 26, 2.4);
+        PP.fx.burst(hp.x, hp.y, "#ff5d5d", 12, 1.6);
+        PP.fx.shake(18, 0.35);
+        PP.audio.sweepFinish();
+      }
+    }
+    if (allDone) finishIntro();
+  }
+
+  // イントロの締め(全彗星到達 or タップでスキップ)。ここで初めて時が動き出す
+  function finishIntro() {
+    killIntro();
+    var g = PP.game;
+    if (g.state !== "intro") return;
+    g.state = "playing";
+    PP.fx.screenFlash("rgba(142,240,208,0.30)", 0.30, 400);
+    PP.fx.shake(12, 0.3);
+    PP.fx.floatText("⚔ 戦闘開始!", PP.W / 2, PP.H / 2 - 60, "#ffd24a", 34);
+    PP.audio.introGo();   // 着水のドン
+    PP.audio.newWave();   // イントロ中に抑えていた出航の波音をここで1回
+    PP.hud.update();
   }
 
   function startClearSweep() {
@@ -461,6 +590,7 @@
   // 組み直し(startLevel)を幕が開く前にやるのがポイント
   // (幕が透明なうちに組み直すと、玉が一瞬で消し替わるところが丸見えになる)
   function finishRetry() {
+    skipIntroOnce = true;   // 暗幕からの明転が主役なので、イントロ演出は重ねない
     startLevel();       // state はこの中で "playing" に戻る
     PP.hud.update();
     var f = retryFx;
@@ -509,12 +639,15 @@
     PP.gameover.start(finishGameOver);
   }
 
-  // 演出が「暗黒」まで進んだら文字を出す(ここでクリック受付が復活する)
+  // 演出が「暗黒」まで進んだら文字を出す(ここでクリック受付が復活する)。
+  // タップするとコンティニュー: この海域からスコア0・ライフ全回復・強化維持で再挑戦
   function finishGameOver() {
     var g = PP.game;
     g.state = "over";
     PP.hud.showOverlay("☠ ゲームオーバー",
-      "船は宝もろとも呑まれた…\n最終スコア " + g.score + " 点 (ステージ " + g.level + ")\n" + PP.TAP + "でリスタート",
+      "船は宝もろとも呑まれた…\n最終スコア " + g.score + " 点 (ステージ " + g.level + ")\n" +
+      "スコアとコインは海の底へ――だが宝玉の力は引き継がれる\n" +
+      PP.TAP + "でこの海域(ステージ " + g.level + ")から再挑戦",
       "doom");
   }
 
@@ -576,6 +709,7 @@
         // (コインでライフを増やす処理は powerups.js の【課題5-1】= あちらは自分で書く)
         if (PP.diff().useLives !== false && g.lives > 0) {
           g.lives--;
+          g.failStreak++;   // 連続失敗を数える(ピティドロップ用。クリアで0へ)
           retryLevel();
         } else {
           gameOver();
@@ -622,6 +756,9 @@
       if (g.state === "playing" && PP.upgrades.pendingChoice()) {
         PP.upgrades.openChoice();
       }
+    } else if (g.state === "intro") {
+      // コース開始イントロ。ゲームプレイ更新は一切呼ばない(玉はまだ流れない)
+      updateIntro(dt);
     } else if (g.state === "choosing") {
       // 【強化】宝玉の力の3択中。ゲームプレイ更新を一切呼ばない=盤面・弾・
       // アイテム・タイマーが全部その場で凍る(retrying と同じ考え方)。
@@ -762,6 +899,8 @@
   PP.previewCourse = function (course) { buildCourse(course); };
   // 【課題5】の復帰(ステージ最初からやり直し)。main.js 内では retryLevel() で呼べる
   PP.retryLevel = retryLevel;
+  // コース開始イントロのスキップ(input.js がタップで呼ぶ)
+  PP.skipIntro = finishIntro;
 
   // ---------- 初期化 ----------
   function init() {
@@ -850,6 +989,10 @@
       restartLevel: function () { return DBG_LEVEL || 1; }
     });
 
+    // タブ復帰時の巨大 delta を Ticker 側で丸める。tick の dt だけでなく
+    // TweenJS(同じ tick イベントで進む)にも効くので、位相機械(dt駆動)と
+    // Tween(演出)の進行がタブ切替でズレなくなる(EaselJS 1.0 の maxDelta)
+    if ("maxDelta" in createjs.Ticker) createjs.Ticker.maxDelta = 50;
     createjs.Ticker.timingMode = createjs.Ticker.RAF;
     createjs.Ticker.on("tick", tick);
     // headless smoke test でも確認できる、全同期初期化の完了マーカー。

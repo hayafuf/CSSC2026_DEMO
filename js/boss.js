@@ -1138,6 +1138,7 @@
         pendingZones.push(zx);
         addWarning(zx, PP.CANNON_Y - 20, K.r, stateT);
       }
+      PP.audio.bossDanger();   // ⚠群の出現音(マーカー数に関係なく1回)
     } else if (key === "tsunami") {
       // 安全地帯(光の柱)を先に見せる。波は fireAttack で走り出す
       var S = PP.BOSS.tsunami;
@@ -1357,8 +1358,8 @@
       tentPending.push(zx, zx2);
       for (var i = 0; i < tentPending.length; i++) {
         addWarning(tentPending[i], PP.CANNON_Y - 20, K.r, warnT);
-        PP.audio.beep(660, 0.06, "square", 0.07);
       }
+      PP.audio.bossDanger();   // ⚠群の出現音(旧: マーカーごとの beep は重複するので廃止)
       PP.audio.gliss(160, 320, warnT, "sine", 0.05);   // 次撃までのライザー(緊張感)
       tentPhase = "warn";
       tentTimer = warnT;
