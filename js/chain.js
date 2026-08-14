@@ -371,16 +371,17 @@
       // 錨: 何も動かない
     } else if (eff.reverse > 0) {
       // 逆風: 「進行方向の速度」から風速 reverseV(フレーム先頭で更新済み)を
-      // 引いた"正味の速度"で各グループを動かす。正味が正=まだ流れが風に勝って
-      // いる間は 0 で頭打ち(前進はしない)。列ごと(グループ単位)に同じ正味量
-      // で動かすので、列の間隔は崩れない。
-      for (var ri = 0; ri < starts.length; ri++) {
-        var rs = starts[ri];
-        var re = (ri + 1 < starts.length) ? starts[ri + 1] : balls.length;
-        var net = Math.min(0, speedAt(lane, balls[rs].d) - reverseV) * dt;  // 負なら後退
-        if (net === 0) continue;
+      // 引いた"正味の速度"で後退させる。正味が正=まだ流れが風に勝っている間は
+      // 0 で頭打ち(前進はしない)。
+      // 正味は先頭の玉(樽に一番近い=進行速度が最も遅い区間)の位置で決め、
+      // 全玉へ同じ量を適用する: レーン全体が間隔を保ったまま洞窟側へ押し戻される。
+      // グループごとに自分の位置の速度で計算すると、洞窟寄りの後続は速度が
+      // 速すぎて風が勝てず居座り、先頭のチェーンしか戻らない(戻った先頭も
+      // 後続に接触した時点で relax に押し返されて止まる)
+      var net = Math.min(0, speedAt(lane, balls[0].d) - reverseV) * dt;  // 負なら後退
+      if (net !== 0) {
         if (-net > reverseFrameRet) reverseFrameRet = -net;   // 実後退量(上限の計上用)
-        for (i = rs; i < re; i++) balls[i].d += net;
+        for (i = 0; i < balls.length; i++) balls[i].d += net;
       }
     } else if (eff.reverseHold > 0) {
       // 吹き戻し後の凪: 錨と同様に前進だけ止める(反動・磁力・重なり解消は

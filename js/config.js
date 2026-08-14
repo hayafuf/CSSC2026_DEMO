@@ -336,7 +336,7 @@
     dmg: { shot: 1, bomb: 2, missile: 1 },
     // 隙間が開いている間は「洞窟に繋がる最後尾の列群」だけが動き、前方の断片は
     // 静止する(chain.js advance)。最後尾は先頭位置基準の速度×この倍率で詰める
-    gapCatchUp: 2.0,
+    gapCatchUp: 1.5,
     waveInterval: 3,    // ボス戦の波間隔(秒)。絶え間なく補給→玉列は常に連続
     waveSize: 40,       // ボス戦の1波の玉数(洞窟が空くまで次波は待つので溢れない)
     cooldownMin: 3.2,   // 攻撃間隔の最小(秒)
@@ -352,8 +352,27 @@
     // 各攻撃: telegraph=予兆秒数 / dur=被弾時の効果秒数 / speed=妖弾の速さ px/s
     ink:       { telegraph: 1.0, dur: 7.0, lobs: 5, grav: 560, vy0: -40,
                  rMin: 170, rMax: 280 },     // 漆黒の墨獄: 弧を描く墨玉のカーテン。着弾点に墨だまり
-    addle:     { telegraph: 1.0, dur: 6.0, speed: 430 },              // 惑乱の逆潮: ホバリング多段リング。被弾で左右反転
-    freeze:    { telegraph: 1.2, dur: 2.0, fan: 7, spread: 130, speed: 380 }, // 深淵の錨鎖: 逆回転する同心リング。被弾で操作不能
+    // 惑乱の逆潮: 大珠が盤面中央で多段分裂する。被弾で左右反転。
+    // burst: 大玉が中央から割れて中玉(mid)が直線で放射状に拡散し、
+    // splitBase 秒後に全中玉が「一斉に」小弾(small)の同心円リングへ割れる
+    // (splitStep>0 にすると順番の時間差ポップに戻せる)。
+    // midSpin は中玉のらせん回転(rad/s)。0=直線 / 0.25=緩い渦 / 0.5=強い渦。
+    // 小弾は常に直線(回転=中玉の証、で世代が見た目で読める)。
+    // 怒りフェーズは三段: 中玉 → 第二世代の中玉(mid2) → 小弾。
+    // 世代が下るごとに数が膨れるので、怒り時は初段の数(midsP2)を絞る。
+    // 中玉は midHp 発で撃ち落とせる=分裂前に未然に消す「中間の択」を作る
+    addle:     { telegraph: 1.0, dur: 6.0, speed: 430,
+                 burst: { mids: 10, midsP2: 8, midR: 19, midHp: 2, midVr: 300, midSpin: 0.25,
+                          splitBase: 0.8, splitStep: 0.1, smalls: 6, smallsP2: 3,
+                          smallSpeed: 235, smallR: 11,
+                          mid2Count: 5, mid2R: 15, mid2Speed: 235, mid2Hp: 1, split2Delay: 0.7 } },
+    // 深淵の錨鎖: 同心リング。被弾で操作不能。
+    // burst: 全リングの弾が中玉になり、splitDelay 秒後に一斉に小弾の
+    // 同心円リングへ割れる。怒りフェーズは addle と同じ三段分裂
+    freeze:    { telegraph: 1.2, dur: 2.0, fan: 7, spread: 130, speed: 380,
+                 burst: { midR: 19, midHp: 2, midSpin: 0.25, splitDelay: 0.55, splitStep: 0.06,
+                          smalls: 4, smallsP2: 3, smallSpeed: 210, smallR: 11,
+                          mid2Count: 4, mid2R: 15, mid2Speed: 210, mid2Hp: 1, split2Delay: 0.55 } },
                  // dur: 完全な操作不能は体感が長い(骸骨玉の freezeDur=1.3 と同思想)。
                  // 3.5 は「危機中に食らうとほぼ死」だったので 2.0 へ短縮
     shotSlow:  { telegraph: 1.0, dur: 6.5, factor: 0.15, speed: 250, r: 26 }, // 時間の滞留: 大きく遅い弾。被弾で弾速低下
@@ -362,13 +381,19 @@
     // 海淵の大触腕: 大砲の高さに⚠予告サークル → 画面下から触手が突き上げ、
     // 範囲内にいるとランダムなデバフ(freeze/addle/shotSlow)。突き上げ後の
     // holdTime の間は触手が居座り、自弾を当てれば斬り返してダメージを取れる
-    tentacle:  { telegraph: 1.6, zones: 2, r: 110, riseTime: 0.18, holdTime: 1.2 },
+    // 多段化: 第1波の後、extraWaves 波(怒り時 extraWavesP2)の追撃が
+    // 「間 waveGap 秒 → ⚠ waveWarn 秒 → 突き上げ」のリズムで連続する。
+    // holdTime は多段化で柱が画面に溜まりすぎないよう短め
+    tentacle:  { telegraph: 1.6, zones: 2, r: 110, riseTime: 0.18, holdTime: 0.9,
+                 extraWaves: 2, extraWavesP2: 3, waveGap: 0.3, waveWarn: 0.7, waveWarnP2: 0.6 },
     // 大津波: 安全地帯(光の柱)以外の低空を水壁が横断。柱の外にいると押し流される
     tsunami:   { telegraph: 1.8, speed: 520, gapW: 170, stun: 1.5, push: 200 },
     // 弾幕: 下向きの扇弾を複数ボレー。個々は遅め=隙間を縫って避ける/撃ち落とす
     barrage:   { telegraph: 1.2, volleys: 3, perVolley: 9, interval: 0.45, speed: 280 },
     // 怒りフェーズ(HP が hpRatio 以下): 攻撃間隔短縮・弾速アップ・コンボ追撃
-    phase2:    { hpRatio: 0.45, cooldownMin: 2.0, cooldownMax: 3.4, speedMul: 1.15,
+    // cooldown: 三段分裂の導入で1回の攻撃の「余韻」が長くなったので、
+    // 攻撃間隔も通常フェーズ寄りに延ばして呼吸を作る(2.0/3.4 は忙しなかった)
+    phase2:    { hpRatio: 0.45, cooldownMin: 2.8, cooldownMax: 4.4, speedMul: 1.15,
                  comboChance: 0.35, comboDelay: 0.8, comboTelegraph: 0.6 }
   };
 
@@ -415,6 +440,28 @@
     // どちらも当たり判定・平均的な到達時間は直線弾とほぼ同じに保つ
     freezeGravity: 320,  // freeze 弾の落下加速度 px/s^2
     freezeSpeedMul: 0.72,// freeze 弾の初速倍率(重力で加速するぶん出だしを遅く)
+    // ---- 弾幕STG変種(タイプごとに2パターン、発射ごとに variantChance で抽選) ----
+    variantChance: 0.5,      // B変種(落錨の簾/三連の波紋)を引く確率
+    // freeze A「二連斉射・改」: 扇の弾ごとに速度をばらして奥行きを出し、
+    // 2波目の anchorDelay 秒後に重い「追い錨」を1発落とす(狙い直しはしない)
+    freezeSpeedJitter: 0.12, // 弾ごとの速度ジッター(±割合)
+    anchorDelay: 0.5,        // 追い錨: 2波目からの遅延(秒)
+    anchorSpeedMul: 1.15,    // 追い錨: 速度倍率
+    anchorGravMul: 1.3,      // 追い錨: 重力倍率
+    // freeze B「落錨の簾」: 上向きロブで山なりに上がり、大砲の周囲へ
+    // rainSpreadX 間隔のカーテン状に降ってくる(隙間に立てば安全)
+    rainCount: 5,            // ロブ弾数
+    rainVy0: -240,           // ロブ初速(上向き)
+    rainGrav: 640,           // ロブの重力 px/s^2
+    rainSpreadX: 80,         // 着弾Xの間隔(大砲を中心に±で並ぶ)
+    // addle A「渦巻き掃射・改」: 奇数弾だけサイン波で蛇行(偶数弾は直線=骨格は読める)
+    addleWave: { amp: 90, freq: 5 },   // amp=横向き速度の振幅 px/s
+    // addle B「三連の波紋」: 扇×パルスの3連射。各弾は減速→再加速の「呼吸」カーブ
+    addlePulses: 3,          // パルス数
+    addlePulsePer: 4,        // 1パルスの弾数(扇)
+    addlePulseGap: 0.3,      // パルス間隔(秒)
+    addlePulseSpreadDeg: 48, // 扇の全開き角(度)
+    addlePulseCurve: { s0: 1.25, s1: 0.5, s2: 1.15, t1: 0.45, t2: 1.1 },
     freezeDur: 1.3,      // 被弾: 停止の秒数(危機中に長いと即死級なので短め)
     addleDur: 3.5,       // 被弾: 操作反転の秒数
     hitIFrames: 2.5,     // 被弾後の無敵秒数(扇の多段ヒット=スタンロック防止)

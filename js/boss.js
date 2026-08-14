@@ -90,6 +90,12 @@
   var curTeleTotal = 1;   // いまの予兆の全長(drawCharge の進行度用)
   var tsuSafeX = 0, tsuDir = 1;          // 津波の安全地帯と進行方向
   var barrageLeft = 0, barrageT = 0;     // 流星雨の残りボレー数と次弾までの秒
+  // 触手の追撃波(第1波の後に「間→⚠→突き上げ」を繰り返す波状攻撃)
+  var tentWavesLeft = 0;   // 残り追撃波数
+  var tentWaveIdx = 0;     // いま何波目か(0=第1波。打撃ビープの音程に使う)
+  var tentTimer = 0;       // gap/warn の残り秒
+  var tentPhase = "";      // "gap"(間) | "warn"(⚠表示中)
+  var tentPending = [];    // 追撃波の突き上げ予定X座標
   var sweepLeft = 0, sweepT = 0, sweepTotal = 0;   // 運命のルーレットの回転スイープ
   var curtainLeft = 0, curtainT = 0, curtainTotal = 0;   // 時凪のカーテンの残り枚数
 
@@ -446,6 +452,12 @@
   //          … 指定の高さまで降りたら停止してホバリングし、time 秒後に
   //            全方位リングを段階的に展開(rings を順に 0.45 秒間隔で放つ)、
   //            最後のリングと同時に自分は弾ける(ホバリング爆裂弾)
+  //   hover.burst: { mids, midR, midHp, midVr, midSpin, splitBase, splitStep,
+  //                  smalls, smallSpeed, smallR }
+  //          … rings の代わりに「二段分裂」: 中玉がらせん状に拡散し、
+  //            各中玉が時間差で小弾リングへさらに割れる
+  //   split: { t, count, speed, r, idx } … t 秒後に小弾リングへ割れる時限分裂
+  //   viewScale: 見た目の倍率(判定半径と見た目を揃える)
   function spawnBullet(type, x, y, vx, vy, grav, r, opts) {
     var view = makeOrbView(type);
     view.x = x; view.y = y;
@@ -463,8 +475,25 @@
                     vr: Math.sqrt(vx * vx + vy * vy), w: opts.spin };
       }
       if (opts.hover) b.hover = { y: opts.hover.y, t: opts.hover.time,
-                                  rings: opts.hover.rings.slice(), done: false };
+                                  rings: opts.hover.rings ? opts.hover.rings.slice() : null,
+                                  burst: opts.hover.burst || null, done: false };
       if (opts.hp) b.hitsLeft = opts.hp;   // 迎撃に複数発が必要な大玉(耐久値)
+      // 時限分裂(多段分裂の中玉): t 秒後に count 発の同心円リングへ割れる。
+      // hp=子の耐久 / spin=子のらせん回転(中玉の証) / child=子がさらに
+      // 割れるときの分裂スペック(入れ子)。
+      // t はここでコピーするので、config の共有オブジェクトを直接渡してよい
+      if (opts.split) b.split = { t: opts.split.t, count: opts.split.count,
+                                  speed: opts.split.speed, r: opts.split.r,
+                                  hp: opts.split.hp || 0,
+                                  spin: opts.split.spin || 0,
+                                  idx: opts.split.idx || 0,
+                                  child: opts.split.child || null };
+      // 見た目の拡縮(焼き込みスプライトはタイプごと固定サイズなので、
+      // 中玉>通常>小弾 の大きさの違いはここで付ける)
+      if (opts.viewScale) {
+        view.baseScale *= opts.viewScale;
+        view.scaleX = view.scaleY = view.baseScale;
+      }
     }
     bullets.push(b);
   }
@@ -487,6 +516,8 @@
     // さらにプールが混んでいる時は発生自体を止める
     // 墨で画面が覆われている間はトレイルがほぼ見えないので予算を絞る
     var trailBudget = (PP.fx.particleLoad() < 0.75) ? (inkBlobs.length > 0 ? 5 : 8) : 0;
+    // 一斉分裂(split)のフレーム内演出予算: 音は1回、リング演出は3個まで
+    var splitFxBudget = 3, splitBeeped = false;
     for (var i = bullets.length - 1; i >= 0; i--) {
       var b = bullets[i];
       // ホバリング爆裂弾: 指定の高さで静止 → 溜め → 全方位リングを段階展開。
@@ -498,6 +529,33 @@
           trailBudget--;
           PP.fx.burst(b.x + (Math.random() - 0.5) * 30, b.y + (Math.random() - 0.5) * 30,
                       ATTACKS[b.type].color, 1, 0.6);
+        }
+        if (b.hover.t <= 0 && b.hover.burst) {
+          // 多段分裂の一段目: 大玉が中央から割れ、中玉のリングが直線で放射状に
+          // 広がる(midSpin>0 ならせん回転にもできる)。各中玉は
+          // burst.split のスペックどおりに一斉に割れる(怒り時は孫の中玉を挟む三段)
+          var BB = b.hover.burst;
+          var baseAng = Math.random() * Math.PI * 2;
+          for (var mi = 0; mi < BB.mids; mi++) {
+            var mang = baseAng + (Math.PI * 2 / BB.mids) * mi;
+            spawnBullet(b.type, b.x, b.y,
+              Math.cos(mang) * BB.midVr, Math.sin(mang) * BB.midVr, 0, BB.midR,
+              { spin: BB.midSpin,
+                hp: BB.midHp,
+                viewScale: BB.midR / PP.BOSS.orb.r,
+                split: BB.splitStep
+                  ? { t: BB.split.t + mi * BB.splitStep, count: BB.split.count,
+                      speed: BB.split.speed, r: BB.split.r, hp: BB.split.hp,
+                      spin: BB.split.spin, idx: mi, child: BB.split.child }
+                  : BB.split });
+          }
+          PP.fx.ring(b.x, b.y, ATTACKS[b.type].color, 14, 120, 460);
+          PP.fx.burst(b.x, b.y, ATTACKS[b.type].color, 16, 1.8);
+          PP.audio.gliss(700, 180, 0.3, "square", 0.12);   // パキッと割れる音
+          PP.audio.bossAddle();
+          b.hover.done = true;
+          removeBullet(i);
+          continue;
         }
         if (b.hover.t <= 0) {
           var bc = b.hover.rings.shift();
@@ -535,6 +593,39 @@
         b.y += b.vy * dt;
         // 蛇行弾: 進行に左右の揺れを重ねる(網のような弾幕を作る)
         if (b.wave) b.x += Math.sin(b.t * b.wave.freq + b.wave.ph) * b.wave.amp * dt;
+      }
+      // 多段分裂の後段: 中玉が時限で同心円リングへ割れる。子が hp/child を
+      // 持てば、その子も撃ち落とせる中玉で、さらにもう一段割れる(怒りの三段)。
+      // リングの位相は進行方向を引き継ぐ=中玉ごとに隙間の向きが変わって見える。
+      // 全中玉が同一フレームで一斉に割れるので、音は1回・リング演出は数個に
+      // 絞る(10個ぶん重ねると音割れ+粒子まみれになる)
+      if (b.split) {
+        b.split.t -= dt;
+        if (b.split.t <= 0) {
+          var ph0 = b.orbit ? b.orbit.ang : Math.atan2(b.vy, b.vx);
+          for (var sk = 0; sk < b.split.count; sk++) {
+            var sang = ph0 + (Math.PI * 2 / b.split.count) * sk;
+            spawnBullet(b.type, b.x, b.y,
+              Math.cos(sang) * b.split.speed, Math.sin(sang) * b.split.speed, 0, b.split.r,
+              { viewScale: b.split.r / PP.BOSS.orb.r,
+                hp: b.split.hp || undefined,
+                spin: b.split.spin || undefined,   // 中玉の子は回転、小弾は直線
+                split: b.split.child || undefined });
+          }
+          if (splitFxBudget > 0) {
+            splitFxBudget--;
+            PP.fx.ring(b.x, b.y, ATTACKS[b.type].color, 8, 70, 380);
+            PP.fx.burst(b.x, b.y, ATTACKS[b.type].color, 8, 1.2);
+          }
+          if (!splitBeeped) {
+            splitBeeped = true;
+            // 時間差ポップ: 順番に音程が上がる(idx)。同一フレームで複数割れても1回だけ
+            PP.audio.beep(380 + b.split.idx * 25, 0.12, "square", 0.1);
+            PP.audio.beep(190 + b.split.idx * 12, 0.18, "sawtooth", 0.07);  // 下支えの低音
+          }
+          removeBullet(i);
+          continue;
+        }
       }
       b.t += dt;
       b.view.x = b.x; b.view.y = b.y;
@@ -763,6 +854,7 @@
       if ((k === "tentacle" || k === "tsunami" || k === "barrage") && attackCount < 1) continue;
       if (k === "tsunami" && wave) continue;
       if (k === "barrage" && barrageLeft > 0) continue;
+      if (k === "tentacle" && tentWavesLeft > 0) continue;   // 追撃波の進行中は重ねない
       if (k === "randomize" && (rndSpinT > 0 || sweepLeft > 0)) continue;
       if (k === "shotSlow" && curtainLeft > 0) continue;
       pool.push(k);
@@ -917,38 +1009,65 @@
         spawnBullet("ink", sx, sy, (lobT - sx) / fallT * spdMul(), K.vy0, K.grav, 18);
       }
     } else if (key === "freeze") {
-      // 深淵の錨鎖: ボスを中心に広がる同心二重の錨のリング。
-      // 外環(速・12発)と内環(遅・8発、半歩ずれ)が時間差で押し寄せる
-      // 外環は時計回り、内環は反時計回りに「回転」しながら広がる(spin)。
-      // 逆回転の二重渦=錨に繋がれた鎖が巻き付いてくるイメージ
+      // 深淵の錨鎖: ボスを中心に直線で広がる同心二重の錨のリング。
+      // 外環(速)と内環(遅・半歩ずれ)が時間差で押し寄せ、全弾が中玉として
+      // 多段分裂する(下の burst 構築を参照)
       var F = B.freeze;
+      var FB = F.burst;
       PP.audio.rings();   // 同心リング展開の専用SE
+      // 全リングの弾が中玉(撃ち落とし可)になり、splitDelay 秒後に一斉に
+      // 小弾の同心円リングへ割れる。怒りフェーズは addle と同じ三段
+      // (中玉→第二世代の中玉→小弾)なので、初段のリングは細めに絞る
+      var fSmall = { t: FB.split2Delay, count: phase2 ? FB.smallsP2 : FB.smalls,
+                     speed: FB.smallSpeed * spdMul(), r: FB.smallR };
+      var fSplit = phase2
+        ? { t: FB.splitDelay, count: FB.mid2Count, speed: FB.mid2Speed * spdMul(),
+            r: FB.mid2R, hp: FB.mid2Hp, spin: FB.midSpin, child: fSmall }
+        : { t: FB.splitDelay, count: FB.smalls, speed: FB.smallSpeed * spdMul(), r: FB.smallR };
       var ringDefs = phase2
-        ? [{ n: 14, v: F.speed, w: 0.55 }, { n: 10, v: F.speed * 0.7, w: -0.75 }, { n: 7, v: F.speed * 0.5, w: 0.95 }]
-        : [{ n: 12, v: F.speed, w: 0.55 }, { n: 8, v: F.speed * 0.68, w: -0.75 }];
+        ? [{ n: 8, v: F.speed }, { n: 6, v: F.speed * 0.7 }]
+        : [{ n: 12, v: F.speed }, { n: 8, v: F.speed * 0.68 }];
+      var fIdx = 0;   // 全リング通しの番号(時間差ポップと音程上昇に使う)
       for (var rl = 0; rl < ringDefs.length; rl++) {
         var rd = ringDefs[rl];
         var shift = rl * (Math.PI / rd.n);         // 環ごとに半歩ずらす
         for (var f = 0; f < rd.n; f++) {
           var angF = (Math.PI * 2 / rd.n) * f + shift;
           spawnBullet("freeze", sx, sy,
-            Math.cos(angF) * rd.v * spdMul(), Math.sin(angF) * rd.v * spdMul(), 0, B.orb.r,
-            { spin: rd.w });
+            Math.cos(angF) * rd.v * spdMul(), Math.sin(angF) * rd.v * spdMul(), 0, FB.midR,
+            { spin: FB.midSpin, hp: FB.midHp, viewScale: FB.midR / B.orb.r,
+              split: FB.splitStep
+                ? { t: fSplit.t + fIdx * FB.splitStep, count: fSplit.count,
+                    speed: fSplit.speed, r: fSplit.r, hp: fSplit.hp,
+                    spin: fSplit.spin, idx: fIdx, child: fSplit.child }
+                : fSplit });
+          fIdx++;
         }
       }
     } else if (key === "addle") {
       // 惑乱の逆潮: 惑わしの大珠が盤面中央まで降りてホバリングし、
-      // 二段のリング(段ごとに半歩ずれる)を展開する。一段目の隙間を
-      // 抜けた先に二段目が来る=渦に呑まれるような弾幕
+      // 「二段分裂」する: 中央から割れて中玉がらせん状に拡散し、
+      // 各中玉が時間差でさらに小弾のリングへ割れる。
+      // 大玉を削り切る(hp5) / 中玉を撃ち落とす(hp2) / 避けに徹する、の三択
+      var AB = B.addle.burst;
+      // 中玉の分裂スペック: 通常は「中玉→小弾」の二段。
+      // 怒りフェーズは「中玉→第二世代の中玉(回転)→小弾(直線)」の三段(初段の数は絞る)
+      var aSmall = { t: AB.split2Delay, count: phase2 ? AB.smallsP2 : AB.smalls,
+                     speed: AB.smallSpeed * spdMul(), r: AB.smallR };
+      var aSplit = phase2
+        ? { t: AB.splitBase, count: AB.mid2Count, speed: AB.mid2Speed * spdMul(),
+            r: AB.mid2R, hp: AB.mid2Hp, spin: AB.midSpin, child: aSmall }
+        : { t: AB.splitBase, count: AB.smalls, speed: AB.smallSpeed * spdMul(), r: AB.smallR };
       var ddxA = tx - sx, ddyA = ty - sy;
       var dlenA = Math.sqrt(ddxA * ddxA + ddyA * ddyA) || 1;
       spawnBullet("addle", sx, sy,
         ddxA / dlenA * 360 * spdMul(), Math.abs(ddyA) / dlenA * 360 * spdMul(), 0, B.shotSlow.r,
-        { hp: 5,   // 大玉は5発当てないと消せない(リング展開前に削り切るかの判断)
+        { hp: 5,   // 大玉は5発当てないと消せない(分裂前に削り切るかの判断)
           hover: { y: 380, time: 0.8,
-                   rings: phase2
-                     ? [{ count: 12, speed: 310 * spdMul(), spin: 0.5 }, { count: 16, speed: 240 * spdMul(), spin: -0.5 }, { count: 20, speed: 185 * spdMul(), spin: 0.5 }]
-                     : [{ count: 10, speed: 300 * spdMul(), spin: 0.5 }, { count: 14, speed: 220 * spdMul(), spin: -0.5 }] } });
+                   burst: { mids: phase2 ? AB.midsP2 : AB.mids,
+                            midR: AB.midR, midHp: AB.midHp,
+                            midVr: AB.midVr * spdMul(),
+                            splitStep: AB.splitStep, split: aSplit } } });
     } else if (key === "shotSlow") {
       // 時凪の呪縛: 大弾のカーテンを五重(怒り時は六重)、時間差で1枚ずつ落とす。
       // 実際の発生は updateCurtain(奇数枚と偶数枚で隙間が互い違い)
@@ -963,9 +1082,16 @@
       sweepT = 0;
       PP.audio.bossSweep();   // 水色の掃射の専用SE
     } else if (key === "tentacle") {
-      // ⚠地点へ画面下から触手が突き上げる(範囲内ならランダムなデバフ)
-      for (var z = 0; z < pendingZones.length; z++) spawnStrike(pendingZones[z]);
+      // ⚠地点へ画面下から触手が突き上げる(範囲内ならランダムなデバフ)。
+      // ここは第1波。以降は updateTentacleWaves が「間→⚠→突き上げ」の
+      // 追撃波を刻む(波状のドラム。常に⚠2個分しか塞がない=必ず逃げ場がある)
+      var KT = B.tentacle;
+      tentWaveIdx = 0;
+      for (var z = 0; z < pendingZones.length; z++) spawnStrike(pendingZones[z], 0);
       pendingZones.length = 0;
+      tentWavesLeft = phase2 ? KT.extraWavesP2 : KT.extraWaves;
+      tentPhase = "gap";
+      tentTimer = KT.waveGap;
       PP.fx.shake(10, 0.25);
       PP.audio.beep(90, 0.4, "sawtooth", 0.14);
       PP.audio.bossTentacle();   // 触手突き上げの専用SE
@@ -987,12 +1113,55 @@
   }
 
   // ---------- 触手突き上げ(⚠地点に画面下から生える) ----------
-  function spawnStrike(x) {
+  function spawnStrike(x, waveIdx) {
     var K = PP.BOSS.tentacle;
     var sh = new createjs.Shape();
     strikeCont.addChild(sh);
     strikes.push({ sh: sh, x: x, timer: K.riseTime + K.holdTime, rise: K.riseTime,
-                   hold: K.holdTime, hitDone: false, seed: Math.random() * 6.28 });
+                   hold: K.holdTime, hitDone: false, seed: Math.random() * 6.28,
+                   wave: waveIdx || 0 });
+  }
+
+  // 触手の追撃波: fireAttack の第1波の後、「間(gap)→⚠(warn)→突き上げ」を
+  // tentWavesLeft 回繰り返す。⚠の1個目は警告を出す瞬間の大砲X(=「動け」の圧)、
+  // 2個目はそこから±200〜340pxオフセット。全打撃に waveWarn 秒以上の予告がある
+  function updateTentacleWaves(dt) {
+    if (tentWavesLeft <= 0) return;
+    var K = PP.BOSS.tentacle;
+    tentTimer -= dt;
+    if (tentTimer > 0) return;
+    if (tentPhase === "gap") {
+      // ⚠を置く: 大砲現在位置 + オフセット1本の2地点
+      var warnT = phase2 ? K.waveWarnP2 : K.waveWarn;
+      tentPending.length = 0;
+      var zx = Math.max(90, Math.min(PP.W - 90, PP.cannon.x));
+      var off = (200 + Math.random() * 140) * (Math.random() < 0.5 ? -1 : 1);
+      var zx2 = Math.max(90, Math.min(PP.W - 90, PP.cannon.x + off));
+      tentPending.push(zx, zx2);
+      for (var i = 0; i < tentPending.length; i++) {
+        addWarning(tentPending[i], PP.CANNON_Y - 20, K.r, warnT);
+        PP.audio.beep(660, 0.06, "square", 0.07);
+      }
+      PP.audio.gliss(160, 320, warnT, "sine", 0.05);   // 次撃までのライザー(緊張感)
+      tentPhase = "warn";
+      tentTimer = warnT;
+    } else {
+      // ⚠満了 → 突き上げ。振り下ろしのフォール音+シェイク
+      tentWaveIdx++;
+      for (var j = 0; j < tentPending.length; j++) spawnStrike(tentPending[j], tentWaveIdx);
+      tentPending.length = 0;
+      tentWavesLeft--;
+      PP.audio.gliss(300, 55, 0.22, "sawtooth", 0.14);
+      if (tentWavesLeft <= 0) {
+        // 最終波: 締めの重低音+大きめのシェイクで「終わった」ことを体で分からせる
+        PP.audio.beep(48, 0.6, "sawtooth", 0.22);
+        PP.fx.shake(14, 0.3);
+      } else {
+        PP.fx.shake(10, 0.2);
+      }
+      tentPhase = "gap";
+      tentTimer = K.waveGap;
+    }
   }
 
   function clearStrikes() {
@@ -1053,7 +1222,9 @@
         PP.fx.ring(s.x, PP.CANNON_Y - 40, "#ff5030", 20, 120, 400);
         PP.fx.ring(s.x, PP.H - 30, "rgba(190,230,246,0.8)", 10, 90, 450);
         PP.fx.shake(14, 0.3);
-        PP.audio.beep(70, 0.3, "sawtooth", 0.16);
+        // 打撃のビープは波が進むほど低く・大きく(78→71→64→57Hz)。
+        // ドラムを追うだけで「まだ続く/終わりが近い」が耳で分かる
+        PP.audio.beep(Math.max(50, 78 - s.wave * 7), 0.42, "sawtooth", 0.2);
         if (Math.abs(PP.cannon.x - s.x) < K.r + 25) {
           var pool = ["freeze", "addle", "shotSlow"];
           applyDebuff(pool[Math.floor(Math.random() * pool.length)], 0.7);
@@ -1426,6 +1597,8 @@
     barrageLeft = 0;
     sweepLeft = 0;
     curtainLeft = 0;
+    tentWavesLeft = 0;
+    tentPending.length = 0;
     queuedAttack = null;
     removeInk();
     clearBullets();
@@ -1465,6 +1638,7 @@
     updateRandomize(dt);
     updateWarnings(dt);
     updateStrikes(dt);
+    updateTentacleWaves(dt);
     updateWave(dt);
     updateBarrage(dt);
     updateSweep(dt);

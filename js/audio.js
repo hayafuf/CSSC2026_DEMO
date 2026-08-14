@@ -558,6 +558,7 @@
 
   PP.audio = {
     beep: beep,
+    gliss: gliss,
     preload: preload,
     unlock: unlock,
     setDanger: setDanger,

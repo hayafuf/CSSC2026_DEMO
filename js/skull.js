@@ -125,18 +125,35 @@
     return bmp;
   }
 
-  // 弾1発の生成(全パターン共通の実弾。直線弾で、freeze だけ重力が乗る)
-  function spawnBullet(x, y, ang, spd, type) {
+  // 弾1発の生成(全パターン共通の実弾。基本は直線弾で、freeze だけ重力が乗る)。
+  // opts(省略可)で弾幕STG流の「軌道の芸」を持たせる:
+  //   wave: { amp, freq, ph } … 進行方向の法線方向にサイン波で蛇行(amp は横向き速度 px/s)
+  //   spdCurve: { s0, s1, s2, t1, t2 } … 速度倍率が s0→(t1秒)→s1→(t2秒)→s2 と
+  //             区分線形に変わる「呼吸する弾」(減速局面が相殺の狙い目になる)
+  //   vx / vy … 速度の直接指定(ロブ弾用。ang/spd の計算を上書き)
+  //   grav   … 重力の個別指定(freeze の既定 freezeGravity を上書き)
+  function spawnBullet(x, y, ang, spd, type, opts) {
     var view = makeBulletView(type);
     view.x = x; view.y = y;
     cont.addChild(view);
-    bullets.push({
+    var b = {
       x: x, y: y,
       vx: Math.cos(ang) * spd,
       vy: Math.sin(ang) * spd,
       r: PP.SKULL.orbR, type: type, view: view,
       t: Math.random() * 6.28          // 脈動・回転用(初期値ランダムで揃い踏み防止)
-    });
+    };
+    if (opts) {
+      if (opts.vx !== undefined) b.vx = opts.vx;
+      if (opts.vy !== undefined) b.vy = opts.vy;
+      if (opts.grav !== undefined) b.grav = opts.grav;
+      if (opts.wave) b.wave = { nx: -Math.sin(ang), ny: Math.cos(ang),
+                                amp: opts.wave.amp, freq: opts.wave.freq,
+                                ph: opts.wave.ph || 0, t: 0 };
+      if (opts.spdCurve) b.spdCurve = { ux: Math.cos(ang), uy: Math.sin(ang),
+                                        spd: spd, c: opts.spdCurve, t: 0 };
+    }
+    bullets.push(b);
   }
 
   // 次の発射までのクールダウンを引き直す
@@ -163,15 +180,25 @@
     // freeze(錨)は重い弾: 出だしを遅くするかわりに重力(updateBullets)で
     // 落下加速する。初速で減らしたぶんは加速で取り返すので到達時間は近い
     if (type === "freeze") spd *= S.freezeSpeedMul;
+    // 弾幕STG変種の抽選: 各タイプに A(既存の強化)/B(新パターン)の2種。
+    // A: freeze=二連斉射+追い錨 / addle=渦巻き掃射(奇数弾が蛇行)
+    // B: freeze=落錨の簾(山なりロブのカーテン) / addle=三連の波紋(呼吸する扇)
+    var variant = Math.random() < S.variantChance ? "B" : "A";
     b.skullVolley = {
       type: type,
+      variant: variant,
       base: Math.atan2(aimY - tmpPos.y, aimX - tmpPos.x),
       spd: spd,
       step: 0,
-      steps: type === "freeze" ? S.freezeWaves : S.addleCount,
-      gap: type === "freeze" ? S.freezeWaveGap : S.addleEmitGap,
+      steps: type === "freeze" ? (variant === "B" ? 1 : S.freezeWaves + 1)
+                               : (variant === "B" ? S.addlePulses : S.addleCount),
+      gap: type === "freeze" ? S.freezeWaveGap
+                             : (variant === "B" ? S.addlePulseGap : S.addleEmitGap),
       timer: 0,                              // 0 始まり=最初のステップは即発射
-      dir: Math.random() < 0.5 ? 1 : -1      // 渦の巻き方向(addle)
+      dir: Math.random() < 0.5 ? 1 : -1,     // 渦の巻き方向(addle)
+      // 落錨の簾: 着弾X(大砲を中心に rainSpreadX 間隔)は開始時に固定
+      // =横に一歩ずれれば必ず隙間に入れる
+      rainCenterX: aimX
     };
     // 号砲はパターン開始の1回だけ(白閃+デバフ色の二重リング)
     PP.fx.flash(tmpPos.x, tmpPos.y, "rgba(255,255,255,0.85)", 40);
@@ -180,31 +207,72 @@
     PP.audio.darkMagic();   // 暗黒魔法の発射音
   }
 
-  // 弾幕の1ステップぶんを発射(freeze=三叉1波 / addle=渦巻きの1発)
+  // 弾幕の1ステップぶんを発射(タイプ×変種で4パターン)
   function volleyStep(b, lane) {
     var S = PP.SKULL;
     var v = b.skullVolley;
     var T = TYPES[v.type];
     lane.rail.posAtInto(b.d + (b.slide || 0), tmpPos);
     var x = tmpPos.x, y = tmpPos.y;
-    if (v.type === "freeze") {
-      // 三叉の斉射。2波目は弾間の半分だけ角度をずらす「奇偶弾」:
-      // 1波目の隙間に立って避けた場所を塞ぐ(立ち位置を変え続けさせる)
-      var spread = S.spreadDeg * Math.PI / 180;
-      var off = v.step === 0 ? 0 : spread / (S.fan - 1) / 2;
-      for (var i = 0; i < S.fan; i++) {
-        var ang = (S.fan > 1 ? v.base - spread / 2 + spread * (i / (S.fan - 1)) : v.base) + off;
-        spawnBullet(x, y, ang, v.spd, "freeze");
+    if (v.type === "freeze" && v.variant === "B") {
+      // 落錨の簾: 上向きロブを一斉に放ち、大砲の周囲へ rainSpreadX 間隔の
+      // カーテン状に降らせる。着弾Xは開始時固定=隙間に立てば安全
+      for (var ri = 0; ri < S.rainCount; ri++) {
+        var tx = v.rainCenterX + (ri - (S.rainCount - 1) / 2) * S.rainSpreadX;
+        // 放物線: vy0 で打ち上げて grav で落とす。大砲の高さへの到達時間から vx を逆算
+        var fallT = (Math.sqrt(S.rainVy0 * S.rainVy0 +
+                     2 * S.rainGrav * Math.max(40, PP.cannon.y - 20 - y)) - S.rainVy0) / S.rainGrav;
+        spawnBullet(x, y, 0, 0, "freeze",
+          { vx: (tx - x) / fallT, vy: S.rainVy0, grav: S.rainGrav });
       }
-      PP.fx.ring(x, y, T.color, 6, 56, 320);
-      if (v.step > 0) PP.audio.beep(150, 0.12, "sawtooth", 0.08);   // 追い波の重い手応え
+      PP.fx.ring(x, y, T.color, 8, 64, 360);
+      PP.audio.beep(180, 0.16, "sawtooth", 0.09);
+      PP.audio.gliss(320, 140, 0.5, "sine", 0.06);   // 打ち上げの重いうねり
+    } else if (v.type === "freeze") {
+      if (v.step >= S.freezeWaves) {
+        // 追い錨: 2波目の後、開始時の狙い角のまま1発だけ重く速く落とす。
+        // 「扇をやり過ごした」直後の油断を突く一撃(狙い直しはしない=読める)
+        spawnBullet(x, y, v.base, v.spd * S.anchorSpeedMul, "freeze",
+          { grav: S.freezeGravity * S.anchorGravMul });
+        PP.fx.ring(x, y, T.color, 5, 48, 300);
+        PP.audio.gliss(500, 120, 0.4, "sine", 0.07);   // 落下のヒュー音
+      } else {
+        // 三叉の斉射。2波目は弾間の半分だけ角度をずらす「奇偶弾」:
+        // 1波目の隙間に立って避けた場所を塞ぐ(立ち位置を変え続けさせる)。
+        // 弾ごとの速度ジッターで扇に奥行きを出す(前後に波打つ錨鎖)
+        var spread = S.spreadDeg * Math.PI / 180;
+        var off = v.step === 0 ? 0 : spread / (S.fan - 1) / 2;
+        for (var i = 0; i < S.fan; i++) {
+          var ang = (S.fan > 1 ? v.base - spread / 2 + spread * (i / (S.fan - 1)) : v.base) + off;
+          var jit = 1 + (Math.random() * 2 - 1) * S.freezeSpeedJitter;
+          spawnBullet(x, y, ang, v.spd * jit, "freeze");
+        }
+        PP.fx.ring(x, y, T.color, 6, 56, 320);
+        if (v.step > 0) PP.audio.beep(150, 0.12, "sawtooth", 0.08);   // 追い波の重い手応え
+        // 最終波を撃ったら、追い錨までの間合いを anchorDelay に切り替える
+        if (v.step === S.freezeWaves - 1) v.gap = S.anchorDelay;
+      }
+    } else if (v.variant === "B") {
+      // 三連の波紋: 開始時狙いの扇×4発を3パルス。各弾は「1.25倍速で出て
+      // 減速→再加速」の呼吸カーブ(止まりかけの弾の間を抜けると加速して追う)
+      var pSpread = S.addlePulseSpreadDeg * Math.PI / 180;
+      for (var pi = 0; pi < S.addlePulsePer; pi++) {
+        var pAng = v.base - pSpread / 2 + pSpread * (S.addlePulsePer > 1 ? pi / (S.addlePulsePer - 1) : 0.5);
+        spawnBullet(x, y, pAng, v.spd, "addle", { spdCurve: S.addlePulseCurve });
+      }
+      PP.fx.ring(x, y, T.color, 5, 50, 300);
+      PP.audio.beep(520 + v.step * 60, 0.07, "square", 0.05);   // パルスごとに音程が上がる
     } else {
       // 渦巻きの掃射: 掃射角 addleSweepDeg を弾数で割って1発ずつ回す。
-      // 直線弾の連続発射が、結果として螺旋の模様を描く(弾幕STGの渦の作法)
+      // 直線弾の連続発射が、結果として螺旋の模様を描く(弾幕STGの渦の作法)。
+      // 奇数弾だけサイン波で蛇行=らせんの骨格(偶数弾)は読めるまま網目が揺れる
       var sweep = S.addleSweepDeg * Math.PI / 180;
       var k = v.steps > 1 ? v.step / (v.steps - 1) : 0.5;
       var ang2 = v.base + v.dir * (-sweep / 2 + sweep * k);
-      spawnBullet(x, y, ang2, v.spd, "addle");
+      var wob = (v.step & 1) === 1
+        ? { wave: { amp: S.addleWave.amp, freq: S.addleWave.freq, ph: Math.random() * 6.28 } }
+        : null;
+      spawnBullet(x, y, ang2, v.spd, "addle", wob);
       PP.fx.burst(x, y, T.color, 2, 0.9);
       if ((v.step & 1) === 0) PP.audio.beep(560 + v.step * 45, 0.05, "square", 0.045);
     }
@@ -314,11 +382,29 @@
       var b = bullets[i];
       b.t += dt;
       // freeze(錨)だけ重力で落下加速(遅く出て速く落ちる。横に逃げて躱す)。
-      // addle(渦)は完全な直線弾: 渦の模様は回転する発射角(volleyStep)が
-      // 作るもので、弾を揺らすと軌道が読めなくなるのでやらない
-      if (b.type === "freeze") b.vy += S.freezeGravity * dt;
+      // b.grav があれば個別指定を優先(落錨の簾のロブ/追い錨の重い落下)
+      if (b.type === "freeze") b.vy += (b.grav !== undefined ? b.grav : S.freezeGravity) * dt;
+      // 呼吸する弾(addle B): 速度倍率が s0→s1→s2 と区分線形で変わる。
+      // 狙い・向きは発射時に固定済み=減速しても曲がらない(理不尽回避)
+      if (b.spdCurve) {
+        var C = b.spdCurve;
+        C.t += dt;
+        var sc = C.t < C.c.t1 ? C.c.s0 + (C.c.s1 - C.c.s0) * (C.t / C.c.t1)
+               : C.t < C.c.t2 ? C.c.s1 + (C.c.s2 - C.c.s1) * ((C.t - C.c.t1) / (C.c.t2 - C.c.t1))
+               : C.c.s2;
+        b.vx = C.ux * C.spd * sc;
+        b.vy = C.uy * C.spd * sc;
+      }
       b.x += b.vx * dt;
       b.y += b.vy * dt;
+      // 蛇行弾(addle A の奇数弾): 進行方向の法線にサイン波を重ねる
+      // (boss.js の wave 弾と同方式。振幅は小さめ+残光で軌道は読める)
+      if (b.wave) {
+        b.wave.t += dt;
+        var wob = Math.sin(b.wave.t * b.wave.freq + b.wave.ph) * b.wave.amp * dt;
+        b.x += b.wave.nx * wob;
+        b.y += b.wave.ny * wob;
+      }
       b.view.x = b.x; b.view.y = b.y;
       // 脈動 + 衛星粒の回転(弾幕STGらしい「生きてる弾」。回転は見た目だけで
       // 当たり判定 r は不変)。基準スケールは焼き込み解像度ぶんの縮小
@@ -360,8 +446,9 @@
         continue;
       }
 
-      // 画面外
-      if (b.y > PP.H + 40 || b.y < -60 || b.x < -60 || b.x > PP.W + 60) removeBullet(i);
+      // 画面外(重力持ちの上昇中ロブは頂点で戻ってくるので上端では消さない)
+      if (b.y > PP.H + 40 || (b.y < -60 && !(b.grav !== undefined && b.vy < 0)) ||
+          b.x < -60 || b.x > PP.W + 60) removeBullet(i);
     }
   }
 
