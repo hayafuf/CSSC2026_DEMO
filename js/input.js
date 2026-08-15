@@ -113,6 +113,11 @@
     }
 
     // オーバーレイ上の選択を盤面操作より先に判定し、同じクリックでの誤発射を防ぐ。
+    // 言語ボタン(🌐)も同様に先取り(タイトル / 全制覇画面だけ当たる)
+    if (PP.hud.hitLang(event.stageX, event.stageY)) {
+      PP.i18n.set(PP.i18n.lang === "ja" ? "en" : "ja");
+      return;
+    }
     var difficulty = PP.hud.hitDifficulty(event.stageX, event.stageY);
     if (difficulty) {
       game.difficulty = difficulty;
@@ -280,7 +285,7 @@
         // 【新】虹玉の手動装填トグル(プレイ中のみ。詳細は upgrades.toggleWild)
         if (canPlay()) PP.upgrades.toggleWild();
       } else if (event.code === "KeyM") {
-        PP.fx.floatText(PP.audio.toggleMute() ? "🔇 消音" : "🔊 音あり",
+        PP.fx.floatText(PP.i18n.t(PP.audio.toggleMute() ? "in.mute" : "in.unmute"),
           PP.W / 2, 88, "#f0e6c8", 22);
       } else if (/^Digit[1-3]$/.test(event.code) && PP.game.state === "choosing") {
         PP.upgrades.chooseIndex(parseInt(event.code.charAt(5), 10) - 1);

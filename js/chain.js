@@ -469,12 +469,16 @@
         (head + 1 >= balls.length || balls[head].d - balls[head + 1].d > D + 0.5);
       var magnet = headLone && !balls[tail].treasure;
       // ついさっきぶつかったばかりなら、反動で開いた隙間をすぐには磁力で閉じ直さない。
-      if (!magnet && (balls[tail].hitCd > 0 || balls[head].hitCd > 0)) {
-        for (i = gStart; i <= tail; i++) balls[i].pull = 0;
-        continue;
-      }
+      // ただし止めるのは「引き寄せ(attract)」だけ。以前はここで pull=0 にして
+      // continue していたが、それだと巻き戻りの慣性(coast)まで破壊してしまい、
+      // マッチで開いた隙間に不応期の玉が面していると磁力が丸ごと止まって
+      // 「コンボは乗るのに反動が出ない」穴になっていた。attract だけ落とせば、
+      // 下の coast 分岐が勢いを保ったまま静かに隙間を閉じてくれる
+      // (gap<=0 でも attract=false なので impact は呼ばれない=二度跳ねしない)。
+      var refractory = !magnet &&
+        (balls[tail].hitCd > 0 || balls[head].hitCd > 0);
       var attract = magnet ||
-        (!withTreasure && balls[tail].color === balls[head].color);
+        (!refractory && !withTreasure && balls[tail].color === balls[head].color);
       if (!attract || gap <= 0) {
         // 磁力が切れた瞬間に急停止させない。巻き戻っていた勢いは慣性として残り滑る。
         var coast = balls[tail].pull || 0;
@@ -543,13 +547,16 @@
     if (!front || !back) return false;
     var c = front.color;
     if (c === null || c === undefined || back.color !== c) return false;
+    // 接続判定の ε は全箇所 0.5 で統一(D+0.5 超=別グループ)。ここだけ D+1 に
+    // なっていると、0.5〜1px の微小な隙間で groupStarts と食い違い、境界ケースで
+    // 「反動はコンボ扱いなのにマッチ不成立(またはその逆)」のぶれが生まれる。
     var n = 0, i;
     for (i = headIndex - 1; i >= 0 && balls[i].color === c; i--) {
-      if (i < headIndex - 1 && balls[i].d - balls[i + 1].d > D + 1) break;
+      if (i < headIndex - 1 && balls[i].d - balls[i + 1].d > D + 0.5) break;
       n++;
     }
     for (i = headIndex; i < balls.length && balls[i].color === c; i++) {
-      if (i > headIndex && balls[i - 1].d - balls[i].d > D + 1) break;
+      if (i > headIndex && balls[i - 1].d - balls[i].d > D + 0.5) break;
       n++;
     }
     return n >= 3;
@@ -587,15 +594,20 @@
     var rv = v * ratio * mult;
 
     // 同フレームの複数衝突や、連鎖で引き継いだ反動との比較(まだ押せる距離で比べる)。
+    // 比較は >= にする: 同フレームに同強度の衝突が並ぶと reach が完全に同値に
+    // なるため、> だと 2 つ目以降が常に捨てられて「衝突したのに反動しない」
+    // 場所が生まれる。タイなら新しい衝突(いま閉じた場所)を採用する。
     var replaced = false;
     if (!lane.recoil ||
-        recoilReach(rv, damp, maxDist, 0) >
+        recoilReach(rv, damp, maxDist, 0) >=
         recoilReach(lane.recoil.v, lane.recoil.damp || PP.RECOIL_DAMP,
                     lane.recoil.max, lane.recoil.moved)) {
       lane.recoil = { anchor: anchor, v: rv, moved: 0, max: maxDist, damp: damp };
       replaced = true;
     }
-    if (!replaced && lane.recoil.anchor === anchor) return;
+    // 採用されなかった衝突は演出も出さない。ここで火花や「大反動」の文字だけ
+    // 出すと、表示は派手なのに列が動かない=見た目が嘘をつくことになる。
+    if (!replaced) return;
     if (g.state !== "playing" || !g.rolloutDone) return;
 
     // 手応えの演出: 衝突点の火花と、ぶつかった2玉の潰れ
@@ -604,7 +616,7 @@
     PP.audio.pop(1);
     if (mult > 1) {
       PP.fx.burst(p.x, p.y, "#ff9f4a", 10);
-      PP.fx.floatText("大反動 x" + mult.toFixed(1), p.x, p.y - 30, "#ff9f4a", 19);
+      PP.fx.floatText(PP.i18n.t("chain.bigRecoil", { n: mult.toFixed(1) }), p.x, p.y - 30, "#ff9f4a", 19);
     }
     [balls[headIndex - 1], anchor].forEach(function (b) {
       if (!b) return;
@@ -622,10 +634,9 @@
     var ai = balls.indexOf(rec.anchor);
     if (ai < 0) { lane.recoil = null; return; }   // anchor が消えたら反動も終わり
 
-    if (!rec.inherited) {
-      rec.anchor.hitCd = PP.BOUNCE_COOLDOWN;
-      if (balls[ai - 1]) balls[ai - 1].hitCd = PP.BOUNCE_COOLDOWN;
-    }
+    // ※ 以前はここで毎フレーム hitCd を再スタンプしていたが、それだと不応期が
+    //   「反動時間 + BOUNCE_COOLDOWN」に伸びて設計意図(1.0秒)を超えてしまう。
+    //   スタンプは impact() の一度きりで十分(COOLDOWN は反動時間より十分長い)。
 
     // 反動の対象は anchor を含む「接触している連続区間」[start, end)。
     var start = ai;
@@ -634,8 +645,16 @@
     while (end < balls.length && balls[end - 1].d - balls[end].d <= D + 0.5) end++;
 
     var step = Math.min(rec.v * dt, rec.max - rec.moved);
-    // グループの最後尾を洞窟の奥へ押し込みすぎない
-    step = Math.min(step, balls[end - 1].d - PP.RECOIL_FLOOR);
+    // グループの最後尾を洞窟の奥へ押し込みすぎない。ただし床は「この反動専用の
+    // 相対値」で持つ: 絶対床(RECOIL_FLOOR)だけだと、補給中の最後尾は常に
+    // 洞窟際(d < D)にいるため 1 回の反動で床に張り付き、以降のコンボ反動が
+    // step=0 の完全な空振りになってしまう。引き潮で床より深く押し込まれた後も
+    // 同じ理屈で反動が死ぬ。そこで初回適用時に「開始時点の最後尾から
+    // FLOOR_GIVE ぶんは必ず押せる」床を確定する(通常時は従来どおり RECOIL_FLOOR)。
+    if (rec.floor === undefined) {
+      rec.floor = Math.min(PP.RECOIL_FLOOR, balls[end - 1].d - PP.RECOIL_FLOOR_GIVE);
+    }
+    step = Math.min(step, balls[end - 1].d - rec.floor);
     if (step > 0) {
       for (var i = start; i < end; i++) balls[i].d -= step;
       rec.moved += step;
@@ -684,7 +703,7 @@
     var t = removeTreasureAt(lane, index);
     var p = lane.rail.posAt(Math.max(t.d, 0));
     PP.fx.burst(p.x, p.y, "#ffe08a", 16);
-    PP.fx.floatText("お宝解放!", p.x, p.y - 26, "#ffe08a", 20);
+    PP.fx.floatText(PP.i18n.t("chain.treasureFree"), p.x, p.y - 26, "#ffe08a", 20);
     PP.audio.treasure();
     PP.powerups.dropTreasure(p.x, p.y);
   }
@@ -695,7 +714,7 @@
     var p = lane.rail.posAt(Math.max(t.d, 0));
     PP.fx.burst(p.x, p.y, "#c9a86a", 14);
     PP.fx.burst(p.x, p.y, "#8a97a8", 8);
-    PP.fx.floatText("宝が砕けた…", p.x, p.y - 26, "#b0b8c0", 18);
+    PP.fx.floatText(PP.i18n.t("chain.treasureCrushed"), p.x, p.y - 26, "#b0b8c0", 18);
     PP.audio.crush();
   }
 
@@ -745,7 +764,7 @@
     var mp = lane.rail.posAt(mid.d);
     PP.fx.floatText("+" + points, mp.x, mp.y - 24, "#ffe08a");
     if (g.combo >= 2) {
-      PP.fx.floatText("コンボ x" + g.combo + "!", mp.x, mp.y - 48, "#ff5d8f", 20);
+      PP.fx.floatText(PP.i18n.t("chain.combo", { n: g.combo }), mp.x, mp.y - 48, "#ff5d8f", 20);
       PP.audio.combo(g.combo);
     } else {
       PP.audio.pop(n);
@@ -765,10 +784,19 @@
     var removed = balls.splice(i, j - i + 1);
     PP.game.ballsDirty = true;
     PP.game.colorsDirty = true;   // 色が盤面から消えたかもしれない → 見張りを回す
-    // 反動の起点が消えたら、後ろ(補給側)に残った玉へ引き継ぐ。
+    // マッチで生まれた隙間は「衝突で開いた隙間」ではないので、不応期(hitCd)を
+    // 引き継がない。これを消さないと、切断面の玉に残った hitCd が磁力を止めて
+    // 「マッチ→吸着→衝突→コンボ反動」の中核ループが途切れてしまう。
+    // destroyRange は全撃破経路(マッチ・爆弾・ミサイル・機銃)の唯一の通り道
+    // なので、ここ 1 か所のクリアで全経路をカバーできる。
+    if (balls[i - 1]) balls[i - 1].hitCd = 0;
+    if (balls[i]) balls[i].hitCd = 0;
+    // 反動の起点が消えたら、後ろ(補給側)に残った玉へ引き継ぐ。消したランが
+    // 列の末尾まで届いていた(=補給側に玉が無い)ときは前(樽側)へ引き継ぐ。
+    // 反動は「洞窟方向へ押す」力なので、どちらへ継承しても押す向きは一貫する。
+    // 波の終わりや掃討フェーズのコンボで反動が丸ごと消えないための保険。
     if (lane.recoil && removed.indexOf(lane.recoil.anchor) >= 0) {
-      lane.recoil.anchor = balls[i] || null;
-      lane.recoil.inherited = true;
+      lane.recoil.anchor = balls[i] || balls[i - 1] || null;
       if (!lane.recoil.anchor) lane.recoil = null;
     }
     removed.forEach(function (b, k) {
@@ -781,7 +809,7 @@
         PP.game.score += PP.SKULL.rewardScore;
         if (Math.random() < PP.SKULL.dropChance) PP.powerups.dropPower(p.x, p.y);
         PP.fx.ring(p.x, p.y, "#ffd24a", 10, 80, 450);
-        PP.fx.floatText("☠ 撃破! +" + PP.SKULL.rewardScore, p.x, p.y - 34, "#ffd24a", 20);
+        PP.fx.floatText(PP.i18n.t("chain.skullReward", { n: PP.SKULL.rewardScore }), p.x, p.y - 34, "#ffd24a", 20);
         PP.audio.beep(520, 0.12, "square", 0.09);
       }
       PP.fx.particles(p.x, p.y, b.color, k * 15);

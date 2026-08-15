@@ -63,14 +63,14 @@
       color: "#ffd24a",
       glowIn: "rgba(255,235,170,0.95)", glowMid: "rgba(255,180,40,0.35)",
       coreEdge: "rgba(255,224,140,0.9)",
-      label: "⛓ 動けない!",
+      labelKey: "skull.freeze",   // 表示文言は i18n 辞書(表示の瞬間に t() で引く)
       teleBeep: 120        // 予兆の警告音の高さ(低い=重い錨)
     },
     addle: {
       color: "#ff5d8f",
       glowIn: "rgba(255,214,230,0.95)", glowMid: "rgba(255,60,130,0.35)",
       coreEdge: "rgba(255,190,215,0.9)",
-      label: "🌀 操作が逆に!",
+      labelKey: "skull.addle",
       teleBeep: 175        // 高い=惑わせる渦
     }
   };
@@ -312,7 +312,7 @@
     else g.bossFx.addle = S.addleDur;
     PP.fx.ring(PP.cannon.x, PP.cannon.y - 40, T.color, 10, 90, 500);
     PP.fx.screenFlash(T.color, 0.1, 220);   // 画面縁も薄く同色に染めて被弾を強調
-    PP.fx.floatText(T.label, PP.cannon.x, PP.cannon.y - 70, T.color, 18);
+    PP.fx.floatText(PP.i18n.t(T.labelKey), PP.cannon.x, PP.cannon.y - 70, T.color, 18);
   }
 
   function removeBullet(i) {
@@ -468,7 +468,7 @@
         if (dx * dx + dy * dy < rr * rr) {
           PP.fx.burst(b.x, b.y, TYPES[b.type].color, 10, 1.2);
           PP.fx.flash(b.x, b.y, "rgba(255,255,255,0.8)", 34);
-          PP.fx.floatText("迎撃!", b.x, b.y - 26, "#8ef0d0", 18);
+          PP.fx.floatText(PP.i18n.t("fx.intercept"), b.x, b.y - 26, "#8ef0d0", 18);
           PP.audio.beep(720, 0.1, "square", 0.08);
           if (sh.special !== "missile") {
             if (sh.view.spark) createjs.Tween.removeTweens(sh.view.spark);

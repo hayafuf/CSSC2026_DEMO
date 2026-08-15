@@ -304,7 +304,7 @@
       // 口が開いた瞬間の宣告(危機に入るたび1回だけ)
       if (part.want > 0 && !part.announced) {
         part.announced = true;
-        PP.fx.floatText("樽が口を開けた!", part.mouth.x - 80, part.mouth.y - 46, "#ff5d5d", 21);
+        PP.fx.floatText(PP.i18n.t("crisis.mouthOpen"), part.mouth.x - 80, part.mouth.y - 46, "#ff5d5d", 21);
       } else if (part.want === 0) {
         part.announced = false;
       }
@@ -325,14 +325,14 @@
     PP.fx.shake(15, 0.55);
     PP.fx.burst(part.mouth.x, part.mouth.y, "#ff4020", 20);
     PP.fx.burst(part.mouth.x, part.mouth.y, "#ffb060", 10);
-    PP.fx.floatText(left > 0 ? "呑まれた!  あと " + left + " 個" : "呑まれた!",
+    PP.fx.floatText(left > 0 ? PP.i18n.t("crisis.swallowedLeft", { n: left }) : PP.i18n.t("crisis.swallowed"),
       part.mouth.x - 70, part.mouth.y - 44, "#ff3535", 24);
     PP.audio.swallowed(deep);
   }
 
   // 押し戻した。安堵は与えるが、演出はゆっくりしか退かない
   function pushedBack(part) {
-    PP.fx.floatText("押し戻した!", part.mouth.x - 70, part.mouth.y - 44, "#8ef0d0", 21);
+    PP.fx.floatText(PP.i18n.t("crisis.pushedBack"), part.mouth.x - 70, part.mouth.y - 44, "#8ef0d0", 21);
     PP.audio.pushedBack();
   }
 

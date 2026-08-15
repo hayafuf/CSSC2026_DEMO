@@ -54,7 +54,7 @@
   // ---- Course: 作りかけ/完成のコース1つを表す ----
   function Course(spec) {
     spec = spec || {};
-    this.name = spec.name || "無名の航路";
+    this.name = spec.name || PP.i18n.t("api.defaultName");
     this.sharp = !!spec.sharp;
     this.corner = isNum(spec.corner) ? spec.corner : 24;
     this.overpass = !!spec.overpass;
@@ -88,13 +88,14 @@
     var multi = lanes.length > 1;
     var totalPoints = 0;
 
+    var t = PP.i18n.t;
     lanes.forEach(function (ln, li) {
       var pts = ln.ctrl;
       totalPoints += pts.length;
-      var tag = multi ? ("レーン" + (li + 1) + ": ") : "";
-      if (pts.length < MIN_POINTS) errors.push(tag + "制御点が少なすぎます(最低 " + MIN_POINTS + " 点)");
+      var tag = multi ? t("api.lane", { n: li + 1 }) : "";
+      if (pts.length < MIN_POINTS) errors.push(tag + t("api.tooFewPoints", { n: MIN_POINTS }));
       if (pts.some(function (p) { return !isNum(p[0]) || !isNum(p[1]); }))
-        errors.push(tag + "数値でない座標が含まれています");
+        errors.push(tag + t("api.nan"));
     });
 
     var length = 0;
@@ -104,16 +105,16 @@
       lanes.forEach(function (ln, li) {
         var pl = PP.rail.measure(course, li);
         if (pl.length > length) length = pl.length;
-        var tag = multi ? ("レーン" + (li + 1) + ": ") : "";
-        if (pl.length < MIN_LENGTH) errors.push(tag + "コースが短すぎます(全長 " +
-          Math.round(pl.length) + "px。目安 " + MIN_LENGTH + "px 以上)");
+        var tag = multi ? t("api.lane", { n: li + 1 }) : "";
+        if (pl.length < MIN_LENGTH)
+          errors.push(tag + t("api.tooShort", { len: Math.round(pl.length), min: MIN_LENGTH }));
         // 画面からはみ出す内部点は警告(端点=最初と最後は洞窟/樽なので除外)
         var out = 0, pts = ln.ctrl;
         for (var i = 1; i < pts.length - 1; i++) {
           var x = pts[i][0], y = pts[i][1];
           if (x < PLAY.xMin || x > PLAY.xMax || y < PLAY.yMin || y > PLAY.yMax) out++;
         }
-        if (out > 0) warnings.push(tag + out + " 個の制御点が遊べる領域からはみ出しています");
+        if (out > 0) warnings.push(tag + t("api.outOfPlay", { n: out }));
       });
 
       // 交差の助言(rail.courseCrossings が自己交差もレーン間交差も列挙する)。
@@ -125,17 +126,14 @@
         });
         var hasSelf = crossings.some(function (c) { return c.laneA === c.laneB; });
         var hasCross = crossings.some(function (c) { return c.laneA !== c.laneB; });
-        if (hasSelf && !this.overpass)
-          warnings.push("道が自分自身と交差しています。overpass:true で立体交差(橋)になります");
-        if (hasCross && !anyRaised)
-          warnings.push("レーン同士が交差しています。上にするレーンへ raised:[{from,to}] か " +
-                        "raisedOver:[相手レーンindex] を付けると橋になります");
+        if (hasSelf && !this.overpass) warnings.push(t("api.selfCross"));
+        if (hasCross && !anyRaised) warnings.push(t("api.laneCross"));
       }
 
       // 速度プロファイルの取り違え(洞窟側のほうが遅い)を知らせる
       if (this.speed && isNum(this.speed.entry) && isNum(this.speed.hole) &&
           this.speed.entry <= this.speed.hole)
-        warnings.push("speed.entry(洞窟側)が speed.hole(樽の直前)以下です。手前ほど速くなります");
+        warnings.push(t("api.speedWarn"));
     }
     return { ok: errors.length === 0, errors: errors, warnings: warnings,
              length: Math.round(length), points: totalPoints };
@@ -144,7 +142,7 @@
   // 致命的エラーがあれば例外にする(play/register の前段)
   Course.prototype.assertValid = function () {
     var r = this.validate();
-    if (!r.ok) throw new Error("コースが不正です: " + r.errors.join(" / "));
+    if (!r.ok) throw new Error(PP.i18n.t("api.invalid", { errors: r.errors.join(" / ") }));
     return r;
   };
 
@@ -193,7 +191,7 @@
       var idx = readIndex();
       if (idx.indexOf(slot) < 0) { idx.push(slot); writeIndex(idx); }
     } catch (e) {
-      throw new Error("保存に失敗しました(localStorage 不可): " + e.message);
+      throw new Error(PP.i18n.t("api.saveFailed", { msg: e.message }));
     }
     return slot;
   };
@@ -231,7 +229,7 @@
     // 保存済みスロットの読み書き
     load: function (slot) {
       var raw = localStorage.getItem(LS_PREFIX + slot);
-      if (!raw) throw new Error("スロットが見つかりません: " + slot);
+      if (!raw) throw new Error(PP.i18n.t("api.slotMissing", { slot: slot }));
       return new Course(JSON.parse(raw));
     },
     slots: function () { return readIndex(); },

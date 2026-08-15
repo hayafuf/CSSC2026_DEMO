@@ -24,6 +24,14 @@
   // ゲームオーバー画面の進路ボタン(⚓再挑戦 / 🏠タイトルへ)。over 画面だけに出す
   var overCont, overRects = [];
   var OVER_BTN = { w: 250, h: 54, gap: 28 };
+  // 言語切り替えボタン(🌐)。難易度ボタンと同じ「新しいランが始まる画面」だけに
+  // 出す(タイトル / 全海域制覇後)。プレイ中に切り替え可能にすると、build 時に
+  // 文字列を焼き込んだ全表示物の貼り替えが必要になるので、入口に限定して
+  // relabel の対象を「その瞬間に見えているもの」だけに絞る
+  var langCont = null, langShape = null, langText = null, langRect = null;
+  var LANG_BTN = { w: 130, h: 34 };
+  // 言語切り替え時に文字を貼り替えるビルド済みテキストの控え
+  var diffCap = null, diffNameTexts = [], overCap = null, overLabels = [];
   // ポーズボタン(⏸)。プレイ中だけバーの下・右端に出す。クリック判定は
   // 難易度ボタンと同じ「矩形当たり判定」方式(発射クリックと混ざらないため)
   var pauseBtn = null;
@@ -225,7 +233,7 @@
       info.armed ? "#8ef0d0" : lit ? "rgba(202,169,106,0.8)" : "rgba(202,169,106,0.3)")
       .drawRoundRect(wr.x, wr.y, wr.w, wr.h, 12);
     wildIconTxt.alpha = lit ? 1 : 0.45;                 // 在庫0は減灯
-    wildCountTxt.text = info.armed ? "装填中" : "x" + info.charges;
+    wildCountTxt.text = info.armed ? PP.i18n.t("hud.wildArmed") : "x" + info.charges;
     wildCountTxt.color = info.armed ? C_TEAL : lit ? C_VAL : "#8a8578";
   }
 
@@ -273,11 +281,11 @@
     }
     if (g.special) {
       var spIcon = g.special === "missile" ? "🚀" : "💣";
-      parts.unshift(spIcon + (g.specialLoaded ? " 装填" : " 待機"));
+      parts.unshift(spIcon + PP.i18n.t(g.specialLoaded ? "hud.chipLoaded" : "hud.chipWait"));
     }
     // 【新】虹玉は装填中だけチップに出す(残数は 🌈 ボタン/#tWild が常時
     // 見せるので、非装填時の 🌈xN 表示は重複になるため出さない)
-    if (PP.upgrades.wildArmed()) parts.unshift("🌈 装填 x" + PP.game.wildCharges);
+    if (PP.upgrades.wildArmed()) parts.unshift(PP.i18n.t("hud.wildChip", { n: PP.game.wildCharges }));
     // 表示文字列(残り秒は Math.ceil なので約1秒に1回しか変わらない)が同じなら、
     // 文字幅の計測(getMeasuredWidth はキャンバスでの実測=重い)とチップの
     // 再描画を丸ごと飛ばす。チップの形は文字列の幅だけで決まるので絵は同一。
@@ -366,13 +374,13 @@
       // ボス戦: 生存ゲージの代わりに討伐の合図(深紅で満たして
       // 「時間切れ待ちではない」ことを示す)。1戦につき1回しか描かない
       gKey = "boss";
-      gaugeText.text = "討伐せよ!";
+      gaugeText.text = PP.i18n.t("hud.bossGauge");
       gaugeText.color = "#ffb0a0";
     } else if (g.finishing) {
       gKey = "fin";
       var left = 0;
       for (var li = 0; li < g.lanes.length; li++) left += g.lanes[li].balls.length;
-      gaugeText.text = "残り " + left;
+      gaugeText.text = PP.i18n.t("hud.remain", { n: left });
       gaugeText.color = C_TEAL;
     } else {
       ratio = g.timeTotal > 0 ? Math.max(0, g.timeLeft / g.timeTotal) : 0;
@@ -457,6 +465,9 @@
     O.addChild(overlaySub);
     buildDiffButtons(O);   // 難易度ボタン(【課題1】)はオーバーレイと一緒に表示される
     buildOverButtons(O);   // ゲームオーバーの進路ボタン(over 画面だけ visible)
+    buildLangButton(O);    // 言語切り替えボタン(タイトル / 全制覇画面だけ visible)
+    // 言語が切り替わったら、ビルド済みラベルの文字を貼り替える
+    PP.i18n.onChange(relabel);
     O.visible = false;
     // 最下段(クリック促し等)をゆっくり明滅させる
     // (ignoreGlobalPause: ポーズ中も Ticker.paused に巻き込まれず明滅を続ける)
@@ -474,18 +485,20 @@
     var total = keys.length * DIFF_BTN.w + (keys.length - 1) * DIFF_BTN.gap;
     var x0 = (W - total) / 2;
     var y = panelBox().y + PANEL.h + 34;
-    var cap = new createjs.Text("難易度をえらぶ(1〜4 キーでも選べる)", '13px "Meiryo", sans-serif', C_LBL);
-    cap.textAlign = "center"; cap.x = W / 2; cap.y = y - 22;
-    diffCont.addChild(cap);
+    diffCap = new createjs.Text(PP.i18n.t("hud.diffCaption"), '13px "Meiryo", sans-serif', C_LBL);
+    diffCap.textAlign = "center"; diffCap.x = W / 2; diffCap.y = y - 22;
+    diffCont.addChild(diffCap);
     keys.forEach(function (key, i) {
       var bx = x0 + i * (DIFF_BTN.w + DIFF_BTN.gap);
       var s = new createjs.Shape();
       diffCont.addChild(s);
       var t1 = new createjs.Text((i + 1) + "  " + key.toUpperCase(), F_LBL, C_LBL);
       t1.textAlign = "center"; t1.x = bx + DIFF_BTN.w / 2; t1.y = y + 9;
-      var t2 = new createjs.Text(PP.DIFFICULTY[key].name, 'bold 17px "Meiryo", sans-serif', C_VAL);
+      var t2 = new createjs.Text(PP.i18n.t("diff." + key + ".name"), 'bold 17px "Meiryo", sans-serif', C_VAL);
       t2.textAlign = "center"; t2.x = bx + DIFF_BTN.w / 2; t2.y = y + 27;
+      t2.langKey = "diff." + key + ".name";   // relabel が貼り替えるための控え
       diffCont.addChild(t1, t2);
+      diffNameTexts.push(t2);
       diffShapes.push(s);
       diffRects.push({ key: key, x: bx, y: y, w: DIFF_BTN.w, h: DIFF_BTN.h });
     });
@@ -500,16 +513,16 @@
   function buildOverButtons(O) {
     overCont = new createjs.Container();
     var defs = [
-      { id: "continue", label: "⚓ この海域から再挑戦", hot: true },
-      { id: "title",    label: "🏠 タイトルへ戻る",     hot: false }
+      { id: "continue", labelKey: "hud.overContinue", hot: true },
+      { id: "title",    labelKey: "hud.overTitle",    hot: false }
     ];
     var total = defs.length * OVER_BTN.w + (defs.length - 1) * OVER_BTN.gap;
     var x0 = (W - total) / 2;
     var y = panelBox().y + PANEL.h + 34;
     if (!PP.TOUCH) {
-      var cap = new createjs.Text("R / T キーでも選べる", '13px "Meiryo", sans-serif', C_LBL);
-      cap.textAlign = "center"; cap.x = W / 2; cap.y = y - 22;
-      overCont.addChild(cap);
+      overCap = new createjs.Text(PP.i18n.t("hud.overCaption"), '13px "Meiryo", sans-serif', C_LBL);
+      overCap.textAlign = "center"; overCap.x = W / 2; overCap.y = y - 22;
+      overCont.addChild(overCap);
     }
     defs.forEach(function (d, i) {
       var bx = x0 + i * (OVER_BTN.w + OVER_BTN.gap);
@@ -523,14 +536,60 @@
         .beginStroke(d.hot ? "#f0c040" : "rgba(202,169,106,0.5)")
         .drawRoundRect(bx, y, OVER_BTN.w, OVER_BTN.h, 12);
       overCont.addChild(s);
-      var t = new createjs.Text(d.label, 'bold 17px "Meiryo", sans-serif', d.hot ? "#ffdf8a" : C_VAL);
+      var t = new createjs.Text(PP.i18n.t(d.labelKey), 'bold 17px "Meiryo", sans-serif', d.hot ? "#ffdf8a" : C_VAL);
       t.textAlign = "center";
       t.x = bx + OVER_BTN.w / 2; t.y = y + OVER_BTN.h / 2 - 9;
+      t.langKey = d.labelKey;
       overCont.addChild(t);
+      overLabels.push(t);
       overRects.push({ id: d.id, x: bx, y: y, w: OVER_BTN.w, h: OVER_BTN.h });
     });
     O.addChild(overCont);
     overCont.visible = false;
+  }
+
+  // ---------- 言語切り替えボタン(🌐) ----------
+  // パネル右上に1個だけ置く。難易度ボタンと同じ「矩形当たり判定」方式で、
+  // クリック処理は input.js が hitLang → PP.i18n.set で行う。
+  // 表示は「切り替え先」の言語名(日本語のとき→ English)にして機能を自明にする
+  function buildLangButton(O) {
+    langCont = new createjs.Container();
+    var b = panelBox();
+    var x = b.x + PANEL.w - LANG_BTN.w;
+    var y = b.y - LANG_BTN.h - 14;   // パネルの右肩(タイトル文字と重ならない位置)
+    langRect = { x: x, y: y, w: LANG_BTN.w, h: LANG_BTN.h };
+    langShape = new createjs.Shape();
+    langShape.graphics
+      .beginLinearGradientFill(["rgba(20,28,40,0.85)", "rgba(8,12,20,0.85)"],
+        [0, 1], x, y, x, y + LANG_BTN.h)
+      .drawRoundRect(x, y, LANG_BTN.w, LANG_BTN.h, 10)
+      .setStrokeStyle(1.2).beginStroke("rgba(202,169,106,0.5)")
+      .drawRoundRect(x, y, LANG_BTN.w, LANG_BTN.h, 10);
+    langText = new createjs.Text(PP.i18n.t("hud.langBtn"), 'bold 15px "Meiryo", sans-serif', C_VAL);
+    langText.textAlign = "center"; langText.textBaseline = "middle";
+    langText.x = x + LANG_BTN.w / 2; langText.y = y + LANG_BTN.h / 2 + 1;
+    langCont.addChild(langShape, langText);
+    langCont.visible = false;
+    O.addChild(langCont);
+  }
+
+  // (x, y) が言語ボタンの上か(出ていない画面では常に false)
+  function hitLang(x, y) {
+    if (!PP.layers.overlay.visible || !langCont || !langCont.visible) return false;
+    var r = langRect, p = TOUCH_PAD;
+    return x >= r.x - p && x <= r.x + r.w + p && y >= r.y - p && y <= r.y + r.h + p;
+  }
+
+  // 言語切り替え時: ビルド時に文字列を焼き込んだラベルを貼り替える。
+  // 毎フレーム更新される表示(update / rebuildEffectChips / showOverlay)は
+  // 表示のたびに t() を引くので、ここで面倒を見るのは「一度だけ作った文字」のみ
+  function relabel() {
+    var t = PP.i18n.t;
+    if (diffCap) diffCap.text = t("hud.diffCaption");
+    diffNameTexts.forEach(function (tx) { tx.text = t(tx.langKey); });
+    if (overCap) overCap.text = t("hud.overCaption");
+    overLabels.forEach(function (tx) { tx.text = t(tx.langKey); });
+    if (langText) langText.text = t("hud.langBtn");
   }
 
   // (x, y) が進路ボタンの上なら "continue" / "title"(外れ・非表示中は null)
@@ -587,6 +646,8 @@
     var b = panelBox();
     // 難易度ボタンは新しいランが始まる画面だけ(呼び出し側で state を先に確定させている)
     if (diffCont) diffCont.visible = canPickDifficulty();
+    // 言語ボタンも「新しいランが始まる画面」だけ(難易度と同じ条件)
+    if (langCont) langCont.visible = canPickDifficulty();
     // 進路ボタン(再挑戦 / タイトルへ)はゲームオーバー画面だけ
     if (overCont) overCont.visible = PP.game.state === "over";
 
@@ -626,6 +687,11 @@
 
     overlayTitle.color = s.title; overlayTitle.text = title;
     overlaySub.color = s.sub; overlaySub.text = sub;
+    // 安全弁: パネル幅に入らない見出し・本文は丸ごと縮めて収める。
+    // 言語によって行の伸び方が違う(特に英語)ので、辞書側で行長を整えた上で、
+    // それでも超えた分だけここで吸収する(getMeasuredWidth は最長行の実測)
+    fitOverlayText(overlayTitle, PANEL.w - 36);
+    fitOverlayText(overlaySub, PANEL.w - 28);
 
     if (pauseBtn) pauseBtn.visible = false;   // 全画面パネルの上にボタンを残さない
     if (swapBtn) swapBtn.visible = false;
@@ -639,16 +705,32 @@
       .to({ alpha: 1 }, 1400, createjs.Ease.quadInOut);
   }
 
+  // テキストが maxW を超えていたら、収まる倍率まで縮小する(超えていなければ等倍)。
+  // 注意: getMeasuredWidth は改行(\n)を分割せず全文を1行として測るので、
+  // 行ごとに入れ替えて「一番長い行」の実測を取る
+  function fitOverlayText(txt, maxW) {
+    txt.scaleX = txt.scaleY = 1;
+    var full = String(txt.text);
+    var lines = full.split("\n");
+    var w = 0;
+    for (var i = 0; i < lines.length; i++) {
+      txt.text = lines[i];
+      var lw = txt.getMeasuredWidth();
+      if (lw > w) w = lw;
+    }
+    txt.text = full;
+    if (w > maxW) txt.scaleX = txt.scaleY = maxW / w;
+  }
+
   function hideOverlay() { PP.layers.overlay.visible = false; }
 
   // ---------- ポーズ画面(pause.js から呼ばれる) ----------
   // 既存のオーバーレイをそのまま使う。Ticker.paused 中はフェードインの
   // Tween が凍結して真っ暗なままになるので、Tween を殺して即座に全表示する
   function showPause(reason) {
-    showOverlay("⚓ PAUSE ⚓",
-      reason === "auto"
-        ? "船の外に出ていたので錨を下ろして停泊中\n用が済んだら、" + (PP.TOUCH ? "タップで再開" : "クリックか P キーで再開")
-        : "錨を下ろして停泊中…\n" + (PP.TOUCH ? "タップで再開" : "クリックか P キーで再開"),
+    var resume = PP.i18n.t(PP.TOUCH ? "hud.resumeTouch" : "hud.resumeMouse");
+    showOverlay(PP.i18n.t("hud.pauseTitle"),
+      PP.i18n.t(reason === "auto" ? "hud.pauseAuto" : "hud.pauseManual", { resume: resume }),
       "normal");
     var O = PP.layers.overlay;
     createjs.Tween.removeTweens(O);
@@ -688,6 +770,7 @@
     hitSwapBtn: hitSwapBtn,
     hitWildBtn: hitWildBtn,   // 【新】🌈 虹玉ボタン(input.js が発射より先に判定)
     hitDifficulty: hitDifficulty, setDifficulty: setDifficulty,
-    hitOverChoice: hitOverChoice
+    hitOverChoice: hitOverChoice,
+    hitLang: hitLang   // 言語切り替えボタン(input.js が難易度と同様に判定)
   };
 })();

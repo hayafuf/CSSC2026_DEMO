@@ -116,16 +116,18 @@
   var rndSpinT = 0, rndStepT = 0, rndOrig = 0;
 
   // 攻撃の定義(色は予兆リング・妖弾・宣言バナーに使う)
+  // 攻撃名は i18n 辞書のキーで持つ(バナーに出す瞬間に t() で引く。
+  // 直に文字列を持つと、タイトルで言語を切り替えても古い言語のまま残る)
   var ATTACKS = {
-    ink:       { name: "―― 漆黒の墨獄 ――",       color: "#8a97a8" },
-    addle:     { name: "―― 惑乱の逆潮 ――",       color: "#ff5d8f" },
-    freeze:    { name: "―― 深淵の錨鎖 ――",       color: "#ffd24a" },
-    shotSlow:  { name: "―― 時凪の呪縛 ――",       color: "#c46ffb" },
-    randomize: { name: "―― 運命のルーレット ――", color: "#8ef0d0" },
-    tentacle:  { name: "―― 海淵の大触腕 ――",     color: "#ff5030" },
-    tsunami:   { name: "―― 終焉の大海嘯 ――",     color: "#4ac8e8" },
-    barrage:   { name: "―― 妖星の豪雨 ――",       color: "#ffa040" },
-    cross:     { name: "―― 両舷斉射 ――",         color: "#9fd8ff" }
+    ink:       { nameKey: "boss.atk.ink",       color: "#8a97a8" },
+    addle:     { nameKey: "boss.atk.addle",     color: "#ff5d8f" },
+    freeze:    { nameKey: "boss.atk.freeze",    color: "#ffd24a" },
+    shotSlow:  { nameKey: "boss.atk.shotSlow",  color: "#c46ffb" },
+    randomize: { nameKey: "boss.atk.randomize", color: "#8ef0d0" },
+    tentacle:  { nameKey: "boss.atk.tentacle",  color: "#ff5030" },
+    tsunami:   { nameKey: "boss.atk.tsunami",   color: "#4ac8e8" },
+    barrage:   { nameKey: "boss.atk.barrage",   color: "#ffa040" },
+    cross:     { nameKey: "boss.atk.cross",     color: "#9fd8ff" }
   };
   var ATTACK_KEYS = ["ink", "addle", "freeze", "shotSlow", "randomize",
                      "tentacle", "tsunami", "barrage", "cross"];
@@ -397,7 +399,7 @@
     // ---- HP バー(HUD レイヤー。HUD バーのすぐ下に真鍮枠で置く)----
     hpCont = new createjs.Container();
     hpCont.mouseEnabled = false;
-    hpLabel = new createjs.Text("🐙 クラーケン", '700 15px "Cinzel","Hiragino Kaku Gothic ProN","Meiryo",serif', "#ff9a8a");
+    hpLabel = new createjs.Text(PP.i18n.t("boss.hpLabel"), '700 15px "Cinzel","Hiragino Kaku Gothic ProN","Meiryo",serif', "#ff9a8a");
     hpLabel.textAlign = "right"; hpLabel.textBaseline = "middle";
     hpLabel.x = 430; hpLabel.y = 80;
     hpLabel.shadow = new createjs.Shadow("rgba(0,0,0,0.8)", 0, 2, 4);
@@ -736,7 +738,7 @@
               b.hitCd = 0.12;
               b.hitsLeft--;
               PP.fx.burst(b.x, b.y, ATTACKS[b.type].color, 6, 0.9);
-              PP.fx.floatText("あと" + b.hitsLeft, b.x, b.y - 30, "#a0dcff", 16);
+              PP.fx.floatText(PP.i18n.t("boss.hitsLeft", { n: b.hitsLeft }), b.x, b.y - 30, "#a0dcff", 16);
               PP.audio.beep(500, 0.06, "square", 0.07);
             }
             if (sh.special !== "missile") {   // 通常弾は1発と交換
@@ -748,7 +750,7 @@
           }
           PP.fx.burst(b.x, b.y, ATTACKS[b.type].color, 10, 1.2);
           PP.fx.flash(b.x, b.y, "rgba(255,255,255,0.8)", 34);
-          PP.fx.floatText("迎撃!", b.x, b.y - 26, "#8ef0d0", 18);
+          PP.fx.floatText(PP.i18n.t("fx.intercept"), b.x, b.y - 26, "#8ef0d0", 18);
           PP.audio.beep(720, 0.1, "square", 0.08);
           if (sh.special !== "missile") {   // 通常弾は1発と交換
             if (sh.view.spark) createjs.Tween.removeTweens(sh.view.spark);
@@ -1116,7 +1118,7 @@
     var a = ATTACKS[key];
     // 宣言バナー + 低い唸りの警告音。
     // チャージリングが出ている間にダメージを与えれば攻撃はキャンセルできる
-    showBanner(a.name, a.color, stateT + 0.4);
+    showBanner(PP.i18n.t(a.nameKey), a.color, stateT + 0.4);
     PP.audio.beep(140, 0.3, "sawtooth", 0.1);
     PP.audio.beep(110, 0.45, "sine", 0.09);
     // 予兆の間、画面全体に薄い血の色を差す(「来るぞ」の圧)
@@ -1477,7 +1479,7 @@
             }
             s.timer = 0.18;                 // 斬られた触手は即退散
             PP.fx.burst(s.x, sh2.y, "#8ef0d0", 12, 1.4);
-            PP.fx.floatText("触手を斬り払った!", s.x, sh2.y - 30, "#8ef0d0", 20);
+            PP.fx.floatText(PP.i18n.t("boss.tentacleCut"), s.x, sh2.y - 30, "#8ef0d0", 20);
             PP.audio.beep(660, 0.12, "square", 0.09);
             onHit(1, s.x, sh2.y);           // 本体まで痛みが走る(HP-1)
             break;
@@ -1845,7 +1847,7 @@
       clearCrossTele();
       hideSafePillar();
       hideBanner();
-      PP.fx.floatText("攻撃を阻止した!!", body.x, body.y + 96, "#8ef0d0", 24);
+      PP.fx.floatText(PP.i18n.t("boss.stopped"), body.x, body.y + 96, "#8ef0d0", 24);
       PP.audio.beep(880, 0.12, "triangle", 0.1);
       PP.audio.beep(1175, 0.18, "triangle", 0.1);
     }
@@ -1860,7 +1862,7 @@
     phase2 = true;
     PP.fx.shake(20, 0.5);
     PP.fx.screenFlash("rgba(200,30,20,0.25)", 0.25, 700);
-    showBanner("クラーケンが怒り狂う!!", "#ff5030", 2.0);
+    showBanner(PP.i18n.t("boss.rage"), "#ff5030", 2.0);
     PP.audio.bossRoar();
     PP.audio.beep(80, 0.5, "sawtooth", 0.16);
     PP.audio.beep(60, 0.7, "sawtooth", 0.12);
@@ -1874,7 +1876,7 @@
     clearStatusFx();               // 撃破の瞬間に全状態異常と妖弾を消す(確実な復元)
     PP.fx.shake(40, 0.8);
     PP.fx.screenFlash("rgba(255,240,200,0.5)", 0.5, 600);
-    PP.fx.floatText("クラーケン撃破!!", PP.W / 2, PP.H / 2 - 60, "#ffdf8a", 40);
+    PP.fx.floatText(PP.i18n.t("boss.slain"), PP.W / 2, PP.H / 2 - 60, "#ffdf8a", 40);
     PP.audio.explode();
     PP.audio.krakenDeath();    // 断末魔
   }
@@ -2126,10 +2128,10 @@
     reset();
     if (!active) removeOpeningHint();   // 非ボス面へ戻ったらヒントも片付ける
     if (active) {
-      showBanner("最終海域 ―― 深淵の主 クラーケン", "#ff5030", 3.2);
+      showBanner(PP.i18n.t("boss.banner"), "#ff5030", 3.2);
       PP.fx.screenFlash("rgba(160,20,16,0.3)", 0.3, 900);
       PP.fx.shake(12, 0.5);
-      PP.fx.floatText("討ち取って海に平穏を!", PP.W / 2, PP.H / 2 + 10, "#e6d3b8", 22);
+      PP.fx.floatText(PP.i18n.t("boss.intro"), PP.W / 2, PP.H / 2 + 10, "#e6d3b8", 22);
       PP.audio.beep(55, 0.8, "sawtooth", 0.14);
       PP.audio.beep(82, 0.6, "sawtooth", 0.1);
       PP.audio.beep(110, 0.5, "sine", 0.08);
@@ -2150,8 +2152,7 @@
   }
   function showOpeningHint() {
     removeOpeningHint();                  // リトライ時: 前のヒントを片付けてから
-    hintTxt = new createjs.Text(
-      "🎯 頭に玉を当てて HP を削れ!   ⚡ 予兆中に当てれば攻撃を阻止!   🛡 妖弾は自弾で迎撃できる",
+    hintTxt = new createjs.Text(PP.i18n.t("boss.hint"),
       'bold 15px "Meiryo", sans-serif', "#f5e8c8");
     hintTxt.textAlign = "center";
     hintTxt.x = PP.W / 2;

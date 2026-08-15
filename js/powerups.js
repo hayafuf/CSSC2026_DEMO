@@ -235,7 +235,7 @@
         if (!caught && it.kind === "treasure" && g.finishing) {
           g.score += it.def.value;
           PP.upgrades.requestChoice();
-          PP.fx.floatText("💎 宝玉を回収! +" + it.def.value, it.x, PP.H - 60, "#ffe08a", 20);
+          PP.fx.floatText(PP.i18n.t("pw.treasure", { n: it.def.value }), it.x, PP.H - 60, "#ffe08a", 20);
           PP.audio.treasure();
           PP.hud.update();
         }
@@ -271,11 +271,11 @@
         g.bossFx.ink = it.def.dur;
         if (PP.skull) PP.skull.splatInk(3, it.def.dur);
         PP.fx.screenFlash("rgba(20,10,30,0.4)", 0.4, 400);
-        PP.fx.floatText("🦑 墨をかぶった!", it.x, it.y - 22, "#c890f0", 18);
+        PP.fx.floatText(PP.i18n.t("pw.ink"), it.x, it.y - 22, "#c890f0", 18);
       } else if (it.def.id === "shotSlow") {
         g.bossFx.shotSlow = it.def.dur;
         PP.fx.screenFlash("rgba(138,32,216,0.22)", 0.22, 600);
-        PP.fx.floatText("⏳ 弾が鈍い…", it.x, it.y - 22, "#c890f0", 18);
+        PP.fx.floatText(PP.i18n.t("pw.shotSlow"), it.x, it.y - 22, "#c890f0", 18);
       }
       PP.audio.debuff();   // 状態異常がかかった合図(骸骨玉の被弾と同じ音)
       vibrate([80, 40, 160]);
@@ -291,7 +291,7 @@
       colorBomb(it.color);
     } else {
       activate(it.def);
-      PP.fx.floatText(it.def.icon + " " + it.def.name + "!", it.x, it.y - 22, "#8ef0d0", 18);
+      PP.fx.floatText(it.def.icon + " " + PP.i18n.t("pu." + it.def.id) + "!", it.x, it.y - 22, "#8ef0d0", 18);
     }
   }
 
@@ -307,7 +307,7 @@
     if (g.coins >= PP.coinsPerLife() && g.lives < PP.LIFE.maxLives) {
       g.coins -= PP.coinsPerLife();
       g.lives++;
-      PP.fx.floatText("❤ ライフ +1!", PP.W / 2, 96, "#ff5d8f", 24);
+      PP.fx.floatText(PP.i18n.t("pw.life"), PP.W / 2, 96, "#ff5d8f", 24);
     }
   }
 
@@ -393,10 +393,10 @@
       hitPts.forEach(function (p, i) {
         PP.fx.particles(p.x, p.y, color, i * 40);
       });
-      PP.fx.floatText("🎨 この色を全撃破! " + total + "個", textP.x, textP.y - 34, pal.light, 24);
+      PP.fx.floatText(PP.i18n.t("pw.colorbomb", { n: total }), textP.x, textP.y - 34, pal.light, 24);
     } else {
       // 落ちてくる間にその色が消え切っていた(拾い損の稀ケース)
-      PP.fx.floatText("🎨 その色はもう残っていない…", PP.W / 2, 96, pal.light, 18);
+      PP.fx.floatText(PP.i18n.t("pw.colorbombNone"), PP.W / 2, 96, pal.light, 18);
     }
   }
 
@@ -412,7 +412,7 @@
       if (it.kind !== "treasure") continue;
       PP.game.score += it.def.value;
       PP.upgrades.requestChoice();
-      PP.fx.floatText("💎 宝玉を回収! +" + it.def.value, it.x, it.y - 22, "#ffe08a", 20);
+      PP.fx.floatText(PP.i18n.t("pw.treasure", { n: it.def.value }), it.x, it.y - 22, "#ffe08a", 20);
       if (it.view.pulse) createjs.Tween.removeTweens(it.view.pulse);
       PP.layers.item.removeChild(it.view);
       items.splice(i, 1);

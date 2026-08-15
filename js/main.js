@@ -181,7 +181,7 @@
     var g = PP.game;
     g.finishing = true;
     PP.audio.timeOver();      // 生存ゲージの時間切れ(掃討フェーズ移行)
-    PP.fx.floatText("補給が止まった! 残りを掃討せよ!", PP.W / 2, 96, "#8ef0d0", 24);
+    PP.fx.floatText(PP.i18n.t("main.finishing"), PP.W / 2, 96, "#8ef0d0", 24);
   }
 
   function levelClear() {
@@ -204,33 +204,37 @@
       g.state = "gameclear";
       g.score += 5000;         // 全海域制覇ボーナス
       PP.hud.update();
-      // コンティニューの航海録: 一度も沈まなかったランには称号を、
-      // 沈んだランにはどの海域で立ち上がったかを添える
-      var honor = g.continues === 0
-        ? "🏅 ノーコンティニュー制覇!\n"
-        : "🔱 コンティニュー " + g.continues + "回 (ステージ " + g.continueStages.join(", ") + " で再起)\n";
-      PP.hud.showOverlay(g.bossMode ? "🏆 クラーケン討伐! 全海域制覇!" : "🏆 全海域制覇!",
-        "全 " + total + " ステージを生き延びた! 秘宝は我らのものだ!\n" + honor +
-        "制覇ボーナス +5000\n最終スコア " + g.score + " 点\n" + PP.TAP + "で最初の海へ");
+      showGameClear();
       return;
     }
     g.state = "clear";
     PP.hud.update();
+    var t = PP.i18n.t;
     // 次がボス海域なら、ただの「次のステージへ」ではなく最終決戦の前口上にする
     var next = PP.COURSES[courseForLevel(g.level + 1)];
     if (next && next.boss) {
       // 最終決戦の前口上 + 倒し方の要点(ボス戦はここまでのルールと勝利条件が
       // 違うので、突入前に必ず一度は目に入る場所で教える)
-      PP.hud.showOverlay("⚓ ステージ " + g.level + "/" + total + " 制覇!",
-        "生存ボーナス +1000 / スコア " + g.score + " 点 ――深淵の主が目を覚ました…\n" +
-        "🎯 クラーケンの頭に玉を当てて HP を削り切れば勝利!\n" +
-        "⚡ 予兆(チャージ)中に当てれば攻撃を阻止できる\n" +
-        "🛡 妖弾は自弾で迎撃できる(ミサイルは貫通)。樽への玉列も守り続けろ!\n" +
-        PP.TAP + "で最終決戦へ");
+      PP.hud.showOverlay(t("main.clearTitle", { level: g.level, total: total }),
+        t("main.clearBossBody", { score: g.score, tap: PP.TAP }));
     } else {
-      PP.hud.showOverlay("⚓ ステージ " + g.level + "/" + total + " 制覇!",
-        "耐え切って残りも掃討した! 生存ボーナス +1000\nスコア " + g.score + " 点\n" + PP.TAP + "で次のステージへ");
+      PP.hud.showOverlay(t("main.clearTitle", { level: g.level, total: total }),
+        t("main.clearBody", { score: g.score, tap: PP.TAP }));
     }
+  }
+
+  // 全海域制覇のオーバーレイ(levelClear と、gameclear 画面での言語切り替えの
+  // 貼り替えで共用する。本文はその時点の g から毎回組み立て直す)
+  function showGameClear() {
+    var g = PP.game;
+    var t = PP.i18n.t;
+    // コンティニューの航海録: 一度も沈まなかったランには称号を、
+    // 沈んだランにはどの海域で立ち上がったかを添える
+    var honor = g.continues === 0
+      ? t("main.gcNoContinue")
+      : t("main.gcContinues", { n: g.continues, stages: g.continueStages.join(", ") });
+    PP.hud.showOverlay(t(g.bossMode ? "main.gcTitleBoss" : "main.gcTitle"),
+      t("main.gcBody", { total: PP.COURSES.length, honor: honor, score: g.score, tap: PP.TAP }));
   }
 
   // ---------- ステージクリアの爆発走査(Zuma 式の距離ボーナス) ----------
@@ -349,9 +353,9 @@
     intro = { t: 0, idx: 0, parts: parts };
     PP.fx.screenFlash("rgba(255,214,110,0.28)", 0.28, 500);
     PP.fx.shake(10, 0.35);
-    PP.fx.floatText("⚓ 出 航 !", PP.W / 2, PP.H / 2 - 84, "#ffd24a", 40);
-    PP.fx.floatText("玉の通り道を見極めよ", PP.W / 2, PP.H / 2 - 44, "#f5e8c8", 22);
-    PP.fx.floatText(PP.TAP + "でスキップ", PP.W / 2, PP.H / 2 - 14, "#b0a890", 15);
+    PP.fx.floatText(PP.i18n.t("main.introGo"), PP.W / 2, PP.H / 2 - 84, "#ffd24a", 40);
+    PP.fx.floatText(PP.i18n.t("main.introHint"), PP.W / 2, PP.H / 2 - 44, "#f5e8c8", 22);
+    PP.fx.floatText(PP.i18n.t("main.introSkip", { tap: PP.TAP }), PP.W / 2, PP.H / 2 - 14, "#b0a890", 15);
     beginIntroLane(0);
   }
 
@@ -456,7 +460,7 @@
     g.state = "playing";
     PP.fx.screenFlash("rgba(255,214,110,0.28)", 0.28, 400);
     PP.fx.shake(12, 0.3);
-    PP.fx.floatText("⚔ 戦闘開始!", PP.W / 2, PP.H / 2 - 60, "#ffd24a", 34);
+    PP.fx.floatText(PP.i18n.t("main.battleStart"), PP.W / 2, PP.H / 2 - 60, "#ffd24a", 34);
     PP.audio.introGo();   // 着水のドン
     PP.audio.newWave();   // イントロ中に抑えていた出航の波音をここで1回
     PP.hud.update();
@@ -481,7 +485,7 @@
     // 全画面の金フラッシュ + 揺れ + 宣言で「ボーナスタイム発動!」を伝える
     PP.fx.screenFlash("rgba(255,214,110,0.28)", 0.28, 450);
     PP.fx.shake(14, 0.4);
-    PP.fx.floatText("✨ 距離ボーナス!", PP.W / 2, PP.H / 2 - 60, "#ffd24a", 30);
+    PP.fx.floatText(PP.i18n.t("main.sweepStart"), PP.W / 2, PP.H / 2 - 60, "#ffd24a", 30);
     PP.audio.sweepStart();   // 発進の巻き上げライザー + 号砲
     sweep = { t: 0, parts: parts };
   }
@@ -535,7 +539,7 @@
         PP.fx.burst(pe.x, pe.y, "#fff3c0", 12, 1.6);
         PP.fx.shake(16, 0.35);
         PP.audio.sweepFinish();   // 終点の花火に音を付ける(低音の腹 + アルペジオ)
-        PP.fx.floatText("距離ボーナス +" + pt.bonus, pe.x, pe.y - 26, "#ffd24a", 26);
+        PP.fx.floatText(PP.i18n.t("main.sweepBonus", { n: pt.bonus }), pe.x, pe.y - 26, "#ffd24a", 26);
       }
     }
     PP.hud.update();
@@ -636,8 +640,8 @@
       texts.push(t);
     }
     // 主役は「残りライフ」。案内文はその下に小さく(読む順番を大きさで作る)
-    line("❤ 残りライフ " + PP.game.lives, -22, 34, "#ff5d8f");
-    line("同じ海域の最初から再挑戦", 30, 18, "#e6d3b8");
+    line(PP.i18n.t("main.retryLives", { n: PP.game.lives }), -22, 34, "#ff5d8f");
+    line(PP.i18n.t("main.retrySub"), 30, 18, "#e6d3b8");
     // 2行のあいだの細い金の飾り線(オーバーレイのディバイダと同じ意匠)
     var div = new createjs.Shape();
     div.graphics.beginStroke("rgba(202,169,106,0.7)").setStrokeStyle(1.2)
@@ -679,7 +683,7 @@
         .to({ alpha: 0 }, PP.RETRY.fade * 1000)
         .call(function () { PP.stage.removeChild(f.cont); });
     }
-    PP.fx.floatText("❤ ライフを使って再挑戦!", PP.W / 2, 96, "#ff5d8f", 24);
+    PP.fx.floatText(PP.i18n.t("main.retryGo"), PP.W / 2, 96, "#ff5d8f", 24);
   }
 
   // 切り替えの進行役。tick から state === "retrying" の間だけ呼ばれ、
@@ -724,12 +728,8 @@
   function finishGameOver() {
     var g = PP.game;
     g.state = "over";
-    PP.hud.showOverlay("☠ ゲームオーバー",
-      "船は宝もろとも呑まれた…\n" +
-      "最終スコア " + g.score + " 点 (ステージ " + g.level + ")\n" +
-      "再挑戦はスコア0から――\n" +
-      "宝玉の力は引き継がれる\n" +
-      "下のボタンで進路を選べ",
+    PP.hud.showOverlay(PP.i18n.t("main.overTitle"),
+      PP.i18n.t("main.overBody", { score: g.score, level: g.level }),
       "doom");
   }
 
@@ -821,7 +821,7 @@
         if (PP.powerups.count() > 0) {
           if (!itemWaitHinted) {
             itemWaitHinted = true;
-            PP.fx.floatText("残ったアイテムを回収せよ!", PP.W / 2, PP.H / 2 - 40, "#ffe08a", 26);
+            PP.fx.floatText(PP.i18n.t("main.collectItems"), PP.W / 2, PP.H / 2 - 40, "#ffe08a", 26);
           }
         } else {
           startClearSweep();   // 走る距離が無ければその場で levelClear() が呼ばれる
@@ -992,11 +992,17 @@
   // タイトル画面の表示(起動時の音源読み込み完了後と、ゲームオーバーからの帰還で共用)
   function showTitle() {
     PP.game.state = "title";
-    PP.hud.showOverlay("🏴‍☠️ Are you ready?",
-      PP.TOUCH
-        ? "タップで出航!\n◀ ▶ ボタンで大砲を移動(押し続けると加速)\nFIRE ボタンで発射(長押しで連射)、⇄ ボタンで玉を交換\n特殊弾は左下のスロットをタップで交換"
-        : "クリックで出航!\nマウスで大砲を移動、クリックで発射\n右クリック / Space で玉を交換、M で消音\n特殊弾は左下のスロットをクリックで交換");
+    PP.hud.showOverlay(PP.i18n.t("main.titleTitle"),
+      PP.i18n.t(PP.TOUCH ? "main.titleTouch" : "main.titleMouse"));
   }
+
+  // 言語切り替え時: いま開いているオーバーレイの文言を貼り替える。
+  // 切り替えボタンが出るのはタイトル / 全制覇画面だけなので、この2枚だけ見ればよい
+  PP.i18n.onChange(function () {
+    var st = PP.game.state;
+    if (st === "title") showTitle();
+    else if (st === "gameclear") showGameClear();
+  });
 
   // ゲームオーバー画面の「🏠 タイトルへ戻る」(input.js が呼ぶ)。
   // ランを完全に畳む(スコア・コイン・強化・コンティニュー記録・試遊コース)
@@ -1084,11 +1090,11 @@
 
     // 音源を読み終えてからタイトルを出す。
     PP.game.state = "loading";
-    PP.hud.showOverlay("🏴‍☠️ 海賊の秘宝", "音楽を読み込み中…");
+    PP.hud.showOverlay(PP.i18n.t("main.loadingTitle"), PP.i18n.t("main.loading"));
     PP.audio.preload(
       function (loaded, total) {
-        PP.hud.showOverlay("🏴‍☠️ 海賊の秘宝",
-          "音楽を読み込み中… " + loaded + " / " + total);
+        PP.hud.showOverlay(PP.i18n.t("main.loadingTitle"),
+          PP.i18n.t("main.loadingN", { loaded: loaded, total: total }));
       },
       function () {
         showTitle();

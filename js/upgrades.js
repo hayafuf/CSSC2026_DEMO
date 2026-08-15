@@ -111,7 +111,7 @@
       if (p.id === "bomb") w *= bw * boost;        // 救済中は立て直しの道具を厚く
       else if (p.id === "missile") w *= mw;
       else if (p.id === "reverse") w *= boost;     // 救済中は風系(引き潮)も厚く
-      return { id: p.id, name: p.name, icon: p.icon, dur: p.dur, w: w };
+      return { id: p.id, icon: p.icon, dur: p.dur, w: w };
     });
   }
 
@@ -138,7 +138,7 @@
       // 全カンスト: 選ぶものが無いのでスコアに変換(権利は消費)
       queued = Math.max(0, queued - 1);
       g.score += 1000;
-      PP.fx.floatText("💎 制覇の証 +1000", PP.W / 2, 96, "#ffe08a", 24);
+      PP.fx.floatText(PP.i18n.t("ug.ui.maxed"), PP.W / 2, 96, "#ffe08a", 24);
       PP.hud.update();
       return;
     }
@@ -188,7 +188,8 @@
     closeChoiceUI();
     g.state = "playing";
     PP.audio.catchItem();
-    PP.fx.floatText(def.icon + " " + def.name + " Lv." + g.upgrades[id] + "!", PP.W / 2, 96, "#ffdf8a", 24);
+    PP.fx.floatText(def.icon + " " + PP.i18n.t("ug." + id + ".name") + " Lv." + g.upgrades[id] + "!",
+      PP.W / 2, 96, "#ffdf8a", 24);
     PP.hud.update();
     // queued が残っていれば、次の tick 末尾の pendingChoice() がまた開く
   }
@@ -241,7 +242,7 @@
       .drawRect(-140, -140, PP.W + 280, PP.H + 280);
     cont.addChild(veil);
 
-    var title = new createjs.Text("💎 宝玉の力を選べ!",
+    var title = new createjs.Text(PP.i18n.t("ug.ui.pick"),
       '800 34px "Cinzel","Hiragino Kaku Gothic ProN","Meiryo",serif', "#ffdf8a");
     title.textAlign = "center"; title.textBaseline = "middle";
     title.x = PP.W / 2; title.y = 104;
@@ -249,8 +250,8 @@
     cont.addChild(title);
 
     // 2個目以降の 💎 が待っているときだけ残数を出す
-    var subText = queued > 1 ? "残りの選択 あと " + (queued - 1) + " 回"
-      : (PP.TOUCH ? "カードをタップで選択" : "カードをクリック(1〜3 キーでも選べる)");
+    var subText = queued > 1 ? PP.i18n.t("ug.ui.remaining", { n: queued - 1 })
+      : PP.i18n.t(PP.TOUCH ? "ug.ui.pickTouch" : "ug.ui.pickMouse");
     var sub = new createjs.Text(subText, '14px "Hiragino Kaku Gothic ProN","Meiryo",sans-serif', "#caa96a");
     sub.textAlign = "center"; sub.textBaseline = "middle";
     sub.x = PP.W / 2; sub.y = 138;
@@ -303,13 +304,13 @@
     }
     line(def.icon, -hh + 62,
       '48px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",serif', "#ffffff");
-    line(def.name, -hh + 122,
+    line(PP.i18n.t("ug." + def.id + ".name"), -hh + 122,
       'bold 24px "Hiragino Kaku Gothic ProN","Meiryo",sans-serif', "#f7ecce");
     line(lv === 0 ? "NEW!" : "Lv." + lv + " → Lv." + (lv + 1), -hh + 158,
       '600 16px "Cinzel","Meiryo",serif', lv === 0 ? "#8ef0d0" : "#ffd15a");
     line(preview(def, lv), -hh + 190,
       'bold 17px "Meiryo",sans-serif', "#ffdf8a");
-    var desc = new createjs.Text(def.desc,
+    var desc = new createjs.Text(PP.i18n.t("ug." + def.id + ".desc"),
       '15px "Hiragino Kaku Gothic ProN","Meiryo",sans-serif', "#e6d3b8");
     desc.textAlign = "center"; desc.lineHeight = 24;
     desc.x = 0; desc.y = -hh + 228;
@@ -319,12 +320,14 @@
     return c;
   }
 
-  // 効果の数値プレビュー(「今 → 取ったら」)
+  // 効果の数値プレビュー(「今 → 取ったら」)。文言は連結ではなくテンプレート
+  // (t の {a}/{b} 穴埋め)で組む: 英語と日本語で単位や語順が違うため
   function preview(def, lv) {
     var id = def.id;
+    var t = PP.i18n.t;
     if (def.kind === "interval") {
-      return lv === 0 ? valAt(def, 1).toFixed(1) + " 秒ごとに発動"
-        : valAt(def, lv).toFixed(1) + "秒 → " + valAt(def, lv + 1).toFixed(1) + "秒";
+      return lv === 0 ? t("ug.prev.interval0", { v: valAt(def, 1).toFixed(1) })
+        : t("ug.prev.interval", { a: valAt(def, lv).toFixed(1), b: valAt(def, lv + 1).toFixed(1) });
     }
     if (id === "cluster") {
       // 塊率の基準はコースごとに違う(コース5は 0.75)ので、絶対値ではなく
@@ -332,20 +335,20 @@
       var base = (PP.game.builtCourse && PP.game.builtCourse.spawnCluster) || PP.SPAWN_CLUSTER;
       var cur = 1 - (1 - base) * Math.pow(0.85, lv);
       var nx = 1 - (1 - base) * Math.pow(0.85, lv + 1);
-      return "同色率 +" + Math.round((nx - cur) * 100) + "%";
+      return t("ug.prev.cluster", { n: Math.round((nx - cur) * 100) });
     }
-    if (id === "barrelcap") return "許容 " + PP.barrelCap() + "個 → " + (PP.barrelCap() + 1) + "個";
+    if (id === "barrelcap") return t("ug.prev.barrelcap", { a: PP.barrelCap(), b: PP.barrelCap() + 1 });
     if (id === "coin") {
       var c0 = Math.max(2, PP.LIFE.coinsPerLife - lv);
       var c1 = Math.max(2, PP.LIFE.coinsPerLife - lv - 1);
-      return "必要 " + c0 + "枚 → " + c1 + "枚";
+      return t("ug.prev.coin", { a: c0, b: c1 });
     }
     if (id === "combo") {
-      return (PP.COMBO_WINDOW * valAt(def, lv)).toFixed(1) + "秒 → " +
-             (PP.COMBO_WINDOW * valAt(def, lv + 1)).toFixed(1) + "秒";
+      return t("ug.prev.interval", { a: (PP.COMBO_WINDOW * valAt(def, lv)).toFixed(1),
+                                     b: (PP.COMBO_WINDOW * valAt(def, lv + 1)).toFixed(1) });
     }
     if (id === "wildshot") {
-      return "最大 " + (PP.WILD.baseMax + lv) + "個 → " + (PP.WILD.baseMax + lv + 1) + "個(全回復)";
+      return t("ug.prev.wildshot", { a: PP.WILD.baseMax + lv, b: PP.WILD.baseMax + lv + 1 });
     }
     return "×" + valAt(def, lv).toFixed(2) + " → ×" + valAt(def, lv + 1).toFixed(2);
   }
@@ -474,7 +477,7 @@
     g.special = kind;
     g.specialLoaded = false;
     PP.cannon.refreshBalls();
-    PP.fx.floatText(icon + " 自動装填!", 86, PP.H - 120, "#8ef0d0", 18);
+    PP.fx.floatText(PP.i18n.t("ug.ui.autoload", { icon: icon }), 86, PP.H - 120, "#8ef0d0", 18);
     PP.audio.specialLoad();   // 特殊弾の装填音(手動キャッチの loadSpecial と同じ音)
   }
 
@@ -566,13 +569,13 @@
     rescue.active = true;
     rescue.pulseT = 0;
     rescue.recoverT = 0;
-    PP.fx.floatText("🌊 海神の加護!", PP.W / 2, 96, "#8ef0d0", 24);
-    PP.fx.floatText("⚔ 加護の間は2個で消える!", PP.W / 2, 128, "#8ef0d0", 17);
+    PP.fx.floatText(PP.i18n.t("ug.ui.rescueOn"), PP.W / 2, 96, "#8ef0d0", 24);
+    PP.fx.floatText(PP.i18n.t("ug.ui.rescueTwo"), PP.W / 2, 128, "#8ef0d0", 17);
     // 【新】虹玉は自動装填しない: 在庫があれば使用を「提案」するだけ
     // (🌈 ボタンの点滅は tickRescue が維持する)。既に装填中なら何も言わない
     if (!rescue.wild && (PP.game.wildCharges || 0) > 0) {
       rescue.suggest = true;
-      PP.fx.floatText(PP.TOUCH ? "🌈 ボタンで虹玉が使える!" : "🌈 Qキーで虹玉が使える!",
+      PP.fx.floatText(PP.i18n.t(PP.TOUCH ? "ug.ui.rescueWildTouch" : "ug.ui.rescueWildKey"),
         PP.W / 2, 158, "#8ef0d0", 17);
     }
     PP.audio.treasure();
@@ -589,7 +592,7 @@
     // 装填済みの万能玉は取り上げない: 一度授けた玉を没収すると、狙いを
     // 定めている間に虹⇄通常色が入れ替わって理不尽に見える。撃つまで有効の
     // まま残し、解除は「以後の再武装をやめる」ことだけを意味する
-    PP.fx.floatText("加護が解けた", PP.W / 2, 96, "#b0d8cc", 16);
+    PP.fx.floatText(PP.i18n.t("ug.ui.rescueOff"), PP.W / 2, 96, "#b0d8cc", 16);
   }
 
   // 【新】虹玉の手動トグル(input.js: PC は Qキー、タッチ端末は #tWild が呼ぶ)。
@@ -608,14 +611,14 @@
     if ((g.wildCharges || 0) <= 0) {
       // 在庫切れ: 空撃ち音と表示で「無い」ことだけ伝える
       PP.audio.beep(160, 0.09, "square", 0.04);
-      PP.fx.floatText("🌈 在庫なし", PP.cannon.x, PP.cannon.y - 72, "#b0d8cc", 14);
+      PP.fx.floatText(PP.i18n.t("ug.ui.wildEmpty"), PP.cannon.x, PP.cannon.y - 72, "#b0d8cc", 14);
       return;
     }
     rescue.wild = true;
     rescue.suggest = false;   // 提案に応えた(枯渇が続けば tickRescue がまた点す)
     PP.cannon.refreshBalls(); // 装填玉の見た目を虹へ(cannon.js が wildArmed を見る)
     PP.audio.specialLoad();
-    PP.fx.floatText("🌈 虹玉 装填!", PP.cannon.x, PP.cannon.y - 72, "#8ef0d0", 16);
+    PP.fx.floatText(PP.i18n.t("ug.ui.wildArmed"), PP.cannon.x, PP.cannon.y - 72, "#8ef0d0", 16);
   }
 
   // HUD(キャンバス内 🌈 ボタン)と DOM(#tWild)が毎フレーム読む表示用の状態

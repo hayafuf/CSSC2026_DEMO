@@ -262,7 +262,8 @@
 </style>
 </head>
 <body>
-  <h1><span class="flag">🏴‍☠️</span><span class="title-text">海賊の秘宝</span></h1>
+  <!-- 見出し・案内文は id を付けて js/i18n.js が言語に応じて差し替える -->
+  <h1><span class="flag">🏴‍☠️</span><span class="title-text" id="titleText">海賊の秘宝</span></h1>
   <div class="stage-wrap" id="stageWrap">
     <canvas id="gameCanvas" width="1300" height="700"></canvas>
     <button id="fsBtn" class="fs-btn" title="全画面表示 (F キー)" aria-label="全画面表示">⛶</button>
@@ -278,17 +279,20 @@
   </div>
   <!-- スマホ縦持ちのときだけ CSS(orientation: portrait)で表示される案内 -->
   <div id="rotateHint">📱 端末を横向きにしてください<br>この海賊船は横長の海でしか戦えません</div>
-  <p class="hint">マウスで大砲を左右に移動、クリックで真上に発射!右クリックか Space で玉を交換。<b>Q キーか画面の 🌈 ボタンで虹玉(万能玉)を装填</b>。落ちてくる宝やパワーアップは大砲でキャッチ!<br>BGM と効果音は最初のクリックで鳴り始めます(M キーで消音)。<br>🛠 <b>E キー</b>か下のボタンで<b>コースエディタ</b>を開いて、自分だけの航路を作れます。</p>
+  <p class="hint" id="hintText">マウスで大砲を左右に移動、クリックで真上に発射!右クリックか Space で玉を交換。<b>Q キーか画面の 🌈 ボタンで虹玉(万能玉)を装填</b>。落ちてくる宝やパワーアップは大砲でキャッチ!<br>BGM と効果音は最初のクリックで鳴り始めます(M キーで消音)。<br>🛠 <b>E キー</b>か下のボタンで<b>コースエディタ</b>を開いて、自分だけの航路を作れます。</p>
 
   <script src="https://code.createjs.com/1.0.0/createjs.min.js"></script>
   <script>
     if (typeof createjs === "undefined") {
       document.body.innerHTML =
-        '<h1 style="color:#f0c040">CreateJS の読み込みに失敗しました</h1>' +
-        '<p style="color:#8aa4be">インターネット接続を確認してから再読み込みしてください。</p>';
+        '<h1 style="color:#f0c040">CreateJS の読み込みに失敗しました / Failed to load CreateJS</h1>' +
+        '<p style="color:#8aa4be">インターネット接続を確認してから再読み込みしてください。<br>' +
+        'Check your internet connection and reload the page.</p>';
     }
   </script>
-  <!-- 依存順に読み込む(config が PP 名前空間を作り、main が起動する) -->
+  <!-- 依存順に読み込む(i18n が文言辞書を用意し、config がデータ定義でそれを引き、
+       main が起動する。i18n は必ず config より前) -->
+  <script src="js/i18n.js"></script>
   <script src="js/config.js"></script>
   <!-- コース API / エディタで共有する純粋なデータ操作 -->
   <script src="js/course-utils.js"></script>

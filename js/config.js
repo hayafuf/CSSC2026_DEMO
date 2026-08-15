@@ -5,7 +5,9 @@
 (function () {
   
   "use strict";
-  var PP = window.PP = {};
+  // i18n.js が先に PP を作っているので「window.PP || {}」で受け取る。
+  // ここで {} に上書きすると、先に読まれた PP.i18n(言語辞書)が消えてしまう
+  var PP = window.PP = window.PP || {};
 
   // ---------- 画面・玉 ----------
   PP.W = 1300;            // キャンバス幅(段を横に伸ばして全長を稼ぐ)
@@ -45,11 +47,13 @@
   //    全難易度共通。仕組みは js/audio.js の gameStart / setDanger を読んでみよう)
   // bossHpMult: ボス(クラーケン)の HP 倍率。ボス戦の唯一の難易度スケール
   // (実 HP = round(PP.BOSS.hp × bossHpMult)。参照は boss.js の maxHp())
+  // 表示名は js/i18n.js の辞書(キー diff.<id>.name)にある。データ表から
+  // 文言を外したのは、言語切り替えで表とじ辞書の二重管理にしないため
   PP.DIFFICULTY = {
-    easy:     { name: "みならい海賊", entryMult: 0.85, holeMult: 0.90, curveMult: 1.15, timeMult: 0.85, colorAdd: 0, colorMin: 4, colorMax: 6, barrelBonus: 2,  useLives: true,  bossHpMult: 0.8,  bgm: "BGM/Easy.mp3" },
-    normal:   { name: "一人前の海賊", entryMult: 1.00, holeMult: 1.00, curveMult: 1.00, timeMult: 1.00, colorAdd: 0, colorMin: 4, colorMax: 6, barrelBonus: 0,  useLives: true,  bossHpMult: 1.0,  bgm: "BGM/Game_music.mp3" },
-    hard:     { name: "海賊船長",     entryMult: 1.10, holeMult: 1.06, curveMult: 0.92, timeMult: 1.00, colorAdd: 1, colorMin: 4, colorMax: 7, barrelBonus: 0,  useLives: true,  bossHpMult: 1.2,  bgm: "BGM/Hard.mp3" },
-    hardcore: { name: "深海の悪魔",   entryMult: 1.15, holeMult: 1.10, curveMult: 0.88, timeMult: 1.10, colorAdd: 1, colorMin: 4, colorMax: 7, barrelBonus: 0, useLives: false, bossHpMult: 1.35, bgm: "BGM/HardCore.mp3" }
+    easy:     { entryMult: 0.85, holeMult: 0.90, curveMult: 1.15, timeMult: 0.85, colorAdd: 0, colorMin: 4, colorMax: 6, barrelBonus: 2,  useLives: true,  bossHpMult: 0.8,  bgm: "BGM/Easy.mp3" },
+    normal:   { entryMult: 1.00, holeMult: 1.00, curveMult: 1.00, timeMult: 1.00, colorAdd: 0, colorMin: 4, colorMax: 6, barrelBonus: 0,  useLives: true,  bossHpMult: 1.0,  bgm: "BGM/Game_music.mp3" },
+    hard:     { entryMult: 1.10, holeMult: 1.06, curveMult: 0.92, timeMult: 1.00, colorAdd: 1, colorMin: 4, colorMax: 7, barrelBonus: 0,  useLives: true,  bossHpMult: 1.2,  bgm: "BGM/Hard.mp3" },
+    hardcore: { entryMult: 1.15, holeMult: 1.10, curveMult: 0.88, timeMult: 1.10, colorAdd: 1, colorMin: 4, colorMax: 7, barrelBonus: 0, useLives: false, bossHpMult: 1.35, bgm: "BGM/HardCore.mp3" }
   };
   // (holeMult/curveMult 改定: easy は速度全体の底上げ(SPEED.levelStep・コース hole)を
   //  相殺して従来の体感を維持、hard/hardcore は normal との差が +2% しかなく
@@ -88,8 +92,12 @@
   // 「指で触る画面」(スマホ/タブレット)かどうか。タッチ用UI(⇄交換ボタン)の
   // 表示や、指でも押しやすいようにボタンの当たり判定を広げる目安に使う。
   PP.TOUCH = !!(window.matchMedia && window.matchMedia("(pointer: coarse)").matches);
-  // 案内文で使う操作の呼び名(タッチ端末では「クリック」と言われても分からない)
-  PP.TAP = PP.TOUCH ? "タップ" : "クリック";
+  // 案内文で使う操作の呼び名(タッチ端末では「クリック」と言われても分からない)。
+  // 言語切り替えのたびに引き直す(main.js 等は {tap} の穴埋めでこの値を使う)
+  PP.TAP = PP.i18n.t(PP.TOUCH ? "common.tap" : "common.click");
+  PP.i18n.onChange(function () {
+    PP.TAP = PP.i18n.t(PP.TOUCH ? "common.tap" : "common.click");
+  });
 
   // ---------- 速度 ----------
   // 発射玉は等速直線ではなく加速させる。砲口を出た初速から SHOT_ACCEL で
@@ -169,6 +177,11 @@
   PP.RECOIL_DAMP = 2.4;          // 通常: 反動の減衰係数 (1/s)。小さいほど長く押す
   PP.RECOIL_MAX = PP.D * 2;      // 通常: 1回の反動で下がる最大距離
   PP.RECOIL_FLOOR = -PP.D * 3;   // 最後尾がこれ以上洞窟に押し戻されない下限 d(共通)
+  // 反動1回ごとに「開始時点の最後尾からこの距離までは必ず押せる」保証。
+  // 補給中は最後尾が常に洞窟際(d < 48)にいるため、絶対床 RECOIL_FLOOR だけだと
+  // コンボ反動1回で床に張り付き、以降の反動が完全に無効(step=0)になってしまう。
+  // 引き潮で床より深く押し込まれた後も、この保証があるから反動が死なない。
+  PP.RECOIL_FLOOR_GIVE = PP.D;
   // コンボ中の反動(通常とは独立。倍率 mult がさらに上乗せされる)
   PP.RECOIL_COMBO_RATIO = 0.8;   // コンボ: 後方列に伝わる割合
   PP.RECOIL_COMBO_DAMP = 2.0;    // コンボ: 減衰係数 (1/s)
@@ -583,9 +596,10 @@
   // パワーアップと同じ落下・キャッチの仕組みだが、確率テーブルは別
   // (PP.ITEMS.downChance)。暗い紫の見た目で「避けるべき物」と分かる。
   // パワーアップを取りに行く動きと避ける動きが対立する=位置取りの駆け引き。
+  // 表示名は js/i18n.js の辞書(キー pd.<id>)にある
   PP.POWERDOWNS = [
-    { id: "ink",      name: "墨壺",       icon: "🦑", dur: 4, w: 1.0 },  // 画面が墨で見えなくなる
-    { id: "shotSlow", name: "時凪の呪い", icon: "⏳", dur: 4, w: 1.0 }   // 自分の弾が遅くなる
+    { id: "ink",      icon: "🦑", dur: 4, w: 1.0 },  // 墨壺: 画面が墨で見えなくなる
+    { id: "shotSlow", icon: "⏳", dur: 4, w: 1.0 }   // 時凪の呪い: 自分の弾が遅くなる
   ];
 
   // ---------- 割り込みの演出 ----------
@@ -785,14 +799,16 @@
   //     レーンが短いコースほど px/s を落とさないと洞窟から樽まで一瞬で届いてしまう。
   //     目安は「既定 × sqrt(レーン長 / 7509)」(7509px = コース1「航路」の全長)。
   PP.COURSES = [
-    // コース1: 現行の7段蛇行(見た目・挙動そのまま)
-    { name: "航路", overpass: false, lanes: [ { ctrl: PP.CTRL } ] },
+    // コース1: 現行の7段蛇行(見た目・挙動そのまま)。
+    // 組み込みコースは nameKey で i18n 辞書を引く(表示は PP.i18n.courseName())。
+    // name はエディタ・自作コース(辞書に無い開集合)との互換のため残す
+    { name: "航路", nameKey: "course.route", overpass: false, lanes: [ { ctrl: PP.CTRL } ] },
 
     // コース2: 立体交差(橋を渡る道)。制御点は BRIDGE_CTRL(上の図解を参照)。
     // 樽を手前に置くのがこのゲームの肝: 押し戻し=リスク管理が砲台の目の前で
     // 起きる。橋は最後に通る=d が大きいので上に描かれる。sharp:true で角丸の直角。
     {
-      name: "橋を渡る道", overpass: true, sharp: true, corner: 20,
+      name: "橋を渡る道", nameKey: "course.bridge", overpass: true, sharp: true, corner: 20,
       speed: { entry: 600, hole: 18.5, curve: 1.35 },   // 全長 4670px(hole 18/curve 1.5 → 18.5/1.35: 樽手前の圧を1段回復)
       lanes: [ { ctrl: BRIDGE_CTRL } ]
     },
@@ -804,7 +820,7 @@
     // 金色の縁は平面上どこも重ならない。橋は「左上ループ・右上ループ・中央の1交差(800,450)」の3か所に
     // 分散(交差はレーン1の raised で A が上=橋、レーン2は下をくぐる)。樽は互い違い(右上1250,450/左下50,550)。
     {
-      name: "エディタのコース", overpass: true, sharp: false, corner: 24,
+      name: "エディタのコース", nameKey: "course.weave", overpass: true, sharp: false, corner: 24,
       speed: { entry: 400, hole: 17.5, curve: 1.9},   // 2レーンとも 2570px(hole 16/curve 2.2 → 17.5/1.9: 2レーン分散があるので控えめに引き上げ)
       lanes: [
         // レーン1(洞窟=左 → 左上ループ → 右の樽 y=450 へ)。中央交差では A が橋(上)。
@@ -832,7 +848,7 @@
     // 速度はコース2より hole を1段落とす(14→13)。レベル補正(+6%/Lv ×3)と
     // 6色化で既に跳ねるので、このステージの難しさは「速さ」でなく「先読み」に寄せる。
     {
-      name: "洞窟の橋道", overpass: true, sharp: true, corner: 20,
+      name: "洞窟の橋道", nameKey: "course.cavern", overpass: true, sharp: true, corner: 20,
       speed: { entry: 500, hole: 17.5, curve: 1.8},   // 全長 4670px(hole 16/curve 2.1 → 17.5/1.8: 「先読み」面にも速度圧を足す)
       // 中盤で強化が乗り始めるので骸骨玉を少し厚くして緊張を保つ
       skullMult: 1.2,
@@ -848,7 +864,7 @@
     // 交差は5か所・どのペアも1回ずつなので raisedOver で自動追従(制御点を
     // 動かしても実測し直し不要)。直角の道なので sharp:true(角丸の直角)。
     {
-      name: "四叉の激流", overpass: false, sharp: true, corner: 26,
+      name: "四叉の激流", nameKey: "course.quad", overpass: false, sharp: true, corner: 26,
       speed: { entry: 560, hole: 16, curve: 2.2 },   // 全長 1550-1930px(hole 14/curve 2.9 → 16/2.2: 最終面が全ステージ最遅+最長の安全地帯だったのを是正)
       // 4レーンに注意が割れる+7色化で消しにくいので、このコースだけ同色の塊を
       // 濃くして補給する(既定 PP.SPAWN_CLUSTER=0.35 → 0.55。ball.js spawnColor)
@@ -885,7 +901,7 @@
     // 全長は約 4700px(コース2「橋を渡る道」と同程度)なので速度も同程度に。
     // levelStep: 0 でレベル補正を切り、テンポは PP.BOSS 側だけで調整できる。
     {
-      name: "クラーケンの海域", boss: true, overpass: false, sharp: true, corner: 26,
+      name: "クラーケンの海域", nameKey: "course.kraken", boss: true, overpass: false, sharp: true, corner: 26,
       speed: { entry: 1000, hole: 22, curve: 4.0, levelStep: 0 },
       lanes: [ { ctrl: BOSS_CTRL } ]
     }
@@ -896,14 +912,15 @@
   // w は出現の重み(相対値。合計が1でなくてよい。大きいほど出やすい)。
   // 強い道具(爆弾・カラーボム)ほど w を下げて「引けたら嬉しい」に寄せる。
   // TODO【課題4】w を変えて、どの道具がよく落ちるかを調整してみよう。
+  // 表示名は js/i18n.js の辞書(キー pu.<id>)にある
   PP.POWERUPS = [
-    { id: "slow",      name: "凪の鎖",       icon: "🐌", dur: 8,  w: 1.0 },  // チェーン速度半減
-    { id: "reverse",   name: "引き潮",       icon: "🌬️", dur: 5,  w: 0.6 },  // チェーンが後退
-    { id: "stop",      name: "海神の錨",     icon: "⚓", dur: 5,  w: 0.9 },  // チェーン停止
-    { id: "bomb",      name: "爆弾",         icon: "💣", dur: 0,  w: 0.8 },  // 大砲に装填して自分で撃つ
-    { id: "missile",   name: "ミサイル",     icon: "🚀", dur: 0,  w: 0.8 },  // 装填して撃つ・直進貫通
-    { id: "colorbomb", name: "カラーボム",   icon: "🎨", dur: 0,  w: 0.7 },  // 取った瞬間、同じ色を全消し
-    { id: "spyglass",  name: "羅針の眼",     icon: "🔭", dur: 10, w: 0.8 }   // 長い照準ガイド
+    { id: "slow",      icon: "🐌", dur: 8,  w: 1.0 },  // 凪の鎖: チェーン速度半減
+    { id: "reverse",   icon: "🌬️", dur: 5,  w: 0.6 },  // 引き潮: チェーンが後退
+    { id: "stop",      icon: "⚓", dur: 5,  w: 0.9 },  // 海神の錨: チェーン停止
+    { id: "bomb",      icon: "💣", dur: 0,  w: 0.8 },  // 爆弾: 大砲に装填して自分で撃つ
+    { id: "missile",   icon: "🚀", dur: 0,  w: 0.8 },  // ミサイル: 装填して撃つ・直進貫通
+    { id: "colorbomb", icon: "🎨", dur: 0,  w: 0.7 },  // カラーボム: 取った瞬間、同じ色を全消し
+    { id: "spyglass",  icon: "🔭", dur: 10, w: 0.8 }   // 羅針の眼: 長い照準ガイド
   ];
 
   // ---------- 【強化】宝玉の力(ローグライト強化)の設計表 ----------
@@ -916,56 +933,45 @@
   //     "interval" … base × decay^(段数-1)。floor で下限(自動系の発動間隔・秒)
   //     "mult"     … 1 + steps[] の累積加算(逓減は steps の減り方で表現する倍率)
   //     "add"      … 段数そのものを加算量に使う
+  // カード名・説明文は js/i18n.js の辞書(キー ug.<id>.name / ug.<id>.desc)にある。
+  // desc の改行位置(\n)も言語ごとに辞書側で調整する(英語は行が伸びるため)
   PP.UPGRADES = [
-    { id: "autogun",    name: "自動機銃",     icon: "🔫", max: 6, w: 0.9,
-      kind: "interval", base: 8.0, decay: 0.85, floor: 4.5,   // floor 3.5 → 4.5: 満載時に盤面が勝手に溶けていた
-      desc: "ペアの無い孤立玉を\n自動で狙い撃つ" },
+    { id: "autogun",    icon: "🔫", max: 6, w: 0.9,   // 自動機銃
+      kind: "interval", base: 8.0, decay: 0.85, floor: 4.5 },  // floor 3.5 → 4.5: 満載時に盤面が勝手に溶けていた
     // 自動装填は2枚に分離(旧「自動装填機」は 50/50 でどちらかが届いた)。
     // 種類が確定するぶん 50/50 より強いので、基本間隔は旧45秒より長め。
     // ボムはボスに2ダメージ入るのでミサイルよりさらに長く
-    { id: "autobomb",   name: "自動装填(ボム)",     icon: "💣", max: 4, w: 0.55,
-      kind: "interval", base: 60, decay: 0.90, floor: 42,   // decay 0.85/floor 36 → 0.90/42: 1枚目(60秒)は
+    { id: "autobomb",   icon: "💣", max: 4, w: 0.55,  // 自動装填(ボム)
+      kind: "interval", base: 60, decay: 0.90, floor: 42 },  // decay 0.85/floor 36 → 0.90/42: 1枚目(60秒)は
       // 不変のまま重ね取りの終端を約7秒マイルドに。無料💣が積み重なると
       // ボス戦も通常面も「待てば道具が解決する」ゲームになりかけていた
-      desc: "数十秒ごとに爆弾が\nスロットへ届く" },
-    { id: "automissile", name: "自動装填(ミサイル)", icon: "🚀", max: 4, w: 0.55,
-      kind: "interval", base: 50, decay: 0.90, floor: 36,   // decay 0.85/floor 32 → 0.90/36: 自動装填(ボム)と同じ理由
-      desc: "数十秒ごとにミサイルが\nスロットへ届く" },
-    { id: "droprate",   name: "戦利品の嗅覚", icon: "🧲", max: 4, w: 1.0,
-      kind: "mult", steps: [0.25, 0.20, 0.20, 0.15],
-      desc: "アイテムのドロップ率が\n上がる" },
-    { id: "cluster",    name: "同色の潮流",   icon: "🔮", max: 4, w: 1.0,
-      kind: "add",
-      desc: "補給される玉に\n同色の塊が増える" },
-    { id: "bombw",      name: "火薬の目利き", icon: "💣", max: 3, w: 0.8,
-      kind: "mult", steps: [0.45, 0.30, 0.25],   // ×2.8 → ×2.0: 3枚積むと抽選が爆弾一色になり、
+    { id: "automissile", icon: "🚀", max: 4, w: 0.55, // 自動装填(ミサイル)
+      kind: "interval", base: 50, decay: 0.90, floor: 36 },  // decay 0.85/floor 32 → 0.90/36: 自動装填(ボム)と同じ理由
+    { id: "droprate",   icon: "🧲", max: 4, w: 1.0,   // 戦利品の嗅覚
+      kind: "mult", steps: [0.25, 0.20, 0.20, 0.15] },
+    { id: "cluster",    icon: "🔮", max: 4, w: 1.0,   // 同色の潮流
+      kind: "add" },
+    { id: "bombw",      icon: "💣", max: 3, w: 0.8,   // 火薬の目利き
+      kind: "mult", steps: [0.45, 0.30, 0.25] },  // ×2.8 → ×2.0: 3枚積むと抽選が爆弾一色になり、
       // 盤面を消すのが腕ではなく道具の仕事になりすぎた。1枚目×1.45で
       // 「爆弾がよく出る」体感は残し、カンストでも他アイテムの2倍止まりに
-      desc: "ドロップ率が少し上がり\n爆弾が出やすくなる" },
-    { id: "missw",      name: "火筒の目利き", icon: "🚀", max: 3, w: 0.8,
-      kind: "mult", steps: [0.45, 0.30, 0.25],   // 火薬の目利きと対のカードなので同じ数値に揃える
+    { id: "missw",      icon: "🚀", max: 3, w: 0.8,   // 火筒の目利き
+      kind: "mult", steps: [0.45, 0.30, 0.25] },  // 火薬の目利きと対のカードなので同じ数値に揃える
       // (片方だけ弱めると選択が歪む)
-      desc: "ドロップ率が少し上がり\nミサイルが出やすくなる" },
-    { id: "barrelcap",  name: "深い樽底",     icon: "🛢️", max: 2, w: 0.6,   // max 3 → 2: 樽 4→7 個の「溢れない保険」は死の緊張を消しすぎた
-      kind: "add",
-      desc: "樽が呑み込める玉の数が\n1個増える" },
-    { id: "recoil",     name: "砲撃の重み",   icon: "💥", max: 3, w: 0.9,
-      kind: "mult", steps: [0.15, 0.12, 0.08],   // ×1.45 → ×1.35: 押し戻しがチェーン前進をほぼ打ち消していた
-      desc: "消したときの押し戻しが\n強くなる" },
-    { id: "combo",      name: "コンボの余韻", icon: "🔥", max: 3, w: 0.9,
-      kind: "mult", steps: [0.20, 0.15, 0.10],   // 窓 2.5秒 → 2.3秒: 満載だと連鎖が途切れなさすぎた
-      desc: "コンボの継続時間が\n延びる" },
-    { id: "coin",       name: "換金術",       icon: "🪙", max: 3, w: 0.8,
-      kind: "add",
-      desc: "ライフ回復に必要な\nコインが1枚減る" },
-    { id: "bombradius", name: "大口径火薬",   icon: "🧨", max: 3, w: 0.7,
-      kind: "mult", steps: [0.12, 0.08, 0.06],   // ×1.38 → ×1.26: 爆風は面積(半径の2乗)で効くので
+    { id: "barrelcap",  icon: "🛢️", max: 2, w: 0.6,   // 深い樽底。max 3 → 2: 樽 4→7 個の「溢れない保険」は死の緊張を消しすぎた
+      kind: "add" },
+    { id: "recoil",     icon: "💥", max: 3, w: 0.9,   // 砲撃の重み
+      kind: "mult", steps: [0.15, 0.12, 0.08] },  // ×1.45 → ×1.35: 押し戻しがチェーン前進をほぼ打ち消していた
+    { id: "combo",      icon: "🔥", max: 3, w: 0.9,   // コンボの余韻
+      kind: "mult", steps: [0.20, 0.15, 0.10] },  // 窓 2.5秒 → 2.3秒: 満載だと連鎖が途切れなさすぎた
+    { id: "coin",       icon: "🪙", max: 3, w: 0.8,   // 換金術
+      kind: "add" },
+    { id: "bombradius", icon: "🧨", max: 3, w: 0.7,   // 大口径火薬
+      kind: "mult", steps: [0.12, 0.08, 0.06] },  // ×1.38 → ×1.26: 爆風は面積(半径の2乗)で効くので
       // 半径+38%は面積+90%だった。半径+26%(面積+59%)に抑え、刻みも強めに逓減。
       // 1枚目の+12%でも玉1個ぶん近く広がるので体感は十分残る
-      desc: "爆弾の爆風が\n広がる" },
-    { id: "wildshot",   name: "七海の虹玉",   icon: "🌈", max: 3, w: 0.7,
-      kind: "add",
-      desc: "虹玉の最大数が1増え\nその場で全回復する" }
+    { id: "wildshot",   icon: "🌈", max: 3, w: 0.7,   // 七海の虹玉
+      kind: "add" }
   ];
 
   // ---------- 【強化】自動機銃の挙動 ----------

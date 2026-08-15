@@ -354,7 +354,7 @@
     root.addChild(rack);
 
     // 次弾ラベル(銘板に彫り込んだ体裁。フォントは fx.floatText と揃える)
-    var nextLabel = new createjs.Text("つぎ",
+    var nextLabel = new createjs.Text(PP.i18n.t("cannon.next"),
       '700 11px "Cinzel","Hiragino Kaku Gothic ProN","Meiryo",serif', BRZ.LIT);
     nextLabel.x = RACK_X; nextLabel.y = RACK_Y + 20.5;
     nextLabel.textAlign = "center";
@@ -384,7 +384,7 @@
     stockLabel.textBaseline = "middle";
     stockLabel.shadow = new createjs.Shadow("rgba(0,0,0,0.8)", 0, 1, 1);
     stockSlot.addChild(stockLabel);
-    var caption = new createjs.Text(PP.TOUCH ? "砲をタップで交換" : "Spaceで交換",
+    var caption = new createjs.Text(PP.i18n.t(PP.TOUCH ? "cannon.swapTouch" : "cannon.swapKey"),
       '700 10px "Hiragino Kaku Gothic ProN","Meiryo",serif', "#f5e8c8");
     caption.x = 0; caption.y = 40;
     caption.textAlign = "center";
@@ -392,6 +392,14 @@
     caption.shadow = new createjs.Shadow("rgba(0,0,0,0.8)", 0, 1, 1);
     stockSlot.addChild(caption);
     root.addChild(stockSlot);   // 大砲コンテナの子にして横移動に追従させる
+
+    // 言語切り替え時: build で文字を焼き込んだラベルだけ貼り替える。
+    // stockLabel は refreshStock が状態から毎回組み直すので、それを呼べば足りる
+    PP.i18n.onChange(function () {
+      nextLabel.text = PP.i18n.t("cannon.next");
+      caption.text = PP.i18n.t(PP.TOUCH ? "cannon.swapTouch" : "cannon.swapKey");
+      refreshStock();
+    });
   }
 
   // ストックスロットの表示を現在の状態に合わせて組み直す
@@ -411,10 +419,10 @@
     if (g.specialLoaded) {
       // 砲身の方に入っている: スロットには薄いゴーストだけ残す
       stockIcon.alpha = 0.35;
-      stockLabel.text = "装填中";
+      stockLabel.text = PP.i18n.t("cannon.loaded");
     } else {
       stockIcon.alpha = 1;
-      stockLabel.text = "待機";
+      stockLabel.text = PP.i18n.t("cannon.wait");
     }
     stockSlot.addChildAt(stockIcon, 1);   // 台座の上・ラベルの下
   }
@@ -464,7 +472,7 @@
   function loadSpecial(kind) {
     var g = PP.game;
     if (g.special && g.special !== kind) {
-      PP.fx.floatText("入れ替え!", PP.cannon.x, PP.cannon.y - 80, "#8ef0d0", 16);
+      PP.fx.floatText(PP.i18n.t("cannon.swapped"), PP.cannon.x, PP.cannon.y - 80, "#8ef0d0", 16);
     }
     g.special = kind;
     g.specialLoaded = true;
