@@ -216,12 +216,16 @@
     if (v.type === "freeze" && v.variant === "B") {
       // 連環の錨輪: 弾幕STGの定番「回転する抜け穴リング」。
       // 全周リングを1環ずつ撃つ。抜け穴(ringGapBullets 個ぶんの欠け)は
-      // 1環目が大砲を向き、環ごとに ringGapStepDeg ずつ回る=穴を追って
-      // 動き続けるしかない。環ごとに速度も変える(遅い環を速い環が
-      // 追い抜いて交差)ので、穴の中で居座ると前後から挟まれる。
+      // 「その環を撃つ瞬間の大砲の位置」を基準に開ける: 発射開始時の狙いを
+      // 置き去りにすると、2環目以降の穴がプレイヤーの届かない場所に出て
+      // 理不尽になるため。そこから環ごとに ringGapStepDeg ずつ位相を
+      // 少しずつずらす=穴は必ず手の届く距離から逃げ始め、追って動き続ける
+      // ことになる。環ごとに速度も変える(遅い環を速い環が追い抜いて交差)
+      // ので、穴の中で居座ると前後から挟まれる。
       // grav:0 の明示で freeze 既定の重力を殺す=真円のまま広がる
       var n = S.ringBullets;
-      var gapCenter = v.base + v.step * S.ringGapStepDeg * Math.PI / 180 * v.dir;
+      var aimNow = Math.atan2(PP.CANNON_Y - y, PP.cannon.x - x);
+      var gapCenter = aimNow + v.step * S.ringGapStepDeg * Math.PI / 180 * v.dir;
       var halfGap = Math.PI * S.ringGapBullets / n;   // 穴の半幅(rad)
       var spdR = v.spd * S.ringSpeedMuls[Math.min(v.step, S.ringSpeedMuls.length - 1)];
       for (var bi = 0; bi < n; bi++) {
