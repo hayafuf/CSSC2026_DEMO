@@ -32,6 +32,16 @@
   // キャンバス内ボタンは廃止したが、判定関数(hitSwapBtn)は互換のため残してある
   var swapBtn = null;
   var SWAP_RECT = { x: W - 116, y: PP.H - 104, w: 92, h: 80 };
+  // 【新】🌈 虹玉ボタン(手動装填のトグル)。キー(Q)だけだと機能の存在に
+  // 気づけないので、PC もキャンバス内にボタンを置き、隅に「Q」のキーキャップを
+  // 描いて「このキーでも押せる」を画面上で教える(クリックでも発動できる)。
+  // タッチ端末は DOM の #tWild(index.html)が担当し、HUD はバッジ更新だけ行う。
+  // 救済(海神の加護)の条件が立つと wildInfo().suggested が true になり、
+  // teal のグロー/点滅で「今使うと効果的」と提案する(発動は常に手動)
+  var wildBtn = null, wildBg = null, wildGlow = null, wildIconTxt = null, wildCountTxt = null;
+  var WILD_RECT = { x: W - 116, y: PP.H - 196, w: 92, h: 84 };
+  var lastWildKey = null;      // キャンバス版の再描画間引き(状態が変わった時だけ)
+  var wildDom = null, lastWildDomKey = null;   // DOM 版の書き込み間引き
   // タッチ端末では見た目はそのまま、当たり判定だけ指の太さぶん広げる
   var TOUCH_PAD = PP.TOUCH ? 12 : 0;
 
@@ -158,7 +168,65 @@
     pauseBtn.visible = false;
     L.addChild(pauseBtn);
 
+    // ---- 【新】🌈 虹玉ボタン(大砲の右・画面下)。クリック判定は input.js が
+    // hitWildBtn() で拾って toggleWild() を呼ぶ(発射クリックと混ざらない
+    // 矩形判定方式)。タッチ端末は DOM の #tWild が同じ役割を持つので、
+    // キャンバス版はそもそも作らない(二重表示防止) ----
+    if (!PP.TOUCH) {
+      var wr = WILD_RECT;
+      wildBtn = new createjs.Container();
+      // 提案中に脈動する teal のグロー(alpha を updateEffects が揺らす)
+      wildGlow = new createjs.Shape();
+      wildGlow.graphics
+        .beginFill("rgba(142,240,208,0.16)")
+        .drawRoundRect(wr.x - 6, wr.y - 6, wr.w + 12, wr.h + 12, 16)
+        .setStrokeStyle(2).beginStroke("rgba(142,240,208,0.8)")
+        .drawRoundRect(wr.x - 3, wr.y - 3, wr.w + 6, wr.h + 6, 14);
+      wildGlow.visible = false;
+      wildBg = new createjs.Shape();   // 形は redrawWildBtn() が状態に応じて描く
+      wildIconTxt = new createjs.Text("🌈",
+        '26px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",sans-serif', "#ffffff");
+      wildIconTxt.textAlign = "center"; wildIconTxt.textBaseline = "middle";
+      wildIconTxt.x = wr.x + wr.w / 2; wildIconTxt.y = wr.y + 30;
+      wildCountTxt = new createjs.Text("", '700 18px "Cinzel", serif', C_VAL);
+      wildCountTxt.textAlign = "center"; wildCountTxt.textBaseline = "middle";
+      wildCountTxt.x = wr.x + wr.w / 2; wildCountTxt.y = wr.y + 62;
+      wildCountTxt.shadow = new createjs.Shadow("rgba(0,0,0,0.65)", 0, 1, 3);
+      // 「Q」のキーキャップ(右上の隅)。ショートカットの存在を画面上で教える
+      var cap = new createjs.Shape();
+      cap.graphics
+        .beginFill("rgba(12,10,6,0.85)")
+        .drawRoundRect(wr.x + wr.w - 24, wr.y - 8, 24, 22, 5)
+        .setStrokeStyle(1.2).beginStroke("rgba(202,169,106,0.75)")
+        .drawRoundRect(wr.x + wr.w - 24, wr.y - 8, 24, 22, 5);
+      var capTxt = new createjs.Text("Q", '700 13px "Cinzel", serif', "#f4e2a0");
+      capTxt.textAlign = "center"; capTxt.textBaseline = "middle";
+      capTxt.x = wr.x + wr.w - 12; capTxt.y = wr.y + 3;
+      wildBtn.addChild(wildGlow, wildBg, wildIconTxt, wildCountTxt, cap, capTxt);
+      wildBtn.visible = false;
+      L.addChild(wildBtn);
+    }
+
     dispScore = PP.game.score;
+  }
+
+  // 🌈 ボタンの盤面(在庫の有無で明暗、装填中は teal の縁)。
+  // 毎フレームは呼ばず、状態キーが変わった時だけ描き直す
+  function redrawWildBtn(info) {
+    var wr = WILD_RECT;
+    var lit = info.charges > 0;
+    var g = wildBg.graphics; g.clear();
+    g.beginLinearGradientFill(
+      lit ? ["rgba(40,30,14,0.78)", "rgba(16,11,5,0.78)"]
+          : ["rgba(24,22,18,0.55)", "rgba(12,10,8,0.55)"],
+      [0, 1], wr.x, wr.y, wr.x, wr.y + wr.h)
+      .drawRoundRect(wr.x, wr.y, wr.w, wr.h, 12);
+    g.setStrokeStyle(1.6).beginStroke(
+      info.armed ? "#8ef0d0" : lit ? "rgba(202,169,106,0.8)" : "rgba(202,169,106,0.3)")
+      .drawRoundRect(wr.x, wr.y, wr.w, wr.h, 12);
+    wildIconTxt.alpha = lit ? 1 : 0.45;                 // 在庫0は減灯
+    wildCountTxt.text = info.armed ? "装填中" : "x" + info.charges;
+    wildCountTxt.color = info.armed ? C_TEAL : lit ? C_VAL : "#8a8578";
   }
 
   function update() {
@@ -207,10 +275,9 @@
       var spIcon = g.special === "missile" ? "🚀" : "💣";
       parts.unshift(spIcon + (g.specialLoaded ? " 装填" : " 待機"));
     }
-    // 【新】虹玉のストック表示。装填中(加護で砲身に入っている)は「装填」表記、
-    // それ以外は残数のみ。0個のときは出さない(枠の圧迫を避ける)
+    // 【新】虹玉は装填中だけチップに出す(残数は 🌈 ボタン/#tWild が常時
+    // 見せるので、非装填時の 🌈xN 表示は重複になるため出さない)
     if (PP.upgrades.wildArmed()) parts.unshift("🌈 装填 x" + PP.game.wildCharges);
-    else if ((PP.game.wildCharges || 0) > 0) parts.unshift("🌈x" + PP.game.wildCharges);
     // 表示文字列(残り秒は Math.ceil なので約1秒に1回しか変わらない)が同じなら、
     // 文字幅の計測(getMeasuredWidth はキャンバスでの実測=重い)とチップの
     // 再描画を丸ごと飛ばす。チップの形は文字列の幅だけで決まるので絵は同一。
@@ -241,6 +308,38 @@
     // (プレイ以外の画面では showOverlay() が隠す)
     if (pauseBtn) pauseBtn.visible = true;
     if (swapBtn) swapBtn.visible = true;
+
+    // 【新】🌈 虹玉ボタンの表示更新(PC=キャンバス / タッチ=DOM の #tWild)
+    var wInfo = PP.upgrades.wildInfo();
+    if (wildBtn) {
+      wildBtn.visible = true;
+      var wKey = wInfo.charges + "/" + wInfo.max + (wInfo.armed ? "A" : "") + (wInfo.suggested ? "S" : "");
+      if (wKey !== lastWildKey) { lastWildKey = wKey; redrawWildBtn(wInfo); }
+      // 提案中は teal グローが suggestPulse 周期で脈動、装填中は静かに点灯
+      if (wInfo.suggested) {
+        wildGlow.visible = true;
+        wildGlow.alpha = 0.35 + 0.65 *
+          (0.5 + 0.5 * Math.sin(animT * Math.PI * 2 / PP.WILD.suggestPulse));
+      } else if (wInfo.armed) {
+        wildGlow.visible = true; wildGlow.alpha = 0.5;
+      } else {
+        wildGlow.visible = false;
+      }
+    } else if (PP.TOUCH) {
+      // DOM ボタンのバッジ(絵文字+残数)と点滅クラス。DOM 書き込みは
+      // リフローを誘発するので、状態キーが変わったフレームだけ触る
+      var dKey = wInfo.charges + (wInfo.armed ? "A" : "") + (wInfo.suggested ? "S" : "");
+      if (dKey !== lastWildDomKey) {
+        lastWildDomKey = dKey;
+        if (!wildDom) wildDom = document.getElementById("tWild");
+        if (wildDom) {
+          wildDom.textContent = "🌈" + wInfo.charges;
+          wildDom.classList.toggle("suggest", wInfo.suggested);
+          wildDom.classList.toggle("armed", wInfo.armed);
+          wildDom.classList.toggle("empty", wInfo.charges <= 0);
+        }
+      }
+    }
 
     // スコアのカウントアップ(急変・減少時は即反映)
     if (g.score < dispScore || Math.abs(g.score - dispScore) > 200000) dispScore = g.score;
@@ -530,6 +629,7 @@
 
     if (pauseBtn) pauseBtn.visible = false;   // 全画面パネルの上にボタンを残さない
     if (swapBtn) swapBtn.visible = false;
+    if (wildBtn) wildBtn.visible = false;
 
     O.visible = true; O.alpha = 0;
     createjs.Tween.get(O, { override: true }).to({ alpha: 1 }, s.fade);
@@ -574,11 +674,19 @@
     return x >= r.x - p && x <= r.x + r.w + p && y >= r.y - p && y <= r.y + r.h + p;
   }
 
+  // 【新】(x, y) が 🌈 虹玉ボタンの上か。プレイ中に出ているときだけ当たる
+  function hitWildBtn(x, y) {
+    if (!wildBtn || !wildBtn.visible || PP.game.state !== "playing") return false;
+    var r = WILD_RECT, p = TOUCH_PAD;
+    return x >= r.x - p && x <= r.x + r.w + p && y >= r.y - p && y <= r.y + r.h + p;
+  }
+
   PP.hud = {
     build: build, update: update, updateEffects: updateEffects,
     buildOverlay: buildOverlay, showOverlay: showOverlay, hideOverlay: hideOverlay,
     showPause: showPause, hidePause: hidePause, hitPauseBtn: hitPauseBtn,
     hitSwapBtn: hitSwapBtn,
+    hitWildBtn: hitWildBtn,   // 【新】🌈 虹玉ボタン(input.js が発射より先に判定)
     hitDifficulty: hitDifficulty, setDifficulty: setDifficulty,
     hitOverChoice: hitOverChoice
   };

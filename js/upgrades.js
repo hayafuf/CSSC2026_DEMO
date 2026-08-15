@@ -16,10 +16,13 @@
  * そこで「先頭が実際に樽へ呑まれ始めていて(PP.RESCUE.start=1.0 なので
  * 先頭の玉が樽の口以深)、かつ局所ペア枯渇」と判定されたら、その場で
  * (時間条件なしに):
- *   1) 装填玉が万能玉(🌈)になる … 当たった連なりを色に関係なく炸裂で
- *      吹き飛ばす(chain.js wildBlast。最大 PP.WILD.blastCap 個)。
- *      ストック制(PP.game.wildCharges)で、在庫が無ければ装填されない。
- *      回復はカード「七海の虹玉」(最大+1&全回復)とラン開始時のみ
+ *   1) 🌈 ボタンが点滅して虹玉(万能玉)の使用を「提案」する … 装填は
+ *      プレイヤーの操作(Qキー / 🌈 ボタンの toggleWild)だけ。当たった
+ *      連なりを色に関係なく炸裂で吹き飛ばす(chain.js wildBlast。最大
+ *      PP.WILD.blastCap 個)。ストック制(PP.game.wildCharges)で、
+ *      回復はカード「七海の虹玉」(最大+1&全回復)とラン開始時のみ。
+ *      ※自動装填にしないのは「切り札をいつ切るか」のリスクとリターンを
+ *        機械ではなくプレイヤーの判断に残すため
  *   2) 撃った弾の割り込みに限り2個で消える(chain.js resolveMatchAt)
  *   3) ドロップ率と ⚓💣 の出現重みが上がる(powerups.js)
  * 「+1D 挿入 → 即 -2D 消去+反動」が常に成立し、どこへ当てるかは腕への報酬。
@@ -77,10 +80,10 @@
   }
   var rescue = {
     active: false,   // 救済(2個消し・ドロップブースト)発動中か
-    wild: false,     // 万能玉が装填されているか
+    wild: false,     // 万能玉が装填されているか(装填はプレイヤー操作のみ)
+    suggest: false,  // 「今 虹玉を使うと効果的」の提案中か(🌈 ボタンが点滅する)
     recoverT: 0,     // 発動中、回復(枯渇でない)が続いている秒数(解除のデバウンス)
     scanT: 0,        // 次のペア走査までの秒数
-    rearmT: 0,       // 万能玉の再武装までの秒数
     grace: 0,        // 解除後の猶予秒(飛行中の弾・割り込み待ちの2個消しを守る)
     pulseT: 0,       // 発動中の脈動リングの周期タイマー
     droughted: false // 直近の走査で「危機レーンの先頭グループがペア枯渇」だったか
@@ -361,34 +364,50 @@
     tickRescue(dt);
   }
 
-  // 大砲の真上の列で最初に当たる玉を返す(無ければ null)。
-  // 「勝手に賢く消える」のではなく、大砲をどこに置くか=何を撃ち抜かせるかが
-  // プレイヤーの判断になるようにする(引き金は自分の位置取り)。
-  // 当たる/当たらないの規準はプレイヤーの弾(cannon.js firstHitY)と同じ:
-  // 宝玉・洞窟内・トンネル内は対象外。横幅 D*0.9、一番手前(y が大きい)の玉。
+  // 「最危険レーンの先頭側から見て、前後に同色の隣接が無い孤立玉」を返す
+  // (無ければ null)。孤立玉を撃ち抜くと、左右の同色グループが磁力巻き戻し
+  // (chain.js)で合体して連鎖の種になる=自動破壊がプレイヤーのお膳立てになる。
+  // 旧仕様「大砲の真上を撃つ」は、狙いたい玉の下へわざわざ移動する手間が
+  // 落下アイテムのキャッチと動線衝突して使いづらかったため廃止した。
+  // 適格の規準はプレイヤーの弾(cannon.js firstHitY)と同じ:
+  // 宝玉・洞窟内・樽内・トンネル内は対象外。
   function findGunTarget() {
-    var x = PP.cannon.x;
-    var muzzleY = PP.cannon.y - 52;
-    var best = null, bestY = 66;   // HUD 下端(66)より上に玉は無い
-    PP.game.eachLaneBall(function (b, lane) {
-      if (b.treasure || b.d < PP.R) return;
-      if (lane.rail.tunnelAt(b.d)) return;
-      var p = lane.rail.posAt(b.d);
-      if (Math.abs(p.x - x) <= PP.D * 0.9 && p.y < muzzleY && p.y > bestY) {
-        bestY = p.y;
-        best = { lane: lane, ball: b, x: p.x, y: p.y };
-      }
+    // レーンを危険度(先頭が樽へ迫っている割合)の高い順に見る。
+    // main.js の leadD 記録と同じ量 = balls[0].d / holeD
+    var lanes = [];
+    PP.game.eachLane(function (lane) {
+      if (lane.balls.length) lanes.push(lane);
     });
-    return best;
+    lanes.sort(function (a, b) {
+      return b.balls[0].d / b.rail.holeD - a.balls[0].d / a.rail.holeD;
+    });
+    for (var li = 0; li < lanes.length; li++) {
+      var lane = lanes[li], balls = lane.balls;
+      for (var i = 0; i < balls.length; i++) {   // index 0 = 先頭(樽側)から走査
+        var b = balls[i];
+        if (b.treasure || b.d < PP.R || b.d > lane.rail.holeD) continue;
+        if (lane.rail.tunnelAt(b.d)) continue;
+        // 孤立判定: 前後どちらにも「同色かつ接触距離(D+1 以内)」の隣がいない。
+        // 宝玉は color を持たないので自然に不一致=境界として働く
+        var prev = balls[i - 1], next = balls[i + 1];
+        if (prev && prev.color === b.color && prev.d - b.d <= PP.D + 1) continue;
+        if (next && next.color === b.color && b.d - next.d <= PP.D + 1) continue;
+        var p = lane.rail.posAt(b.d);
+        return { lane: lane, ball: b, x: p.x, y: p.y };
+      }
+    }
+    // 孤立玉ゼロ = 盤面がペアと塊だけ。ペアを割る撃ち方は連鎖を壊すだけの
+    // マイナス行動なので、無理に撃たない(少し待って索敵し直す)
+    return null;
   }
 
   function tickAutogun(dt) {
     autogunT -= dt;
     if (autogunT > 0) return;
     var target = findGunTarget();
-    // 真上に狙える玉が無い間は「装填済み」のまま待つ(タイマーは 0 で止める)。
-    // 大砲がチェーンの上を横切った瞬間に発射される=位置取りが引き金になる
-    if (!target) { autogunT = 0; return; }
+    // 孤立玉が無い間は retryDelay 秒後に索敵し直す。旧仕様の
+    // 「大砲の真上に的が来るまで待機」という位置取り依存は廃止した
+    if (!target) { autogunT = PP.GUN.retryDelay; return; }
     autogunT = val("autogun");
     fireGun(target);
   }
@@ -397,12 +416,11 @@
   // 挿入(通常弾)にしないのは、勝手な発射が盤面にゴミ色を混ぜてプレイヤーの
   // 邪魔をするため。popRun も使わない: コンボを 1 に上書きして継続コンボを
   // 踏み潰し、maybeDrop まで回ってしまう。destroySingle は純粋な1個破壊+連鎖判定
-  var GUN_SPEED = 3000;   // 銃弾の速さ px/s(通常弾の上限 2600 より速い=銃らしい)
   function fireGun(target) {
     var mx = PP.cannon.x, my = PP.cannon.y - 52;
     var lane = target.lane, ball = target.ball;
     // 弾道(トレーサー): 砲口から着弾点へ金の線が一瞬走り、すっと消える。
-    // 「どこから撃って何に当たったか」がひと目で分かる=位置取りが引き金だと伝わる
+    // 斜めに走る線が「どの孤立玉を摘んだか」をひと目で伝える
     var tracer = new createjs.Shape();
     tracer.graphics.setStrokeStyle(2.5).beginStroke("rgba(255,214,140,0.55)")
       .moveTo(mx, my).lineTo(target.x, target.y);
@@ -421,7 +439,10 @@
     PP.layers.shot.addChild(b);
     PP.fx.flash(mx, my, "rgba(255,214,140,0.9)", 22);
     PP.audio.beep(880, 0.06, "square", 0.06);
-    var time = Math.max(40, (my - target.y) / GUN_SPEED * 1000);
+    // 飛行時間は実距離ベース(旧の「高さ差だけ」は真上撃ち専用の式で、
+    // 斜め射だと距離を過小に見積もって弾が瞬着してしまう)
+    var dx = target.x - mx, dy = target.y - my;
+    var time = Math.max(40, Math.sqrt(dx * dx + dy * dy) / PP.GUN.speed * 1000);
     createjs.Tween.get(b).to({ x: target.x, y: target.y }, time).call(function () {
       PP.layers.shot.removeChild(b);
       // トレーサーは着弾後にすっとフェードして消える
@@ -433,9 +454,9 @@
       if (i < 0) { PP.fx.burst(target.x, target.y, "#ffd24a", 4); return; }
       var p = lane.rail.posAt(ball.d);    // 着弾時点の実位置で演出を出す
       PP.chain.destroySingle(lane, i);
-      PP.game.score += 5;
+      PP.game.score += PP.GUN.score;
       PP.fx.ring(p.x, p.y, "#ffd24a", 6, 60, 300);
-      PP.fx.floatText("🔫 +5", p.x, p.y - 20, "#ffd24a", 14);
+      PP.fx.floatText("🔫 +" + PP.GUN.score, p.x, p.y - 20, "#ffd24a", 14);
       PP.hud.update();
     });
   }
@@ -528,11 +549,10 @@
     if (!rescue.active) activateRescue();
 
     if (rescue.active) {
-      // 万能玉を消費(発射)してもまだ枯渇が続くなら再武装(外した場合の保険)
-      if (!rescue.wild) {
-        rescue.rearmT -= dt;
-        if (rescue.rearmT <= 0) armWild();
-      }
+      // 【新】自動再武装はしない。かわりに「未装填かつ在庫あり」の間は
+      // 提案フラグを立て続ける(🌈 ボタンが点滅する)。撃って外しても
+      // 枯渇が続く限り提案は再点灯する=判断の主導権はプレイヤーのまま
+      rescue.suggest = !rescue.wild && (g.wildCharges || 0) > 0;
       // 発動中の合図: 大砲位置で teal のリングが約2秒周期で脈動
       rescue.pulseT -= dt;
       if (rescue.pulseT <= 0) {
@@ -546,19 +566,21 @@
     rescue.active = true;
     rescue.pulseT = 0;
     rescue.recoverT = 0;
-    armWild();
-    // 虹玉の在庫が無いときは2個消しルールだけの加護になる(文言も合わせる)
-    if (rescue.wild) {
-      PP.fx.floatText("🌈 海神の加護! 万能玉!", PP.W / 2, 96, "#8ef0d0", 24);
-    } else {
-      PP.fx.floatText("🌊 海神の加護!", PP.W / 2, 96, "#8ef0d0", 24);
-    }
+    PP.fx.floatText("🌊 海神の加護!", PP.W / 2, 96, "#8ef0d0", 24);
     PP.fx.floatText("⚔ 加護の間は2個で消える!", PP.W / 2, 128, "#8ef0d0", 17);
+    // 【新】虹玉は自動装填しない: 在庫があれば使用を「提案」するだけ
+    // (🌈 ボタンの点滅は tickRescue が維持する)。既に装填中なら何も言わない
+    if (!rescue.wild && (PP.game.wildCharges || 0) > 0) {
+      rescue.suggest = true;
+      PP.fx.floatText(PP.TOUCH ? "🌈 ボタンで虹玉が使える!" : "🌈 Qキーで虹玉が使える!",
+        PP.W / 2, 158, "#8ef0d0", 17);
+    }
     PP.audio.treasure();
   }
 
   function deactivateRescue() {
     rescue.active = false;
+    rescue.suggest = false;
     // 飛行中の弾・割り込みアニメ待ち(INSERT_TIME)の2個消しを守る猶予。
     // これが無いと「万能玉を当てたのに、着弾までの間に走った走査が解除して
     // 3個ルールに戻り、約束の2個消しが起きない」レースが生まれる
@@ -570,13 +592,40 @@
     PP.fx.floatText("加護が解けた", PP.W / 2, 96, "#b0d8cc", 16);
   }
 
-  function armWild() {
-    // 【新】虹玉はストック制: 在庫(PP.game.wildCharges)が無ければ装填しない。
-    // 加護の他の効果(2個消し・ドロップブースト)はそのまま続く
-    if ((PP.game.wildCharges || 0) <= 0) return;
+  // 【新】虹玉の手動トグル(input.js: PC は Qキー、タッチ端末は #tWild が呼ぶ)。
+  // 「装填はトグル・在庫の消費は発射の瞬間」: 装填したまま気が変わったら
+  // もう一度押せば無償で解除できる(切り札を構える行為自体は無料)。
+  function toggleWild() {
+    var g = PP.game;
+    if (g.state !== "playing") return;
+    if (rescue.wild) {
+      // 解除(在庫は発射時にしか減らないので返却処理は不要)
+      rescue.wild = false;
+      PP.cannon.refreshBalls();
+      PP.audio.beep(300, 0.06, "sine", 0.05);
+      return;
+    }
+    if ((g.wildCharges || 0) <= 0) {
+      // 在庫切れ: 空撃ち音と表示で「無い」ことだけ伝える
+      PP.audio.beep(160, 0.09, "square", 0.04);
+      PP.fx.floatText("🌈 在庫なし", PP.cannon.x, PP.cannon.y - 72, "#b0d8cc", 14);
+      return;
+    }
     rescue.wild = true;
-    rescue.rearmT = PP.RESCUE.rearm;
-    PP.cannon.refreshBalls();   // 装填玉の見た目を虹へ(cannon.js が wildArmed を見る)
+    rescue.suggest = false;   // 提案に応えた(枯渇が続けば tickRescue がまた点す)
+    PP.cannon.refreshBalls(); // 装填玉の見た目を虹へ(cannon.js が wildArmed を見る)
+    PP.audio.specialLoad();
+    PP.fx.floatText("🌈 虹玉 装填!", PP.cannon.x, PP.cannon.y - 72, "#8ef0d0", 16);
+  }
+
+  // HUD(キャンバス内 🌈 ボタン)と DOM(#tWild)が毎フレーム読む表示用の状態
+  function wildInfo() {
+    return {
+      charges: PP.game.wildCharges || 0,
+      max: PP.game.wildMax || 0,
+      armed: rescue.wild,
+      suggested: rescue.suggest
+    };
   }
 
   // cannon.js fire が呼ぶ: 発射する通常色弾を万能玉として撃ち出す
@@ -584,8 +633,7 @@
   function consumeWild() {
     if (!rescue.wild) return false;
     rescue.wild = false;
-    rescue.rearmT = PP.RESCUE.rearm;
-    // 【新】発射した瞬間に在庫を1消費(残数は HUD の 🌈xN が見せる)
+    // 【新】発射した瞬間に在庫を1消費(残数は HUD の 🌈 ボタンが見せる)
     PP.game.wildCharges = Math.max(0, (PP.game.wildCharges || 0) - 1);
     PP.hud.update();
     return true;
@@ -602,9 +650,9 @@
     autoDeliverT.automissile = has("automissile") ? val("automissile") : 0;
     rescue.active = false;
     rescue.wild = false;
+    rescue.suggest = false;
     rescue.recoverT = 0;
     rescue.scanT = 0;
-    rescue.rearmT = 0;
     rescue.grace = 0;
     rescue.pulseT = 0;
     rescue.droughted = false;
@@ -641,6 +689,8 @@
     rescueActive: rescueActive,
     wildArmed: wildArmed,
     consumeWild: consumeWild,
+    toggleWild: toggleWild,   // 【新】虹玉の手動装填トグル(Qキー / 🌈 ボタン)
+    wildInfo: wildInfo,       // 【新】🌈 ボタン表示用の状態(残数・装填・提案)
     // 強化圧(動的難易度)。chain.js が毎フレーム読むので事前計算値を返すだけ
     speedPressure: function () { return pressureSpeedMul; },
     skullPressure: function () { return pressureSkullMul; },

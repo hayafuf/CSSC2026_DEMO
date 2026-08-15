@@ -27,6 +27,9 @@
   var parryBeepCd = 0;    // 無敵中の「弾いた」音の間引き(火花は毎回、音は0.12秒に1回)
   var t = 0;              // 明滅・墨の揺らぎ用の通し時間
   var tmpPos = {};        // rail.posAtInto 用の使い回しオブジェクト
+  // 直近に予兆を開始した時刻(通し時間 t 基準)。予兆開始どうしの最小間隔
+  // (PP.SKULL.teleSpacing)を全骸骨で共有し、攻撃開始を階段状にばらす
+  var lastTeleAt = -Infinity;
 
   // レイヤーは main.js の init 後でないと存在しないので、初回に遅延生成
   function ensureCont() {
@@ -234,7 +237,10 @@
         var dAng = angR - gapCenter;
         dAng = Math.atan2(Math.sin(dAng), Math.cos(dAng));
         if (Math.abs(dAng) < halfGap) continue;
-        spawnBullet(x, y, angR, spdR, "freeze", { grav: 0 });
+        // 二段速度(緩急): t1 秒までじわっと広がり(読める)、そこから一気に
+        // 加速する(確認してから避け始めると追いつかれる)。数値と設計意図は
+        // config.js の ringCurve。機構は addle B と同じ spdCurve(updateBullets)
+        spawnBullet(x, y, angR, spdR, "freeze", { grav: 0, spdCurve: S.ringCurve });
       }
       PP.fx.ring(x, y, T.color, 8, 70, 380);
       PP.fx.ring(x, y, T.color, 4, 44, 300);
@@ -324,6 +330,12 @@
     // 発射禁止帯と同じ思想の全体版)。クールダウンも凍結するので、危機が
     // 明けた瞬間に溜まった骸骨が一斉発射することもない
     var crisisNow = PP.crisis && PP.crisis.level && PP.crisis.level() > 0.05;
+    // 同時攻撃の全体制限のため、予兆〜発射中の個体数を先に数える
+    // (骸骨は最大5体=毎フレームの走査コストは無視できる)
+    var attacking = 0;
+    PP.game.eachLaneBall(function (b) {
+      if (b.skull && (b.skullTele > 0 || b.skullVolley)) attacking++;
+    });
     PP.game.eachLaneBall(function (b, lane) {
       if (!b.skull) return;
       var fx = b.skullFx;   // ball.js makeSkullOverlay(chain.js が付ける)
@@ -334,6 +346,14 @@
           // 撃っている最中に隠れた/危機が来た: 弾幕は打ち切り(出た弾は残る)
           b.skullVolley = null;
           b.skullCd = nextCd();
+        }
+        // 沈黙中に CD を使い切っていたら、短めの個別 CD を引き直す。
+        // 負のまま放置すると「危機が明けた最初のフレームで、待っていた全個体が
+        // 同時に skullCd <= 0 を満たして一斉に予兆入りする」束が生まれる
+        // (冒頭コメントの『一斉発射しない』の抜け穴だった)
+        if (b.skullCd !== undefined && b.skullCd <= 0) {
+          b.skullCd = S.gateRecoverMin +
+            Math.random() * (S.gateRecoverMax - S.gateRecoverMin);
         }
         if (fx) fx.ring.alpha = 0.4;
         return;
@@ -371,6 +391,17 @@
       if (fx) fx.ring.alpha = 0.3 + 0.15 * Math.sin(t * 3);
       b.skullCd = (b.skullCd === undefined ? S.firstDelay : b.skullCd) - dt;
       if (b.skullCd <= 0) {
+        // 同時攻撃の全体ゲート: 予兆〜発射中が teleMaxActive 体いる、または
+        // 直前の予兆開始から teleSpacing 秒経っていないなら、少し待って
+        // 再挑戦する(=攻撃開始が階段状にばらけ、常に「どこかが撃ち、
+        // どこかが黙る」波になる。全員一斉は構造的に起きない)
+        if (attacking >= S.teleMaxActive || t - lastTeleAt < S.teleSpacing) {
+          b.skullCd = S.teleRetryMin +
+            Math.random() * (S.teleRetryMax - S.teleRetryMin);
+          return;
+        }
+        attacking++;
+        lastTeleAt = t;
         // どのデバフを撃つかは予兆の時点で決め、予兆リングをその色で出す
         // (=飛んでくる前から種類が読める)。警告音の高さも種類で変える
         b.skullType = pickType();
@@ -542,6 +573,7 @@
     inkBlobs.length = 0;
     playerHitCd = 0;
     parryBeepCd = 0;
+    lastTeleAt = -Infinity;   // 予兆間隔の共有記憶も仕切り直す
     PP.cannon.clearHurt();   // リトライ・レベル切替で点滅を残留させない
   }
 

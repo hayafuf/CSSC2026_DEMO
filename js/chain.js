@@ -147,7 +147,9 @@
           PP.skull.countActive() < PP.SKULL.maxActive) {
         var nb = balls[balls.length - 1];
         nb.skull = true;
-        nb.skullCd = PP.SKULL.firstDelay;
+        // 初弾の猶予にジッターを足す: 同じ波の骸骨は数百ms差で連なって湧くので、
+        // 固定値だと初弾が構造的に同期して「全員一斉発射」になる(skull.js 参照)
+        nb.skullCd = PP.SKULL.firstDelay + Math.random() * PP.SKULL.firstDelayJitter;
         nb.skullFx = PP.ball.makeSkullOverlay();
         view.addChild(nb.skullFx);
       }

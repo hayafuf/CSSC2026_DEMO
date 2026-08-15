@@ -757,6 +757,11 @@
       });
       PP.cannon.updateShots(dt);   // 命中時にその場でマッチ判定される
       PP.powerups.update(dt);
+      // bossFx(addle/freeze)の減算は ↑ の powerups.update に一本化されている。
+      // タイマー失効と同じフレーム内で照準の橋渡しエッジを張り直す(input.js)。
+      // これが無いと検知が次フレームにずれ、間に届いた mousemove が旧写像で
+      // 砲台を書いて一瞬跳ねることがある
+      PP.input.syncEdges();
       PP.upgrades.update(dt);      // 【強化】自動機銃・自動装填・手詰まり救済
       // 骸骨玉の弾幕(通常コースのみ。ボス戦は boss.js の弾幕があるので出さない)
       if (!g.bossMode && PP.skull) PP.skull.update(dt);

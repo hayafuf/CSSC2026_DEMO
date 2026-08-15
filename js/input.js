@@ -16,14 +16,17 @@
   var touchMoveDirection = 0;
   var touchMoveHeld = 0;
 
-  // 逆転(addle)の付与/解除の瞬間に照準が瞬間移動しないための橋渡し。
+  // 逆転(addle)の付与/解除・停止(freeze)明けの瞬間に照準が瞬間移動しない
+  // ための橋渡し(数値は config.js の PP.AIM)。
   // lastPointerX: 最後に見たマウスの生 stageX(タッチ操作では使わない)。
   // aimOffset: 切替の瞬間の「今の砲台X − 新写像での目標X」。指数減衰で0へ
-  // 吸収されるので、1:1 の即応は保ったまま砲台が滑らかに合流する。
+  // 吸収するが、1フレームの吸収量には PP.AIM.maxAbsorb の速度上限を掛ける:
+  // 逆転解除のオフセットは画面幅近くになり得るので、減衰だけだと出だしが
+  // 数千px/s の「ワープ」になり、避けている最中に敵弾へ突っ込んでしまう。
   var lastPointerX = null;
   var aimOffset = 0;
   var prevAddleOn = false;
-  var AIM_BLEND_TAU = 0.09;   // 減衰時定数(秒)。約0.3秒でほぼ吸収
+  var prevFrozen = false;
 
   var TOUCH_MOVE_START = 600;
   var TOUCH_MOVE_MAX = 1800;
@@ -40,15 +43,22 @@
     return PP.game.bossFx.addle > 0 ? PP.W - stageX : stageX;
   }
 
-  // 逆転(addle)の付与/解除エッジの検出と橋渡しオフセットの張り直し。
-  // 「新しい写像を最初に適用する前」に必ず呼ぶ必要があるため、毎フレームの
-  // update だけでなく mousemove / mousedown ハンドラの先頭からも呼ぶ
-  // (addle の失効は tick 内の powerups.update で起きるので、次の update より
-  //  先にマウスイベントが届くと、旧写像のまま計算した砲台が一瞬で跳ぶ)。
-  function syncAddleEdge() {
+  // 逆転(addle)の付与/解除・停止(freeze)明けエッジの検出と、橋渡しオフセットの
+  // 張り直し。「新しい写像を最初に適用する前」に必ず呼ぶ必要があるため、
+  // 毎フレームの update・mousemove / mousedown ハンドラの先頭に加えて、
+  // main.js の tick でも bossFx を減算する powerups.update の直後に呼ぶ
+  // (タイマー失効と同じフレーム内でエッジを張り、検知の1フレーム遅れを閉じる。
+  //  boss.js clearStatusFx の強制解除もこの経路で拾える)。
+  function syncEdges() {
     var addleOn = PP.game.bossFx.addle > 0;
-    if (addleOn === prevAddleOn) return;
+    var frozen = PP.game.bossFx.freeze > 0;
+    // freeze の「解除」もエッジ: 停止中は setX が無効(cannon.js)なので、
+    // その間にマウスだけ動くと、解除後の最初の setX で砲台がマウス実位置へ
+    // 一発ワープする。解除の瞬間にズレをオフセットへ退避して滑らかに合流させる
+    var edge = (addleOn !== prevAddleOn) || (prevFrozen && !frozen);
     prevAddleOn = addleOn;
+    prevFrozen = frozen;
+    if (!edge) return;
     if (lastPointerX !== null && !touchAiming) {
       var m = PP.CANNON_MARGIN;
       var want = Math.max(m, Math.min(PP.W - m, aimStageX(lastPointerX)));
@@ -134,6 +144,11 @@
         PP.cannon.swap();
         return;
       }
+      // 【新】🌈 虹玉ボタン(発射より先に判定し、同じクリックでの誤発射を防ぐ)
+      if (PP.hud.hitWildBtn(event.stageX, event.stageY)) {
+        PP.upgrades.toggleWild();
+        return;
+      }
       if (PP.cannon.hitStock(event.stageX, event.stageY)) {
         PP.cannon.toggleSpecial();
         return;
@@ -146,7 +161,7 @@
           event.stageY > PP.cannon.y - 90;
       } else {
         lastPointerX = event.stageX;
-        syncAddleEdge();
+        syncEdges();
         PP.cannon.setX(aimStageX(event.stageX) + aimOffset);
         PP.cannon.fire();
       }
@@ -241,6 +256,7 @@
     bindHold("tRight", 1);
     bindFire("tFire");
     bindTap("tSwap", function () { PP.cannon.swap(); });
+    bindTap("tWild", function () { PP.upgrades.toggleWild(); });   // 【新】🌈 虹玉
   }
 
   function bindKeyboard(startLevel) {
@@ -260,6 +276,9 @@
       if (event.code === "Space") {
         event.preventDefault();
         PP.cannon.swap();
+      } else if (event.code === PP.WILD.key) {
+        // 【新】虹玉の手動装填トグル(プレイ中のみ。詳細は upgrades.toggleWild)
+        if (canPlay()) PP.upgrades.toggleWild();
       } else if (event.code === "KeyM") {
         PP.fx.floatText(PP.audio.toggleMute() ? "🔇 消音" : "🔊 音あり",
           PP.W / 2, 88, "#f0e6c8", 22);
@@ -298,7 +317,7 @@
       if (PP.pauseCtl && PP.pauseCtl.active) return;
       if (isTouchEvent(event)) return;
       lastPointerX = event.stageX;
-      syncAddleEdge();
+      syncEdges();
       PP.cannon.setX(aimStageX(event.stageX) + aimOffset);
     });
 
@@ -316,11 +335,19 @@
   }
 
   function update(deltaSeconds) {
-    // 逆転(addle)の付与/解除エッジの検出(boss.js clearStatusFx の強制解除や
-    // 妖弾の付与など、マウスが静止したまま切り替わるケースをここで拾う)
-    syncAddleEdge();
-    if (aimOffset !== 0) {
-      aimOffset *= Math.exp(-deltaSeconds / AIM_BLEND_TAU);
+    // エッジ検出(マウスが静止したまま addle/freeze が切り替わるケースを拾う)
+    syncEdges();
+    if (PP.game.bossFx.freeze > 0) {
+      // 停止(freeze)中は cannon.setX が無効なので、オフセットの減衰も止める。
+      // ここで減衰だけ回すと「見た目は動かないままズレだけ静かに消え、解除の
+      // 瞬間にマウス実位置へ一発ワープ」する(解除エッジは syncEdges が拾う)
+    } else if (aimOffset !== 0) {
+      // 指数減衰のステップに速度上限を掛ける(定数と意図は config.js の PP.AIM)
+      var step = aimOffset * (1 - Math.exp(-deltaSeconds / PP.AIM.blendTau));
+      var cap = PP.AIM.maxAbsorb * deltaSeconds;
+      if (step > cap) step = cap;
+      else if (step < -cap) step = -cap;
+      aimOffset -= step;
       if (Math.abs(aimOffset) < 0.5) aimOffset = 0;
       // マウスが静止していても減衰の途中経過が見えるよう毎フレーム書く
       if (lastPointerX !== null && !touchAiming) {
@@ -336,6 +363,8 @@
     touchMoveHeld += deltaSeconds;
     var speed = TOUCH_MOVE_START + (TOUCH_MOVE_MAX - TOUCH_MOVE_START) *
       Math.min(1, touchMoveHeld / TOUCH_MOVE_RAMP);
+    // タッチ移動は絶対座標の写像を持たない相対移動なので、逆転(addle)は
+    // 方向の符号を返すだけでよい=解除時のワープは構造的に起きない
     var direction = PP.game.bossFx.addle > 0 ? -touchMoveDirection : touchMoveDirection;
     PP.cannon.setX(PP.cannon.x + direction * speed * deltaSeconds);
   }
@@ -345,7 +374,9 @@
   function resetAim() {
     aimOffset = 0;
     prevAddleOn = false;
+    prevFrozen = false;
   }
 
-  PP.input = { attach: attach, update: update, resetAim: resetAim };
+  PP.input = { attach: attach, update: update, resetAim: resetAim,
+    syncEdges: syncEdges };   // main.js が powerups.update(bossFx減算)の直後に呼ぶ
 })();
