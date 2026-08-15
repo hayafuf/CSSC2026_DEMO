@@ -279,103 +279,182 @@
   function killIntro() {
     if (!intro) return;
     for (var i = 0; i < intro.parts.length; i++) {
-      var c = intro.parts[i].comet;
-      if (c && c.parent) c.parent.removeChild(c);
+      var pt = intro.parts[i];
+      if (pt.comet && pt.comet.parent) pt.comet.parent.removeChild(pt.comet);
+      if (pt.trail) {
+        createjs.Tween.removeTweens(pt.trail);
+        if (pt.trail.parent) pt.trail.parent.removeChild(pt.trail);
+      }
     }
     intro = null;
+  }
+
+  // 彗星の尾のパラメータ。尾は「塗り残した線」ではなく、頭が通り過ぎたあと
+  // 時間差でスッと消えていく(彗星の頭 makeComet と同じ 白熱→金→橙 の配色)
+  var INTRO_TAIL_TIME = 0.55;   // 頭が通ってから尾のその地点が消えるまでの秒数
+  var INTRO_TAIL_STEP = 14;     // 尾の頂点間隔 px(小さいほど曲線が滑らか)
+
+  // 尾の描画用シェイプ(毎フレーム全消し→描き直し。加算合成で発光して見える)
+  function makeIntroTrail() {
+    var s = new createjs.Shape();
+    s.compositeOperation = "lighter";
+    PP.layers.fx.addChild(s);
+    return s;
+  }
+
+  // 頭(pt.d)から離れすぎた頂点を尾の末端から捨てる
+  function pruneIntroTail(pt) {
+    var tailLen = pt.speed * INTRO_TAIL_TIME;
+    while (pt.tailPts.length && pt.d - pt.tailPts[0].d > tailLen) pt.tailPts.shift();
+  }
+
+  // 尾を描く: 頭に近いほど太く白熱し、末端へ向かって金→橙に冷めながら細く消える
+  function drawIntroTail(pt) {
+    var tg = pt.trail.graphics;
+    tg.clear();
+    var pts = pt.tailPts;
+    if (pts.length < 2) return;
+    var tailLen = pt.speed * INTRO_TAIL_TIME;
+    for (var j = 1; j < pts.length; j++) {
+      var a = pts[j - 1], b = pts[j];
+      var k = 1 - (pt.d - b.d) / tailLen;   // 1=頭の直後、0=消える寸前
+      if (k <= 0) continue;
+      // 外層: 橙の淡いグロー
+      tg.setStrokeStyle(3 + 15 * k * k, "round", "round")
+        .beginStroke("rgba(255,150,40," + (0.25 * k * k).toFixed(3) + ")")
+        .moveTo(a.x, a.y).lineTo(b.x, b.y).endStroke();
+      // 芯: 白熱(頭)→ 金(末端)。makeComet の放射グラデと同じ温度感
+      tg.setStrokeStyle(1.5 + 4.5 * k, "round", "round")
+        .beginStroke("rgba(255," + Math.round(200 + 52 * k) + "," +
+                     Math.round(90 + 140 * k) + "," + (0.9 * k).toFixed(3) + ")")
+        .moveTo(a.x, a.y).lineTo(b.x, b.y).endStroke();
+    }
   }
 
   function startIntro() {
     var g = PP.game;
     var parts = [];
-    var maxT = 0;
-    g.eachLane(function (lane, i) {
-      var delay = i * PP.INTRO.stagger;
-      var pt = { lane: lane, d: 0, delay: delay, launched: false,
-                 nextSpark: 0, nextRing: 0, n: 0, done: false, comet: makeComet() };
+    g.eachLane(function (lane) {
       var p0 = lane.rail.posAt(0);
+      var pt = { lane: lane, d: 0, tailPts: [], lastTailD: 0,
+                 nextSpark: 0, nextRing: 0, n: 0,
+                 // 順番になぞるので、長いレーンは maxLaneTime 秒に収まるよう加速する
+                 speed: Math.max(PP.INTRO.speed, lane.rail.holeD / PP.INTRO.maxLaneTime),
+                 trail: makeIntroTrail(), comet: makeComet() };
       pt.comet.x = p0.x; pt.comet.y = p0.y;
-      pt.comet.visible = false;   // 発進(delay 明け)まで隠しておく
+      pt.comet.visible = false;   // 自分の番が来るまで隠しておく
       parts.push(pt);
-      maxT = Math.max(maxT, delay + lane.rail.holeD / PP.INTRO.speed);
     });
     if (!parts.length) { g.state = "playing"; return; }
-    intro = { t: 0, parts: parts };
-    // 開幕の号砲: 天から降りてくる下降ライザー(クリア走査の上昇形の鏡像)を
-    // 彗星の走行時間ぴったりに合わせて鳴らし、画面は teal の閃光と揺れで幕を開ける
-    PP.audio.introStart(maxT);
-    PP.fx.screenFlash("rgba(142,240,208,0.30)", 0.30, 500);
+    intro = { t: 0, idx: 0, parts: parts };
+    PP.fx.screenFlash("rgba(255,214,110,0.28)", 0.28, 500);
     PP.fx.shake(10, 0.35);
     PP.fx.floatText("⚓ 出 航 !", PP.W / 2, PP.H / 2 - 84, "#ffd24a", 40);
-    PP.fx.floatText("玉の通り道を見極めよ", PP.W / 2, PP.H / 2 - 44, "#8ef0d0", 22);
-    PP.fx.floatText(PP.TAP + "でスキップ", PP.W / 2, PP.H / 2 - 14, "#b0d8cc", 15);
+    PP.fx.floatText("玉の通り道を見極めよ", PP.W / 2, PP.H / 2 - 44, "#f5e8c8", 22);
+    PP.fx.floatText(PP.TAP + "でスキップ", PP.W / 2, PP.H / 2 - 14, "#b0a890", 15);
+    beginIntroLane(0);
+  }
+
+  // k 番目のレーンのなぞりを始める(複数レーンは同時ではなく1本ずつ順番)。
+  // 音のライザーはレーンごとに下降→上昇→下降…と交互(偶数=下降、奇数=上昇)
+  function beginIntroLane(k) {
+    var pt = intro.parts[k];
+    pt.comet.visible = true;
+    var c0 = pt.lane.rail.posAt(0);
+    PP.fx.flash(c0.x, c0.y, "#ffe9a0", 80);
+    PP.fx.ring(c0.x, c0.y, "#ffd24a", 12, 130, 420);
+    PP.fx.burst(c0.x, c0.y, "#ffd24a", 22, 2.0);
+    PP.fx.shake(8, 0.25);
+    PP.audio.introLaunch(k);
+    PP.audio.introRiser(pt.lane.rail.holeD / pt.speed, (k & 1) === 1);
   }
 
   function updateIntro(dt) {
     if (!intro) { PP.game.state = "playing"; return; }   // UI 無しの保険
     intro.t += dt;
-    var allDone = true;
-    for (var i = 0; i < intro.parts.length; i++) {
-      var pt = intro.parts[i];
-      if (pt.done) continue;
-      allDone = false;
-      if (pt.delay > 0) { pt.delay -= dt; continue; }   // レーンごとの発進ずらし
-      if (!pt.launched) {
-        // 発進の瞬間: 洞窟の口で弾けてから走り出す(後発レーンほど音が低い)
-        pt.launched = true;
-        pt.comet.visible = true;
-        var c0 = pt.lane.rail.posAt(0);
-        PP.fx.flash(c0.x, c0.y, "#8ef0d0", 70);
-        PP.fx.ring(c0.x, c0.y, "#8ef0d0", 10, 110, 400);
-        PP.fx.burst(c0.x, c0.y, "#8ef0d0", 18, 1.8);
-        PP.fx.shake(6, 0.2);
-        PP.audio.introLaunch(i);
-      }
-      pt.d += PP.INTRO.speed * dt;
-      var end = pt.lane.rail.holeD;
-      var hp = pt.lane.rail.posAt(Math.min(pt.d, end));
-      pt.comet.x = hp.x; pt.comet.y = hp.y;
-      pt.comet.scaleX = pt.comet.scaleY = 1.2 + 0.35 * Math.sin(intro.t * 22 + i * 2);
-      // 彗星の尾: 毎フレーム頭の位置に teal / 金の火の粉を交互に撒く
-      // (パーティクルはプール制なので飽和しても重くならない)
-      PP.fx.burst(hp.x, hp.y, (pt.n & 1) ? "#ffd24a" : "#8ef0d0", 2, 0.8);
-      // D×sparkEvery ごとの火花 + チクタク(処理落ちでも while で追いつく)
-      while (pt.nextSpark <= pt.d && pt.nextSpark < end) {
-        var sp = pt.lane.rail.posAt(pt.nextSpark);
-        PP.fx.burst(sp.x, sp.y, (pt.n & 1) ? "#fff3c0" : "#8ef0d0", 5, 1.2);
-        if (i === 0) PP.audio.introTick(pt.n);   // 音は先頭レーンだけ(飽和防止)
-        pt.n++;
-        pt.nextSpark += PP.D * PP.INTRO.sparkEvery;
-      }
-      // 8個ごとの節目は波紋リングを残して「道筋」を刻む
-      while (pt.nextRing <= pt.d && pt.nextRing < end) {
-        var rp = pt.lane.rail.posAt(pt.nextRing);
-        PP.fx.ring(rp.x, rp.y, (pt.nextRing / (PP.D * 8) & 1) ? "#ffd24a" : "#8ef0d0", 4, 64, 320);
-        pt.nextRing += PP.D * 8;
-      }
-      if (pt.d >= end) {
-        // 樽(ゴール)へ到達: 大花火で「ここに入れたら負け」を目立たせる
-        pt.done = true;
-        if (pt.comet.parent) pt.comet.parent.removeChild(pt.comet);
-        PP.fx.flash(hp.x, hp.y, "#fff6d0", 90);
-        PP.fx.ring(hp.x, hp.y, "#ffd24a", 10, 150, 500);
-        PP.fx.ring(hp.x, hp.y, "#fff3c0", 5, 90, 380);
-        PP.fx.burst(hp.x, hp.y, "#ffd24a", 26, 2.4);
-        PP.fx.burst(hp.x, hp.y, "#ff5d5d", 12, 1.6);
-        PP.fx.shake(18, 0.35);
-        PP.audio.sweepFinish();
-      }
+
+    // なぞり終えたレーンの尾: 仮想の頭(pt.d)を進め続けることで、
+    // 樽に吸い込まれるように末端からスッと消えていく
+    for (var i = 0; i < intro.idx && i < intro.parts.length; i++) {
+      var ft = intro.parts[i];
+      if (!ft.tailPts.length) continue;
+      ft.d += ft.speed * dt;
+      pruneIntroTail(ft);
+      drawIntroTail(ft);
     }
-    if (allDone) finishIntro();
+    if (intro.idx >= intro.parts.length) return;   // 全レーン到達後の保険
+
+    var pt = intro.parts[intro.idx];
+    var up = (intro.idx & 1) === 1;   // チクタクの音程もライザーと同じ向きに
+    pt.d += pt.speed * dt;
+    var end = pt.lane.rail.holeD;
+    var hp = pt.lane.rail.posAt(Math.min(pt.d, end));
+
+    // 尾の頂点をレール弧長 INTRO_TAIL_STEP ごとに拾う(曲線でも滑らかな尾になる)
+    var headD = Math.min(pt.d, end);
+    while (pt.lastTailD + INTRO_TAIL_STEP <= headD) {
+      pt.lastTailD += INTRO_TAIL_STEP;
+      var tp = pt.lane.rail.posAt(pt.lastTailD);
+      pt.tailPts.push({ x: tp.x, y: tp.y, d: pt.lastTailD });
+    }
+    pruneIntroTail(pt);
+    drawIntroTail(pt);
+
+    pt.comet.x = hp.x; pt.comet.y = hp.y;
+    pt.comet.scaleX = pt.comet.scaleY = 1.2 + 0.35 * Math.sin(intro.t * 22);
+    // 火の粉: 頭の位置から白金の粒がこぼれ落ちる
+    PP.fx.burst(hp.x, hp.y, (pt.n & 1) ? "#ffd24a" : "#fff3c0", 2, 0.8);
+    // D×sparkEvery ごとの火花 + チクタク(処理落ちでも while で追いつく)
+    while (pt.nextSpark <= pt.d && pt.nextSpark < end) {
+      var sp = pt.lane.rail.posAt(pt.nextSpark);
+      PP.fx.burst(sp.x, sp.y, (pt.n & 1) ? "#fff3c0" : "#ffd24a", 5, 1.2);
+      PP.audio.introTick(pt.n, up);
+      pt.n++;
+      pt.nextSpark += PP.D * PP.INTRO.sparkEvery;
+    }
+    // 8個ごとの節目は金の波紋リングを刻む
+    while (pt.nextRing <= pt.d && pt.nextRing < end) {
+      var rp = pt.lane.rail.posAt(pt.nextRing);
+      PP.fx.ring(rp.x, rp.y, "#ffd24a", 4, 64, 320);
+      pt.nextRing += PP.D * 8;
+    }
+
+    if (pt.d >= end) {
+      // 樽(ゴール)へ到達: 大花火で「ここに入れたら負け」を目立たせて次のレーンへ。
+      // 尾は上の「なぞり終えたレーン」ループが末端から消してくれる
+      if (pt.comet.parent) pt.comet.parent.removeChild(pt.comet);
+      PP.fx.flash(hp.x, hp.y, "#fff6d0", 90);
+      PP.fx.ring(hp.x, hp.y, "#ffd24a", 10, 150, 500);
+      PP.fx.ring(hp.x, hp.y, "#fff3c0", 5, 90, 380);
+      PP.fx.burst(hp.x, hp.y, "#ffd24a", 26, 2.4);
+      PP.fx.burst(hp.x, hp.y, "#ff5d5d", 12, 1.6);
+      PP.fx.shake(18, 0.35);
+      PP.audio.sweepFinish();
+      intro.idx++;
+      if (intro.idx < intro.parts.length) beginIntroLane(intro.idx);
+      else finishIntro();
+    }
   }
 
-  // イントロの締め(全彗星到達 or タップでスキップ)。ここで初めて時が動き出す
+  // イントロの締め(全レーン到達 or タップでスキップ)。ここで初めて時が動き出す。
+  // 軌跡はフェードで消し、彗星は即座に片付ける
   function finishIntro() {
-    killIntro();
     var g = PP.game;
-    if (g.state !== "intro") return;
+    if (g.state !== "intro") { killIntro(); return; }
+    if (intro) {
+      for (var i = 0; i < intro.parts.length; i++) {
+        var pt = intro.parts[i];
+        if (pt.comet.parent) pt.comet.parent.removeChild(pt.comet);
+        (function (tr) {
+          createjs.Tween.get(tr, { override: true })
+            .to({ alpha: 0 }, 800)
+            .call(function () { if (tr.parent) tr.parent.removeChild(tr); });
+        })(pt.trail);
+      }
+      intro = null;
+    }
     g.state = "playing";
-    PP.fx.screenFlash("rgba(142,240,208,0.30)", 0.30, 400);
+    PP.fx.screenFlash("rgba(255,214,110,0.28)", 0.28, 400);
     PP.fx.shake(12, 0.3);
     PP.fx.floatText("⚔ 戦闘開始!", PP.W / 2, PP.H / 2 - 60, "#ffd24a", 34);
     PP.audio.introGo();   // 着水のドン
@@ -640,14 +719,17 @@
   }
 
   // 演出が「暗黒」まで進んだら文字を出す(ここでクリック受付が復活する)。
-  // タップするとコンティニュー: この海域からスコア0・ライフ全回復・強化維持で再挑戦
+  // 進路はパネル下の2ボタンで選ぶ: ⚓再挑戦(コンティニュー: この海域から
+  // スコア0・ライフ全回復・強化維持)/ 🏠タイトルへ(ランを畳む)
   function finishGameOver() {
     var g = PP.game;
     g.state = "over";
     PP.hud.showOverlay("☠ ゲームオーバー",
-      "船は宝もろとも呑まれた…\n最終スコア " + g.score + " 点 (ステージ " + g.level + ")\n" +
-      "スコアとコインは海の底へ――だが宝玉の力は引き継がれる\n" +
-      PP.TAP + "でこの海域(ステージ " + g.level + ")から再挑戦",
+      "船は宝もろとも呑まれた…\n" +
+      "最終スコア " + g.score + " 点 (ステージ " + g.level + ")\n" +
+      "再挑戦はスコア0から――\n" +
+      "宝玉の力は引き継がれる\n" +
+      "下のボタンで進路を選べ",
       "doom");
   }
 
@@ -902,6 +984,36 @@
   // コース開始イントロのスキップ(input.js がタップで呼ぶ)
   PP.skipIntro = finishIntro;
 
+  // タイトル画面の表示(起動時の音源読み込み完了後と、ゲームオーバーからの帰還で共用)
+  function showTitle() {
+    PP.game.state = "title";
+    PP.hud.showOverlay("🏴‍☠️ Are you ready?",
+      PP.TOUCH
+        ? "タップで出航!\n◀ ▶ ボタンで大砲を移動(押し続けると加速)\nFIRE ボタンで発射(長押しで連射)、⇄ ボタンで玉を交換\n特殊弾は左下のスロットをタップで交換"
+        : "クリックで出航!\nマウスで大砲を移動、クリックで発射\n右クリック / Space で玉を交換、M で消音\n特殊弾は左下のスロットをクリックで交換");
+  }
+
+  // ゲームオーバー画面の「🏠 タイトルへ戻る」(input.js が呼ぶ)。
+  // ランを完全に畳む(スコア・コイン・強化・コンティニュー記録・試遊コース)
+  PP.returnToTitle = function () {
+    var g = PP.game;
+    PP.gameover.reset();     // 暗幕・渦・ドクロを片付ける
+    PP.crisis.reset();
+    g.customCourse = null;   // 試遊中の自作コースも畳んで通常進行へ
+    g.builtCourse = null;    // 次の出航で必ずレールを組み直す
+    g.level = DBG_LEVEL || 1;
+    g.score = 0;
+    g.coins = 0;
+    g.lives = PP.LIFE.startLives;
+    g.continues = 0;
+    g.continueStages = [];
+    g.failStreak = 0;
+    PP.upgrades.onRunReset();
+    PP.audio.gameStart();    // ゲームオーバー曲から通常曲へ戻す
+    PP.hud.update();
+    showTitle();
+  };
+
   // ---------- 初期化 ----------
   function init() {
     stage = PP.stage = new createjs.Stage("gameCanvas");
@@ -974,11 +1086,7 @@
           "音楽を読み込み中… " + loaded + " / " + total);
       },
       function () {
-        PP.game.state = "title";
-        PP.hud.showOverlay("🏴‍☠️ Are you ready?",
-          PP.TOUCH
-            ? "タップで出航!\n◀ ▶ ボタンで大砲を移動(押し続けると加速)\nFIRE ボタンで発射(長押しで連射)、⇄ ボタンで玉を交換\n特殊弾は左下のスロットをタップで交換"
-            : "クリックで出航!\nマウスで大砲を移動、クリックで発射\n右クリック / Space で玉を交換、M で消音\n特殊弾は左下のスロットをクリックで交換");
+        showTitle();
       }
     );
 

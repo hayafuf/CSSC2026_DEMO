@@ -107,7 +107,7 @@
       var w = p.w;
       if (p.id === "bomb") w *= bw * boost;        // 救済中は立て直しの道具を厚く
       else if (p.id === "missile") w *= mw;
-      else if (p.id === "stop") w *= boost;
+      else if (p.id === "reverse") w *= boost;     // 救済中は風系(引き潮)も厚く
       return { id: p.id, name: p.name, icon: p.icon, dur: p.dur, w: w };
     });
   }

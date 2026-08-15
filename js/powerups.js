@@ -42,10 +42,10 @@
     // crisis.level() は 0(平常)〜2(あふれ寸前)の滑らかな値
     var crisisLv = (PP.crisis && PP.crisis.level) ? PP.crisis.level() : 0;
     chance += PP.ITEMS.crisisDropBonus * (crisisLv / 2);
-    // ピティ(追い詰め救済): ライフ0や連続失敗が続くプレイヤーに道具を厚く配る。
-    // 倍率の外側で加算するので dropMult の上限(2.2)に食われない
+    // ピティ(追い詰め救済): GameOver後の再挑戦や連続失敗が続くプレイヤーに
+    // 道具を厚く配る。倍率の外側で加算するので dropMult の上限(2.2)に食われない
     var pity = 0;
-    if (PP.diff().useLives !== false && g.lives === 0) pity += PP.ITEMS.pityLivesBonus;
+    if (g.continues > 0) pity += PP.ITEMS.pityContinueBonus;
     if (g.failStreak >= PP.ITEMS.pityFailFrom) {
       pity += (g.failStreak - PP.ITEMS.pityFailFrom + 1) * PP.ITEMS.pityFailBonus;
     }

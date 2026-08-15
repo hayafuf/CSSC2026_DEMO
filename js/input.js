@@ -155,7 +155,10 @@
       PP.hud.hideOverlay();
       startLevel();
     } else if (game.state === "over") {
-      continueRun(startLevel);
+      // 進路はボタンで選ぶ(ボタン外のクリックは誤爆防止で何もしない)
+      var pick = PP.hud.hitOverChoice(event.stageX, event.stageY);
+      if (pick === "continue") continueRun(startLevel);
+      else if (pick === "title" && PP.returnToTitle) PP.returnToTitle();
     } else if (game.state === "gameclear") {
       resetRun(startLevel, restartLevel);
     }
@@ -240,7 +243,7 @@
     bindTap("tSwap", function () { PP.cannon.swap(); });
   }
 
-  function bindKeyboard() {
+  function bindKeyboard(startLevel) {
     window.addEventListener("keydown", function (event) {
       if (PP.editor && PP.editor.active) return;
       PP.audio.unlock();
@@ -249,6 +252,11 @@
         return;
       }
       if (PP.pauseCtl && PP.pauseCtl.active) return;
+      // ゲームオーバー画面の進路選択(ボタンと同じ2択のキー版)
+      if (PP.game.state === "over") {
+        if (event.code === "KeyR") { continueRun(startLevel); return; }
+        if (event.code === "KeyT") { if (PP.returnToTitle) PP.returnToTitle(); return; }
+      }
       if (event.code === "Space") {
         event.preventDefault();
         PP.cannon.swap();
@@ -304,7 +312,7 @@
     });
 
     bindTouchButtons();
-    bindKeyboard();
+    bindKeyboard(startLevel);
   }
 
   function update(deltaSeconds) {

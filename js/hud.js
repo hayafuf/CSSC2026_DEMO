@@ -21,6 +21,9 @@
   // ステージクリア画面では出さない = キャンペーンの途中では変えられない。
   var diffCont, diffShapes = [], diffRects = [];
   var DIFF_BTN = { w: 172, h: 56, gap: 16 };
+  // ゲームオーバー画面の進路ボタン(⚓再挑戦 / 🏠タイトルへ)。over 画面だけに出す
+  var overCont, overRects = [];
+  var OVER_BTN = { w: 250, h: 54, gap: 28 };
   // ポーズボタン(⏸)。プレイ中だけバーの下・右端に出す。クリック判定は
   // 難易度ボタンと同じ「矩形当たり判定」方式(発射クリックと混ざらないため)
   var pauseBtn = null;
@@ -354,6 +357,7 @@
     overlaySub.x = W / 2; overlaySub.y = panelBox().y + 108;
     O.addChild(overlaySub);
     buildDiffButtons(O);   // 難易度ボタン(【課題1】)はオーバーレイと一緒に表示される
+    buildOverButtons(O);   // ゲームオーバーの進路ボタン(over 画面だけ visible)
     O.visible = false;
     // 最下段(クリック促し等)をゆっくり明滅させる
     // (ignoreGlobalPause: ポーズ中も Ticker.paused に巻き込まれず明滅を続ける)
@@ -388,6 +392,56 @@
     });
     O.addChild(diffCont);
     redrawDiffButtons();
+  }
+
+  // ---------- ゲームオーバーの進路ボタン ----------
+  // パネルの下に2つ並べる(難易度ボタンと同じ「矩形当たり判定」方式)。
+  // 「再挑戦」= コンティニュー(この海域から、スコア0・強化維持)、
+  // 「タイトルへ」= ランを畳んで最初の画面に帰る。クリック判定は input.js。
+  function buildOverButtons(O) {
+    overCont = new createjs.Container();
+    var defs = [
+      { id: "continue", label: "⚓ この海域から再挑戦", hot: true },
+      { id: "title",    label: "🏠 タイトルへ戻る",     hot: false }
+    ];
+    var total = defs.length * OVER_BTN.w + (defs.length - 1) * OVER_BTN.gap;
+    var x0 = (W - total) / 2;
+    var y = panelBox().y + PANEL.h + 34;
+    if (!PP.TOUCH) {
+      var cap = new createjs.Text("R / T キーでも選べる", '13px "Meiryo", sans-serif', C_LBL);
+      cap.textAlign = "center"; cap.x = W / 2; cap.y = y - 22;
+      overCont.addChild(cap);
+    }
+    defs.forEach(function (d, i) {
+      var bx = x0 + i * (OVER_BTN.w + OVER_BTN.gap);
+      var s = new createjs.Shape();
+      s.graphics
+        .beginLinearGradientFill(
+          d.hot ? ["#3a2c12", "#241806"] : ["rgba(20,28,40,0.85)", "rgba(8,12,20,0.85)"],
+          [0, 1], bx, y, bx, y + OVER_BTN.h)
+        .drawRoundRect(bx, y, OVER_BTN.w, OVER_BTN.h, 12)
+        .setStrokeStyle(d.hot ? 2.5 : 1.2)
+        .beginStroke(d.hot ? "#f0c040" : "rgba(202,169,106,0.5)")
+        .drawRoundRect(bx, y, OVER_BTN.w, OVER_BTN.h, 12);
+      overCont.addChild(s);
+      var t = new createjs.Text(d.label, 'bold 17px "Meiryo", sans-serif', d.hot ? "#ffdf8a" : C_VAL);
+      t.textAlign = "center";
+      t.x = bx + OVER_BTN.w / 2; t.y = y + OVER_BTN.h / 2 - 9;
+      overCont.addChild(t);
+      overRects.push({ id: d.id, x: bx, y: y, w: OVER_BTN.w, h: OVER_BTN.h });
+    });
+    O.addChild(overCont);
+    overCont.visible = false;
+  }
+
+  // (x, y) が進路ボタンの上なら "continue" / "title"(外れ・非表示中は null)
+  function hitOverChoice(x, y) {
+    if (!PP.layers.overlay.visible || !overCont || !overCont.visible) return null;
+    for (var i = 0; i < overRects.length; i++) {
+      var r = overRects[i];
+      if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) return r.id;
+    }
+    return null;
   }
 
   // 難易度を選び直せる画面か(= ここから新しいランが始まる画面か)。
@@ -434,6 +488,8 @@
     var b = panelBox();
     // 難易度ボタンは新しいランが始まる画面だけ(呼び出し側で state を先に確定させている)
     if (diffCont) diffCont.visible = canPickDifficulty();
+    // 進路ボタン(再挑戦 / タイトルへ)はゲームオーバー画面だけ
+    if (overCont) overCont.visible = PP.game.state === "over";
 
     overlayBg.graphics.clear();
     overlayBg.graphics.beginFill(s.bg).drawRect(0, 0, W, PP.H);
@@ -523,6 +579,7 @@
     buildOverlay: buildOverlay, showOverlay: showOverlay, hideOverlay: hideOverlay,
     showPause: showPause, hidePause: hidePause, hitPauseBtn: hitPauseBtn,
     hitSwapBtn: hitSwapBtn,
-    hitDifficulty: hitDifficulty, setDifficulty: setDifficulty
+    hitDifficulty: hitDifficulty, setDifficulty: setDifficulty,
+    hitOverChoice: hitOverChoice
   };
 })();

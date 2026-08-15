@@ -640,25 +640,32 @@
       });
     },
     // ---- コース開始イントロの音 ----
-    // クリア走査(最後)は上昇ライザーなので、イントロ(最初)はその鏡像:
-    // 天から降りてくる下降ライザー。dur は彗星の走行時間(main.js が算出)
-    introStart: function (dur) {
-      dur = Math.max(0.8, dur || 2.5);
-      gliss(1600, 140, dur, "sawtooth", 0.06);         // 上から滑り落ちる主層
-      gliss(800, 70, dur, "sine", 0.09);               // 下支えの胴
-      gliss(2400, 500, dur * 0.55, "triangle", 0.045); // 先行して落ちる煌めき
-      beep(55, 0.7, "sine", 0.22);                     // 出航の腹に響く号砲
+    // クリア走査(最後)は上昇ライザーなので、イントロ(最初)は下降が基本形。
+    // 複数レーンでは「下降→上昇→下降…」とレーンごとに交互(up は main.js が渡す)。
+    // 主層+5度ハモリ+胴+先行する煌めき+腹に響く号砲の5層で鳴らす
+    introRiser: function (dur, up) {
+      dur = Math.max(0.6, dur || 2.5);
+      var m1 = up ? 140 : 1600, m2 = up ? 1600 : 140;   // 主層
+      var b1 = up ? 70 : 800,   b2 = up ? 800 : 70;     // 下支えの胴
+      var s1 = up ? 500 : 2400, s2 = up ? 2400 : 500;   // 先行する煌めき
+      gliss(m1, m2, dur, "sawtooth", 0.09);
+      gliss(m1 * 1.5, m2 * 1.5, dur, "sawtooth", 0.045); // 5度上のハモリ(厚み)
+      gliss(b1, b2, dur, "sine", 0.12);
+      gliss(s1, s2, dur * 0.55, "triangle", 0.06);
+      beep(55, 0.6, "sine", 0.24);                       // レーン発進の号砲
     },
-    // レーン発進のきらめき(i = レーン番号。後発ほど少し低く落ちていく)
+    // レーン発進のきらめき(i = レーン番号。後発ほど少し低く)
     introLaunch: function (i) {
-      beep(Math.max(300, 900 - i * 140), 0.14, "triangle", 0.09);
-      beep(Math.max(150, 450 - i * 70), 0.22, "sine", 0.07);
+      beep(Math.max(300, 900 - i * 140), 0.14, "triangle", 0.1);
+      beep(Math.max(150, 450 - i * 70), 0.22, "sine", 0.08);
     },
-    // 彗星のチクタク(n = 通過数)。sweepTick の鏡像で、駆け上がらず駆け下りる
-    introTick: function (n) {
-      var f = Math.max(220, 1150 - n * 16);
-      beep(f, 0.06, "square", 0.05);
-      beep(f * 0.5, 0.1, "sawtooth", 0.04);
+    // 彗星のチクタク(n = 通過数)。ライザーと同じ向きに駆け下り/駆け上がる。
+    // 8個ごとの節目(視覚のリングと同じ拍)には上の煌めきを重ねる
+    introTick: function (n, up) {
+      var f = up ? Math.min(1300, 260 + n * 18) : Math.max(220, 1150 - n * 18);
+      beep(f, 0.07, "square", 0.07);
+      beep(f * 0.5, 0.11, "sawtooth", 0.055);
+      if ((n & 7) === 0) beep(f * 2, 0.14, "triangle", 0.05);
     },
     // 全レーン到達=戦闘開始の着水ドン(newWave と同時に鳴らす)
     introGo: function () {

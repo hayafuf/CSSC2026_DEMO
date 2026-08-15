@@ -216,6 +216,11 @@
     var entry = sp.entry * df.entryMult;
     var hole = sp.hole * df.holeMult;
     var curve = sp.curve * df.curveMult;
+    // 海神の加護: 危機中はカーブを少し立てて(easy の curveMult と同じ向き)、
+    // 樽際の減速が早めに効くようにする=立て直しの時間をわずかに足す
+    if (PP.upgrades && PP.upgrades.rescueActive && PP.upgrades.rescueActive()) {
+      curve *= PP.RESCUE.curveMult;
+    }
     var t = Math.max(0, Math.min(1, d / lane.rail.holeD));
     var v = hole + (entry - hole) * Math.pow(1 - t, curve);
     v *= 1 + (g.level - 1) * sp.levelStep;     // レベルで底上げ
