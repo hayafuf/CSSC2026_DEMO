@@ -744,6 +744,10 @@
     var dt = Math.min(e.delta / 1000, 0.05);
     var g = PP.game;
 
+    // マウス格納(Pointer Lock)の見張り。カード選択・クリア・ゲームオーバー等
+    // 「カーソルで押す画面」へ移った瞬間に返上する(input.js watchLock)
+    PP.input.watchLock();
+
     if (g.state === "playing") {
       PP.input.update(dt);
       if (g.comboTimer > 0) {
@@ -863,6 +867,7 @@
     PP.fx.updateParticles(dt);   // プール式パーティクルの前進(fx.js)
     PP.cannon.updateHurt(dt);    // 被弾後の無敵の点滅(非プレイ時は自動で解除される)
     PP.cannon.updateAim();
+    PP.cannon.updateGuide(dt);   // 砲の真上の現在位置ガイド(格納中のカーソル代役)
 
     renderChains();
 

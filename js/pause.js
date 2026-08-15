@@ -31,6 +31,9 @@
       if (PP.editor && PP.editor.active) return;
       ctl.active = true;
       ctl.reason = reason || "manual";
+      // 逆操作中のマウス格納(Pointer Lock)は返上する。ポーズ画面は
+      // 「クリックで再開」なので、カーソルが見えないと操作できない
+      if (PP.input && PP.input.releaseLock) PP.input.releaseLock();
       PP.fx.resetShake();               // 揺れの途中で止まると画面がズレたままになる
       PP.hud.showPause(ctl.reason);
       PP.audio.pauseAll();

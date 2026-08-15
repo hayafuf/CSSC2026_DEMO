@@ -22,6 +22,16 @@
 
   var MUZZLE_LEN = 52; // 砲口までの高さ
 
+  // ---------- 現在位置ガイド(大砲の少し上に浮かぶ真鍮の羅針飾り) ----------
+  // マウスは Pointer Lock でゲーム内へ格納され、OSカーソルは見えない(input.js)。
+  // その代わりに「砲はいまここ」を指す小さな目印を砲口の上へ浮かべる。
+  // 意匠は吊り輪付きの羅針の針先(下向きの菱形)。世界の真鍮言語(BRZ)で描き、
+  // 逆操作(addle)中は妖弾と同じ桃色に染めてゆらゆら揺らし、「素直に動かない」
+  // ことを色と動きでも伝える。
+  var guide = null, guideCore = null;
+  var guideT = 0, guideShown = false, guideAddle = false;
+  var GUIDE_Y = -122;   // 砲口(-53)より上、照準の点線に重ねて「いまここ」を示す高さ
+
   // 特殊弾ストックスロットのクリック判定の半幅。位置は次弾ラックの鏡像
   // (大砲の左脇)で、RACK_X の定義後に STOCK_X / STOCK_Y として決める。
   // swap(Space/右クリック)が装填⇔待機の双方向トグルなので、スロットを
@@ -353,6 +363,8 @@
     rack.cache(RACK_X - 30, RACK_Y - 26, 60, 56);
     root.addChild(rack);
 
+    buildGuide();   // 現在位置ガイド(root の子なので横移動に自動で追従する)
+
     // 次弾ラベル(銘板に彫り込んだ体裁。フォントは fx.floatText と揃える)
     var nextLabel = new createjs.Text(PP.i18n.t("cannon.next"),
       '700 11px "Cinzel","Hiragino Kaku Gothic ProN","Meiryo",serif', BRZ.LIT);
@@ -400,6 +412,62 @@
       caption.text = PP.i18n.t(PP.TOUCH ? "cannon.swapTouch" : "cannon.swapKey");
       refreshStock();
     });
+  }
+
+  function buildGuide() {
+    guide = new createjs.Container();
+    guide.y = GUIDE_Y;
+    guide.visible = false;
+    guideCore = new createjs.Shape();
+    drawGuideCore(false);
+    guide.addChild(guideCore);
+    root.addChild(guide);
+  }
+
+  // ガイドの作画(通常=真鍮の金 / 逆操作中=妖弾と同じ桃)。
+  // 色が切り替わる瞬間だけ描き直す(毎フレームのベクタ再描画はしない)
+  function drawGuideCore(addle) {
+    var body = addle ? "#ff5d8f" : BRZ.BODY;
+    var lit  = addle ? "#ffc2d6" : BRZ.LIT;
+    var dark = addle ? "#6e1b34" : BRZ.DARK;
+    var g = guideCore.graphics;
+    g.clear();
+    // 柔らかい後光(小さく・薄く。照準の点線より少し目立つ程度)
+    g.beginRadialGradientFill(
+      [addle ? "rgba(255,93,143,0.28)" : "rgba(240,192,64,0.26)", "rgba(0,0,0,0)"],
+      [0, 1], 0, 0, 2, 0, 0, 24).drawCircle(0, 0, 24);
+    // 吊り輪(ランタンを吊るす環と同じ言葉遣い)
+    g.setStrokeStyle(2).beginStroke(lit).drawCircle(0, -13, 4.5);
+    // 針先: 下向きの菱形。上から照りが差す(玉・砲身と同じ光の向き)
+    g.beginLinearGradientFill([lit, body, dark], [0, 0.45, 1], 0, -8, 0, 16)
+      .moveTo(0, 16).lineTo(8.5, -1).lineTo(0, -8).lineTo(-8.5, -1).closePath();
+    g.setStrokeStyle(1.2).beginStroke(dark)
+      .moveTo(0, 16).lineTo(8.5, -1).lineTo(0, -8).lineTo(-8.5, -1).closePath();
+    // 中央の稜線(磨いた金属のスペキュラ)
+    g.setStrokeStyle(1).beginStroke(addle ? "#ffe6ef" : BRZ.SPEC)
+      .moveTo(0, -6).lineTo(0, 13);
+  }
+
+  // 毎フレーム更新(main.js の tick が updateAim と並べて呼ぶ)。
+  // タッチ端末では出さない: カーソルの代役という役目がそもそも無く、
+  // 画面も小さいので盤面の邪魔になるだけ
+  function updateGuide(dt) {
+    if (!guide) return;
+    var st = PP.game.state;
+    var show = !PP.TOUCH && (st === "playing" || st === "intro");
+    if (show !== guideShown) { guideShown = show; guide.visible = show; }
+    if (!show) return;
+    guideT += dt;
+    // 停泊中の錨のように静かに上下する(主張しすぎない振幅)
+    guide.y = GUIDE_Y + Math.sin(guideT * 2.4) * 3;
+    var addle = PP.game.bossFx.addle > 0;
+    if (addle !== guideAddle) {
+      guideAddle = addle;
+      drawGuideCore(addle);
+      guide.rotation = 0;
+    }
+    // 逆操作中は振り子のように揺れ、「羅針が狂っている」ことを見せる
+    if (addle) guide.rotation = Math.sin(guideT * 6) * 14;
   }
 
   // ストックスロットの表示を現在の状態に合わせて組み直す
@@ -908,6 +976,7 @@
     refreshBalls: refreshBalls,
     syncColors: syncColors,
     updateAim: updateAim,
+    updateGuide: updateGuide,   // 現在位置ガイド(main.js の tick が毎フレーム呼ぶ)
     updateShots: updateShots,
     setHurt: setHurt,        // 被弾側(boss.js / skull.js)が無敵秒数を渡す
     clearHurt: clearHurt,    // ステージリセット時の点滅解除
