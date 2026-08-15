@@ -69,6 +69,25 @@
     return Math.max(1, PP.BARREL_CAPACITY + PP.diff().barrelBonus + up);
   };
 
+  // ---------- Web フォントで焼いた Text の登録簿 ----------
+  // 描画を軽くするため装飾フォントの Text は cache() でビットマップに焼く。
+  // ただし Web フォントが届く前に焼くと代替フォントの字形が固まってしまうので、
+  // 焼いた Text をここに登録しておき、フォント到着時(index.html の
+  // document.fonts.ready)に一度だけ焼き直す。到着後に焼いたものは登録不要。
+  var fontCaches = [];
+  var fontsArrived = false;
+  PP.regFontCache = function (obj) {
+    if (!fontsArrived) fontCaches.push(obj);
+  };
+  PP.refreshFontCaches = function () {
+    fontsArrived = true;
+    for (var i = 0; i < fontCaches.length; i++) {
+      // コース差し替えで既に捨てられた Text は触らない(parent が外れている)
+      if (fontCaches[i].cacheCanvas && fontCaches[i].parent) fontCaches[i].updateCache();
+    }
+    fontCaches = [];
+  };
+
   // ---------- 【課題5】コインとライフ ----------
   // 通常ドロップの宝はコイン(🪙)として落ちる。大砲でキャッチして集めると
   // ライフが増え、樽が溢れてもゲームオーバーの代わりに「そのステージの最初から」
@@ -311,7 +330,37 @@
     growlAt: 0.45,    // この深さを超えたら心拍のたびに地鳴りが唸る
     dripAt: 0.22,     // この深さを超えたら画面が血を流し始める(浅めの危機から滲む)
     glitchAt: 0.5,    // この深さを超えたら心拍のたびに赤い走査ノイズが走る
-    omenAt: 0.55      // この深さを超えたら「☠ GAME OVER ☠」の凶兆がちらつき始める
+    omenAt: 0.55,     // この深さを超えたら「☠ GAME OVER ☠」の凶兆がちらつき始める
+    bgmRelease: 2.0   // 危険BGMを平常曲へ戻すまでの猶予(秒)。チェーンが危機の境界で
+                      // 前後に揺れるたびに BGM が頭出しを繰り返すと安っぽく煩いので、
+                      // 「入りは即・抜けはためらう」ヒステリシスにする(crisis.js)
+  };
+
+  // ---------- パフォーマンス(描画キャッシュと低負荷モード) ----------
+  // EaselJS の stage.update() は毎フレーム全表示物を描き直す。cache() していない
+  // Shape や Text は「値を変えていなくても」毎フレーム、パスとグラデーションを
+  // Canvas に流し直すので、携帯ではこれが最大の負荷になる(crisis.js / fx.js 参照)。
+  // ここはその cache の解像度と、弱い端末向けの「低負荷モード」の調整卓。
+  PP.PERF = {
+    VEIL_CACHE_SCALE: 0.5, // 全画面級グラデ(危機の帳など)を焼く解像度。ぼんやりした
+                           // グラデは半分の解像度で焼いて2倍に伸ばしても見分けが
+                           // つかず、メモリと焼き時間が 1/4 で済む
+    CREEP_STEP: 2,         // 這い寄る赤(crisis)の描き直しを count 何刻みでまとめるか。
+                           // 1 だと玉の微動のたびに大きなビットマップを焼き直してしまう
+    AUTO: true,            // 低FPSを検知したら自動で低負荷モードへ落とすか
+    FPS_WINDOW: 1.5,       // FPS の指数移動平均の時定数(秒)。瞬間値で判断しない
+    LOW_ENTER: 42,         // このFPSを下回り続けたら低負荷モードへ
+    LOW_EXIT: 54,          // このFPSを上回り続けたら通常へ復帰。入りと出しきい値を
+                           // 分けるのは境界での往復振動を防ぐため(bgmRelease と同じ思想)
+    HOLD: 3.0,             // 判定に必要な継続秒数。GC や読み込みの瞬間スパイクで
+                           // モードがパタパタ切り替わるのを防ぐ
+    LOW: {                 // 低負荷モードで削るもの。削る順は「気づかれにくいもの
+                           // (背景の塵)→ 気づかれるもの(破片の数)」
+      shardMul: 0.5,       //   玉消去の破片・きらめきの個数倍率
+      motes: false,        //   背景の光の塵を止める
+      glitch: false,       //   危機の走査ノイズを出さない
+      dripMul: 0.5         //   血の滴りを半減
+    }
   };
 
   // ---------- ゲームオーバーの演出 ----------

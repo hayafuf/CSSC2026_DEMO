@@ -230,7 +230,7 @@
     // 樽の脇のドクロが血の色に膨れ上がる
     forEachSkull(function (sk) {
       createjs.Tween.removeTweens(sk);
-      sk.color = "#ff1414";
+      PP.setSkullColor(sk, "#ff1414");   // cache 済みなので専用ヘルパーで焼き直す
       createjs.Tween.get(sk).to({ scaleX: 2.4, scaleY: 2.4 }, 300, createjs.Ease.backOut);
     });
   }
@@ -390,7 +390,7 @@
       createjs.Tween.removeTweens(sk);
       sk.alpha = 1;
       sk.scaleX = sk.scaleY = 1;
-      sk.color = "#f0e6c8";
+      PP.setSkullColor(sk, "#f0e6c8");
     });
     PP.fx.resetShake();
   }

@@ -14,7 +14,9 @@
   // 都度 Shape+Graphics+Tween を作ると GC と removeChild(indexOf走査)が支配的に
   // なるため、色ごとに一度だけ焼いた円 canvas を Bitmap で使い回し、自前積分で
   // 動かす。定常状態では割り当てゼロ。
-  var MAX_P = 300;             // 同時生存の上限。飽和時は超過スポーンを捨てる
+  var MAX_P = 360;             // 同時生存の上限。飽和時は超過スポーンを捨てる
+                               // (リング/フラッシュ/シャードもプールに同居する
+                               //  ようになったぶん、旧 300 から少し広げてある)
   var DOT_R = 4.5;             // 焼き込み円の半径(呼び出し側の最大値)
   var dotCanvas = {};          // CSS色文字列 → 焼き込み済み canvas
   var dotCanvasN = 0;          // 色マップの肥大ガード用
@@ -42,29 +44,44 @@
   }
 
   // 汎用スポーン: (x0,y0)→(tx,ty) へ quadOut で移動、scale も s0→s1 へ補間、
-  // alpha は 1→0。img は焼き込み canvas、comp は合成モード(null で通常)。
-  function spawnDot(img, comp, x0, y0, tx, ty, s0x, s0y, s1x, s1y, durMs) {
+  // alpha は a0→0。img は焼き込み canvas、comp は合成モード(null で通常)。
+  // opts は省略可能な拡張(particles の載せ替えで必要になった分だけ):
+  //   delay(ms)   出番までの待ち。待機中は visible=false で寝かせる
+  //   rot0/rotSpin 開始角(度)と回転量(度)。回転も同じイージングで進む
+  //   easeIn      true で quadIn(加速)。血の滴りなど「落ちる」動きに使う
+  //   a0          開始 alpha(省略時 1)
+  function spawnDot(img, comp, x0, y0, tx, ty, s0x, s0y, s1x, s1y, durMs, opts) {
     if (pActive.length >= MAX_P) return;
     var b = pFree.pop();
     if (!b) {
       b = new createjs.Bitmap(null);
       ensureCont().addChild(b);
     }
+    var delay = (opts && opts.delay) ? opts.delay / 1000 : 0;
+    var a0 = (opts && opts.a0 !== undefined) ? opts.a0 : 1;
     b.image = img;
     b.regX = img._rx; b.regY = img._ry;
     b.compositeOperation = comp;
-    b.visible = true; b.alpha = 1;
+    b.visible = delay <= 0; b.alpha = a0;
     b.x = x0; b.y = y0; b.scaleX = s0x; b.scaleY = s0y;
-    pActive.push({ bmp: b, age: 0, dur: durMs / 1000,
+    b.rotation = (opts && opts.rot0) || 0;
+    // レコードの形はいつも同じにする(JS エンジンが同じ「形」のオブジェクトを
+    // 高速に扱えるため、使わない拡張フィールドも 0/false で必ず埋める)
+    pActive.push({ bmp: b, age: 0, dur: durMs / 1000, delay: delay,
                    x0: x0, y0: y0, tx: tx, ty: ty,
-                   s0x: s0x, s0y: s0y, s1x: s1x, s1y: s1y });
+                   s0x: s0x, s0y: s0y, s1x: s1x, s1y: s1y,
+                   rot0: (opts && opts.rot0) || 0,
+                   rotSpin: (opts && opts.rotSpin) || 0,
+                   easeIn: !!(opts && opts.easeIn), a0: a0 });
   }
 
   function updateParticles(dt) {
     for (var i = pActive.length - 1; i >= 0; i--) {
       var p = pActive[i];
       p.age += dt;
-      var k = p.age / p.dur;
+      var t = p.age - p.delay;
+      if (t < 0) continue;               // まだ出番前(visible=false のまま待機)
+      var k = t / p.dur;
       if (k >= 1) {
         p.bmp.visible = false;
         pFree.push(p.bmp);
@@ -72,13 +89,16 @@
         pActive.pop();
         continue;
       }
-      var e = 1 - (1 - k) * (1 - k);   // quadOut(従来 Tween と同じイージング)
       var b = p.bmp;
+      if (!b.visible) b.visible = true;  // 遅延明けの初回にここで目を覚ます
+      var e = p.easeIn ? k * k                       // quadIn(加速して落ちる)
+                       : 1 - (1 - k) * (1 - k);      // quadOut(従来 Tween と同じ)
       b.x = p.x0 + (p.tx - p.x0) * e;
       b.y = p.y0 + (p.ty - p.y0) * e;
       b.scaleX = p.s0x + (p.s1x - p.s0x) * e;
       b.scaleY = p.s0y + (p.s1y - p.s0y) * e;
-      b.alpha = 1 - e;
+      b.rotation = p.rot0 + p.rotSpin * e;
+      b.alpha = p.a0 * (1 - e);
     }
   }
 
@@ -96,84 +116,121 @@
     return img;
   }
 
-  // リング衝撃波(加算合成で光る輪が広がって消える)
-  function ring(x, y, color, r0, r1, dur) {
-    var fx = PP.layers.fx;
+  // ---------- リング/フラッシュ/シャードの焼き込み ----------
+  // どれも「終端(いちばん大きく表示される瞬間)のサイズ」で焼き、開始は縮小
+  // 表示にする。拡大終端で等倍=一番見られる瞬間が一番きれい、という向き。
+  // 以前のベクタ版も transform の拡大でストロークごと太っていたので、
+  // ビットマップの拡大と見た目は一致する。
+  // 焼く解像度は「よく使う最大サイズ」に合わせる: リングは r1=34〜120 が大半
+  // (ボスの大技の 180 だけは 3 倍拡大になるが、加算合成で消えていく光なので
+  //  にじみはむしろ発光に見える)。フラッシュは元々なめらかなグラデなので
+  //  多少の拡大では絵が変わらない
+  var RING_BAKE = 6;     // 元実装: 半径10・線幅2.4 の円を transform で拡大していた
+  var RING_R = 10 * RING_BAKE;
+  var FLASH_R = 72;      // flash の最大表示半径(rad110 × 1.6)の約 1/2.4 で焼く
+  var ringCanvas = {}, flashCanvas = {}, shardCanvas = {}, extraCanvasN = 0;
+
+  function bakeInto(map, color, draw) {
+    var img = map[color];
+    if (img === undefined) {
+      // dotFor と同じ肥大ガード(動的な色文字列が流れ込んでも無限に育たない)
+      if (extraCanvasN >= 64) color = "#ffffff";
+      if (map[color] === undefined) { map[color] = draw(color); extraCanvasN++; }
+      img = map[color];
+    }
+    return img;
+  }
+
+  function bakeRing(color) {
     var s = new createjs.Shape();
-    s.x = x; s.y = y;
-    s.compositeOperation = "lighter";
-    s.graphics.setStrokeStyle(2.4).beginStroke(color).drawCircle(0, 0, 10);
-    s.scaleX = s.scaleY = (r0 || 4) / 10;
-    fx.addChild(s);
-    createjs.Tween.get(s)
-      .to({ scaleX: (r1 || 34) / 10, scaleY: (r1 || 34) / 10, alpha: 0 }, dur || 360, createjs.Ease.quadOut)
-      .call(function () { fx.removeChild(s); });
+    s.graphics.setStrokeStyle(2.4 * RING_BAKE).beginStroke(color).drawCircle(0, 0, RING_R);
+    var half = Math.ceil(RING_R + 1.2 * RING_BAKE + 2);
+    s.cache(-half, -half, half * 2, half * 2);
+    s.cacheCanvas._rx = half; s.cacheCanvas._ry = half;
+    return s.cacheCanvas;
+  }
+
+  function bakeFlash(color) {
+    var s = new createjs.Shape();
+    s.graphics.beginRadialGradientFill([color, "rgba(255,255,255,0)"], [0, 1],
+      0, 0, 2, 0, 0, FLASH_R).drawCircle(0, 0, FLASH_R);
+    s.cache(-FLASH_R - 1, -FLASH_R - 1, FLASH_R * 2 + 2, FLASH_R * 2 + 2);
+    s.cacheCanvas._rx = FLASH_R + 1; s.cacheCanvas._ry = FLASH_R + 1;
+    return s.cacheCanvas;
+  }
+
+  // シャード(玉が砕けた破片)。基準サイズで焼いて等率 scale で大小を出す。
+  // 縮小方向にしか使わないのでボケない。2:1 の縦横比は焼いた形が保つ
+  var SHARD_SZ0 = 5.5;   // 呼び出し側のランダムサイズ 2〜5.5 の最大値
+  function bakeShard(color) {
+    var s = new createjs.Shape();
+    s.graphics.beginFill(color).drawRect(-SHARD_SZ0, -SHARD_SZ0 * 0.5, SHARD_SZ0 * 2, SHARD_SZ0);
+    s.cache(-SHARD_SZ0 - 1, -SHARD_SZ0 * 0.5 - 1, SHARD_SZ0 * 2 + 2, SHARD_SZ0 + 2);
+    s.cacheCanvas._rx = SHARD_SZ0 + 1;
+    s.cacheCanvas._ry = SHARD_SZ0 * 0.5 + 1;
+    return s.cacheCanvas;
+  }
+
+  // リング衝撃波(加算合成で光る輪が広がって消える)。delayMs は内部用
+  // (particles が消去の時間差カスケードに使う。公開 API の形は従来どおり)
+  function ring(x, y, color, r0, r1, dur, delayMs) {
+    var img = bakeInto(ringCanvas, color, bakeRing);
+    var s0 = (r0 || 4) / RING_R, s1 = (r1 || 34) / RING_R;
+    spawnDot(img, "lighter", x, y, x, y, s0, s0, s1, s1, dur || 360,
+      delayMs ? { delay: delayMs } : null);
   }
 
   // 瞬間フラッシュ(着弾点の光)
-  function flash(x, y, color, rad) {
-    var fx = PP.layers.fx;
-    var s = new createjs.Shape();
-    s.x = x; s.y = y; s.compositeOperation = "lighter";
-    s.graphics.beginRadialGradientFill([color, "rgba(255,255,255,0)"], [0, 1], 0, 0, 1, 0, 0, rad || 22)
-      .drawCircle(0, 0, rad || 22);
-    fx.addChild(s);
-    createjs.Tween.get(s)
-      .to({ scaleX: 1.6, scaleY: 1.6, alpha: 0 }, 260, createjs.Ease.quadOut)
-      .call(function () { fx.removeChild(s); });
+  function flash(x, y, color, rad, delayMs) {
+    var img = bakeInto(flashCanvas, color, bakeFlash);
+    var s0 = (rad || 22) / FLASH_R, s1 = s0 * 1.6;
+    spawnDot(img, "lighter", x, y, x, y, s0, s0, s1, s1, 260,
+      delayMs ? { delay: delayMs } : null);
   }
 
-  // 消去の華やかな破裂(色シャード + きらめき + リング + フラッシュ)
+  // 消去の華やかな破裂(色シャード + きらめき + リング + フラッシュ)。
+  // ※ 以前は玉1個につき Shape 11個 + Tween 11本 + クロージャを作っていて、
+  //   10連鎖では1フレームに100個超のゴミが出て GC のカクつきになっていた。
+  //   いまは全部プール(spawnDot)経由: 破片の「重力」は物理ではなく着地点を
+  //   +16px 下げた quadOut 移動だったので、同じ着地点を渡せば軌道は完全に同一。
   function particles(x, y, colorIndex, delay) {
-    var fx = PP.layers.fx;
     var pal = PP.PALETTE[colorIndex] || { light: "#fff", main: "#ffd27a" };
     var color = pal.main, light = pal.light;
     delay = delay || 0;
 
     // リング + フラッシュは1回だけ(遅延に合わせて出す)
-    var trigger = new createjs.Shape();
-    fx.addChild(trigger);
-    createjs.Tween.get(trigger).wait(delay).call(function () {
-      fx.removeChild(trigger);
-      ring(x, y, light, 4, 30, 340);
-      flash(x, y, light, 20);
-    });
+    ring(x, y, light, 4, 30, 340, delay);
+    flash(x, y, light, 20, delay);
+
+    // 低負荷モード(PP.quality=0、main.js の低FPS検知)では個数を絞る
+    var q = PP.quality === 0 ? PP.PERF.LOW.shardMul : 1;
 
     // 飛び散る色シャード(重力付き・回転しながら消える)
     // TODO【課題4】玉が消えるときの破片の数。7 を増やすと派手になる
     // (増やしすぎると重くなるので 30 以下がおすすめ)
-    for (var i = 0; i < 7; i++) {
-      (function () {
-        var p = new createjs.Shape();
-        var sz = 2 + Math.random() * 3.5;
-        p.graphics.beginFill(Math.random() < 0.4 ? light : color).drawRect(-sz, -sz * 0.5, sz * 2, sz);
-        p.x = x; p.y = y; p.rotation = Math.random() * 360; p.visible = false;
-        fx.addChild(p);
-        var ang = Math.random() * Math.PI * 2;
-        var dist = 20 + Math.random() * 34;
-        createjs.Tween.get(p).wait(delay).call(function () { p.visible = true; })
-          .to({
-            x: x + Math.cos(ang) * dist, y: y + Math.sin(ang) * dist + 16,
-            rotation: p.rotation + (Math.random() - 0.5) * 300, alpha: 0
-          }, 360 + Math.random() * 240, createjs.Ease.quadOut)
-          .call(function () { fx.removeChild(p); });
-      })();
+    var shardN = Math.max(1, Math.round(7 * q));
+    for (var i = 0; i < shardN; i++) {
+      var img = bakeInto(shardCanvas, Math.random() < 0.4 ? light : color, bakeShard);
+      var sz = 2 + Math.random() * 3.5;
+      var sc = sz / SHARD_SZ0;
+      var ang = Math.random() * Math.PI * 2;
+      var dist = 20 + Math.random() * 34;
+      spawnDot(img, null, x, y,
+        x + Math.cos(ang) * dist, y + Math.sin(ang) * dist + 16,
+        sc, sc, sc, sc, 360 + Math.random() * 240,
+        { delay: delay, rot0: Math.random() * 360, rotSpin: (Math.random() - 0.5) * 300 });
     }
     // 白いきらめき(加算)
     // TODO【課題4】きらめきの数。破片(上)とセットで増減させるとよい
-    for (var j = 0; j < 3; j++) {
-      (function () {
-        var s = new createjs.Shape();
-        s.compositeOperation = "lighter";
-        s.graphics.beginFill("rgba(255,252,240,0.95)").drawCircle(0, 0, 1.4 + Math.random() * 1.6);
-        s.x = x; s.y = y; s.visible = false;
-        fx.addChild(s);
-        var ang = Math.random() * Math.PI * 2, dist = 10 + Math.random() * 22;
-        createjs.Tween.get(s).wait(delay).call(function () { s.visible = true; })
-          .to({ x: x + Math.cos(ang) * dist, y: y + Math.sin(ang) * dist, alpha: 0 },
-            300 + Math.random() * 200, createjs.Ease.quadOut)
-          .call(function () { fx.removeChild(s); });
-      })();
+    var sparkImg = dotFor("rgba(255,252,240,0.95)");
+    var sparkN = Math.max(1, Math.round(3 * q));
+    for (var j = 0; j < sparkN; j++) {
+      var r = 1.4 + Math.random() * 1.6;
+      var ssc = r / DOT_R;
+      var ang2 = Math.random() * Math.PI * 2, dist2 = 10 + Math.random() * 22;
+      spawnDot(sparkImg, "lighter", x, y,
+        x + Math.cos(ang2) * dist2, y + Math.sin(ang2) * dist2,
+        ssc, ssc, ssc, ssc, 300 + Math.random() * 200, { delay: delay });
     }
   }
 
@@ -242,26 +299,38 @@
   }
 
   // 全画面フラッシュ(特殊攻撃の「発動した!」を画面全体で伝える)。
-  // color は CSS 色、alpha は最大の明るさ、dur はフェード時間(ms)
-  function screenFlash(color, alpha, dur) {
-    var fx = PP.layers.fx;
+  // color は CSS 色、alpha は最大の明るさ、dur はフェード時間(ms)。
+  // 単色は 8×8 の焼き込みを引き伸ばしても完全に同じ絵になるのでプールに乗せる。
+  // 画面より 1.3 倍大きく貼るのは、ビットマップ端の補間で縁が薄まるのを
+  // 画面の外へ追い出すため
+  var solidCanvas = {};
+  function bakeSolid(color) {
     var s = new createjs.Shape();
-    s.compositeOperation = "lighter";
-    s.graphics.beginFill(color).drawRect(0, 0, PP.W, PP.H);
-    s.alpha = alpha || 0.3;
-    fx.addChild(s);
-    createjs.Tween.get(s)
-      .to({ alpha: 0 }, dur || 260, createjs.Ease.quadOut)
-      .call(function () { fx.removeChild(s); });
+    s.graphics.beginFill(color).drawRect(0, 0, 8, 8);
+    s.cache(0, 0, 8, 8);
+    s.cacheCanvas._rx = 4; s.cacheCanvas._ry = 4;
+    return s.cacheCanvas;
+  }
+  function screenFlash(color, alpha, dur) {
+    var img = bakeInto(solidCanvas, color, bakeSolid);
+    var sx = PP.W * 1.3 / 8, sy = PP.H * 1.3 / 8;
+    spawnDot(img, "lighter", PP.W / 2, PP.H / 2, PP.W / 2, PP.H / 2,
+      sx, sy, sx, sy, dur || 260, { a0: alpha || 0.3 });
   }
 
-  // 浮かび上がる数字/文言。輪郭付き + 出現ポップ
+  // 浮かび上がる数字/文言。輪郭付き + 出現ポップ。
+  // 文字列が毎回違うのでプールでの使い回しは効かないが、生成直後に cache して
+  // 「生存中の約1秒 × 60フレーム、shadowBlur 付きテキストを描き直す」のを
+  // 1回のラスタライズに変える。ポップで 1.12 倍まで拡大されるので、その分
+  // 少し高い解像度(1.25)で焼いてボケを防ぐ
   function floatText(str, x, y, color, size) {
     var fx = PP.layers.fx;
     var t = new createjs.Text(str, "700 " + (size || 18) + 'px "Cinzel","Hiragino Kaku Gothic ProN","Meiryo",serif', color);
     t.textAlign = "center"; t.textBaseline = "middle";
     t.x = x; t.y = y;
     t.shadow = new createjs.Shadow("rgba(0,0,0,0.85)", 0, 2, 4);
+    var tb = t.getBounds();
+    if (tb) t.cache(tb.x - 8, tb.y - 8, tb.width + 16, tb.height + 20, 1.25);
     t.scaleX = t.scaleY = 0.4;
     fx.addChild(t);
     createjs.Tween.get(t)

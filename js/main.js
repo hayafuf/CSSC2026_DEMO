@@ -733,6 +733,33 @@
       "doom");
   }
 
+  // ---------- 低FPS検知(自動品質調整) ----------
+  // 弱い端末では描画の cache 化を尽くしても足りないことがあるので、実測 FPS を
+  // 見て「低負荷モード」(PP.quality = 0)へ自動で落とす保険。判定は
+  //   ・瞬間値ではなく指数移動平均(PP.PERF.FPS_WINDOW 秒の時定数)
+  //   ・入り(LOW_ENTER)と出(LOW_EXIT)でしきい値を分けたヒステリシス
+  //   ・どちらも HOLD 秒続いたときだけ切り替え
+  // の三段構えで、GC やコース組み直しの一瞬のスパイクではパタつかせない
+  // (境界の往復振動を嫌う作りは crisis.js の bgmRelease と同じ思想)。
+  // 低負荷モードで削るもの: fx.particles の破片数・crisis の滴りと走査ノイズ・
+  // background の光の塵(内訳は config.js の PP.PERF.LOW)
+  var fpsAvg = 60, qualHold = 0;
+  PP.quality = 1;
+  function updateQuality(rawDt) {
+    if (!PP.PERF.AUTO || rawDt <= 0) return;
+    var P = PP.PERF;
+    fpsAvg += (1 / rawDt - fpsAvg) * Math.min(1, rawDt / P.FPS_WINDOW);
+    if (PP.quality === 1 && fpsAvg < P.LOW_ENTER) {
+      qualHold += rawDt;
+      if (qualHold >= P.HOLD) { PP.quality = 0; qualHold = 0; }
+    } else if (PP.quality === 0 && fpsAvg > P.LOW_EXIT) {
+      qualHold += rawDt;
+      if (qualHold >= P.HOLD) { PP.quality = 1; qualHold = 0; }
+    } else {
+      qualHold = 0;   // しきい値の内側に戻ったら数え直し
+    }
+  }
+
   // ---------- メインループ ----------
   function tick(e) {
     // ポーズ(停泊)中はゲームの一切を進めない。描画だけ更新して、
@@ -743,6 +770,7 @@
     }
     var dt = Math.min(e.delta / 1000, 0.05);
     var g = PP.game;
+    updateQuality(e.delta / 1000);
 
     // マウス格納(Pointer Lock)の見張り。カード選択・クリア・ゲームオーバー等
     // 「カーソルで押す画面」へ移った瞬間に返上する(input.js watchLock)
@@ -1077,6 +1105,19 @@
     PP.layers.fx.mouseEnabled = false;
     PP.layers.crisis.mouseEnabled = false;
     PP.layers.doom.mouseEnabled = false;
+    // 玉・レール・弾・アイテムの層もマウス走査から外す。ゲーム入力はすべて
+    // stage レベルのイベント(input.js の stagemousedown / stagemousemove)で
+    // 受けており、これらは子のヒットテストを必要としない。EaselJS のヒット
+    // テストは対象を 1px のキャンバスへ実際に描いて判定する高価な処理で、
+    // 有効なままだとタップのたびに盤面の全玉(×3 Bitmap)を走査していた。
+    // mouseChildren=false も付けて走査が子へ降りること自体を止める。
+    // (hud / overlay / cannon はボタン類の可能性を考えて触らず残す。
+    //  エディタは自前の Container にリスナーを張るので影響しない)
+    var deaf = ["path", "ballUnder", "ballOver", "barrel", "shot", "item"];
+    for (var di = 0; di < deaf.length; di++) {
+      PP.layers[deaf[di]].mouseEnabled = false;
+      PP.layers[deaf[di]].mouseChildren = false;
+    }
 
     PP.bg.build();
     // デバッグ: index.html?level=3 のように URL で開始レベルを指定できる。

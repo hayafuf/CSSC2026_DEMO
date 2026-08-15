@@ -789,8 +789,8 @@
     front.addChild(rim);
     PP.layers.barrel.addChild(front);
 
-    // ドクロ(道の終着点の印)。crisis/gameover が拡大して色を変えるので Text のまま。
-    // 単体だと背景に埋もれるので、影と冷たい縁取りで海から切り出す。
+    // ドクロ(道の終着点の印)。単体だと背景に埋もれるので、影と冷たい縁取りで
+    // 海から切り出す。
     var skull = new createjs.Text("☠",
       'bold 32px "Cinzel","Hiragino Kaku Gothic ProN",serif', "#f0e6c8");
     skull.textAlign = "center";
@@ -798,11 +798,28 @@
     skull.shadow = new createjs.Shadow("rgba(0,0,0,0.9)", 0, 2, 6);
     skull.x = end.x + end.tx * (BH + RX + 30);
     skull.y = end.y + end.ty * (BH + RX + 30);
+    // shadowBlur 付きの Text は描くたびにぼかし計算が走る上、EaselJS は毎フレーム
+    // 描き直すので、一度ビットマップへ焼く。crisis/gameover の拡大・脈動は焼いた
+    // ビットマップの scale で表現でき(最大2倍近くまで上がるので cacheScale=2 で
+    // 高解像度に焼く)、色替えだけは PP.setSkullColor 経由で焼き直す。
+    var kb = skull.getBounds();
+    skull.cache(kb.x - 10, kb.y - 10, kb.width + 20, kb.height + 24, 2);
+    PP.regFontCache(skull);
     PP.layers.barrel.addChild(skull);
 
     // 危機/ゲームオーバー演出が読む樽パーツ。mouth は樽の口の座標。
     lane.barrel = { back: back, front: front, skull: skull, mouth: { x: end.x, y: end.y } };
   }
+
+  // ドクロの色替え(crisis / gameover から使う)。ドクロは cache 済みなので
+  // color を代入しただけでは画面に出ない — 変わったときだけ焼き直す。
+  // 「変わったときだけ」が肝で、危機演出は毎フレーム色を書き込んでくるが、
+  // 実際の色は3値しかないので焼き直しは危機の段が変わる瞬間だけで済む
+  PP.setSkullColor = function (sk, c) {
+    if (sk.color === c) return;
+    sk.color = c;
+    if (sk.cacheCanvas) sk.updateCache();
+  };
 
   // レーン1本ぶんの静的な作画を、buildCourse と同じ順序でまとめて描く。
   // (path/bridge/tunnel/barrel レイヤーは呼び出し側=buildCourse が事前に空にしておく)

@@ -92,8 +92,23 @@
         MOON_X, ry, 2, MOON_X, ry, halfW)
         .drawEllipse(MOON_X - halfW, ry - hh, halfW * 2, hh * 2);
     }
-    sea.cache(0, 0, W, H);
-    bg.addChild(sea);
+    // ---- 色調(フィルミックなグレード: 影を青緑へ、月光を冷たい銀へ) ----
+    // soft-light 合成の全画面矩形。soft-light は Canvas2D で最も高い部類の
+    // CPU ブレンドで、cache しても「画面に描くとき」の合成だけは毎フレーム
+    // 走ってしまう(全画面 = 約91万px/フレーム)。海もグレードも静的なので、
+    // 起動時に2枚まとめて1枚のビットマップへ焼き込み、以後は素の drawImage
+    // 1回にする。以前は上に重なる波・霧・粒にもうっすら掛かっていたが、
+    // どれも alpha 0.1 前後の淡い光なので焼き込み後との見た目の差は出ない
+    var grade = new createjs.Shape();
+    grade.graphics.beginLinearGradientFill(
+        ["rgba(150,180,200,0.12)", "rgba(20,50,70,0.10)"],
+        [0, 1], 0, 0, 0, H).drawRect(0, 0, W, H);
+    grade.compositeOperation = "soft-light";
+    var base = new createjs.Container();
+    base.addChild(sea);
+    base.addChild(grade);
+    base.cache(0, 0, W, H);   // sea 自身の cache は不要(この1枚に含まれる)
+    bg.addChild(base);
 
     // ---- god ray(月から差し込む光条。ゆっくり揺れて明滅する) ----
     rays = new createjs.Container();
@@ -151,6 +166,9 @@
       m.graphics.beginRadialGradientFill(
         ["rgba(216,232,250,0.9)", "rgba(216,232,250,0)"], [0, 1], 0, 0, 0, 0, 0, w)
         .drawEllipse(-w, -h, w * 2, h * 2);
+      // 小さくてもグラデ塗りの再実行は積もる(20個×毎フレーム)。一度焼けば
+      // 以後は alpha/x/y が動くだけなので純粋な drawImage になる
+      m.cache(-w - 1, -h - 1, w * 2 + 2, h * 2 + 2);
       caustics.addChild(m);
       resetGlint(m);
       twinkleGlint(m);
@@ -172,19 +190,13 @@
       s.scaleY = d.h / d.w;
       s.y = d.y;
       s.x = (i * 0.4) * W;
-      s.cache(-d.w / 2 - 2, -d.w / 2 - 2, d.w + 4, d.w + 4);
+      // 描いた楕円は縦 d.h しかないので、cache の高さも d.h+4 で足りる。
+      // (以前は高さにも d.w を使っていて、1枚あたり約4倍の透明画素を
+      //  毎フレーム合成していた — 見えない部分にも合成コストは掛かる)
+      s.cache(-d.w / 2 - 2, -d.h / 2 - 2, d.w + 4, d.h + 4);
       bg.addChild(s);
       fogs.push({ s: s, speed: d.speed, baseA: 1, phase: Math.random() * 6.28, w: d.w });
     });
-
-    // ---- 色調(フィルミックなグレード: 影を青緑へ、月光を冷たい銀へ) ----
-    var grade = new createjs.Shape();
-    grade.graphics.beginLinearGradientFill(
-        ["rgba(150,180,200,0.12)", "rgba(20,50,70,0.10)"],
-        [0, 1], 0, 0, 0, H).drawRect(0, 0, W, H);
-    grade.compositeOperation = "soft-light";
-    grade.cache(0, 0, W, H);
-    bg.addChild(grade);
 
     // ---- 立ち上る光の塵(海面から昇ってゆっくり消える) ----
     moteLayer = new createjs.Container();
@@ -196,6 +208,7 @@
       mo.graphics.beginRadialGradientFill(
         ["rgba(210,228,248,0.9)", "rgba(190,214,240,0)"], [0, 1], 0, 0, 0, 0, 0, mr)
         .drawCircle(0, 0, mr);
+      mo.cache(-mr - 1, -mr - 1, mr * 2 + 2, mr * 2 + 2);   // caustics と同じ理由
       moteLayer.addChild(mo);
       motes.push(resetMote({ s: mo }, true));
     }
@@ -298,7 +311,8 @@
       s.scaleY = d.h / d.w;
       s.y = d.y;
       s.x = (i * 0.37) * W;
-      s.cache(-d.w / 2 - 2, -d.w / 2 - 2, d.w + 4, d.w + 4);
+      // 霧(fogs)と同じ: 縦は d.h ぶんしか描いていないので cache もその高さで
+      s.cache(-d.w / 2 - 2, -d.h / 2 - 2, d.w + 4, d.h + 4);
       bossCont.addChild(s);
       bossFogs.push({ s: s, speed: d.speed, phase: Math.random() * 6.28, w: d.w });
     });
@@ -413,8 +427,15 @@
       if (fo.s.x > W + fo.w) fo.s.x = -fo.w;
       fo.s.alpha = 0.7 + 0.3 * Math.sin(T * 0.3 + fo.phase);
     }
-    // 光の塵: 上昇して寿命で消える
-    for (var m = 0; m < motes.length; m++) {
+    // 低負荷モード(main.js の低FPS検知): 光の塵は数が多いわりに見た目の
+    // 寄与が小さいので、まっさきに水を抜く(復帰したら自然に再開する)
+    if (PP.quality === 0 && !PP.PERF.LOW.motes) {
+      if (moteLayer && moteLayer.visible) moteLayer.visible = false;
+    } else if (moteLayer && !moteLayer.visible) {
+      moteLayer.visible = true;
+    }
+    // 光の塵: 上昇して寿命で消える(隠している間は動かす必要もない)
+    for (var m = 0; m < motes.length && moteLayer.visible; m++) {
       var mo = motes[m];
       mo.life += dt;
       if (mo.life >= mo.max) { resetMote(mo, false); continue; }

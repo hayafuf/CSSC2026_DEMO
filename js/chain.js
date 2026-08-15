@@ -415,7 +415,7 @@
       }
     } else {
       // 反動で押し戻されている最中のグループは、速度基準を動かさない
-      var recIdx = lane.recoil ? balls.indexOf(lane.recoil.anchor) : -1;
+      var recIdx = recoilIndex(lane);
       for (var si = starts.length - 1; si >= 0; si--) {
         var gs = starts[si];
         var ge = (si + 1 < starts.length) ? starts[si + 1] : balls.length;
@@ -567,6 +567,17 @@
     return Math.min(v / damp, Math.max(0, max - (moved || 0)));
   }
 
+  // 反動の起点(anchor)の配列位置。indexOf は O(玉数) で、反動中は毎フレーム
+  // 2箇所(advance / applyRecoil)から必要になるので、前回の位置を recoil に
+  // 覚えておき「まだそこに居るか」を1比較で確かめる。挿入・消去で配列が
+  // ずれたフレームだけ indexOf で引き直す(見つからなければ -1 を返す)。
+  function recoilIndex(lane) {
+    var rec = lane.recoil;
+    if (!rec) return -1;
+    if (lane.balls[rec.idx] !== rec.anchor) rec.idx = lane.balls.indexOf(rec.anchor);
+    return rec.idx;
+  }
+
   // 磁力で引き寄せられた列が後ろの列にぶつかった瞬間。
   // 衝突の勢いを反動に変換し、ぶつけられた側(補給側)だけを押し戻す。
   function impact(lane, headIndex, v) {
@@ -602,7 +613,7 @@
         recoilReach(rv, damp, maxDist, 0) >=
         recoilReach(lane.recoil.v, lane.recoil.damp || PP.RECOIL_DAMP,
                     lane.recoil.max, lane.recoil.moved)) {
-      lane.recoil = { anchor: anchor, v: rv, moved: 0, max: maxDist, damp: damp };
+      lane.recoil = { anchor: anchor, idx: headIndex, v: rv, moved: 0, max: maxDist, damp: damp };
       replaced = true;
     }
     // 採用されなかった衝突は演出も出さない。ここで火花や「大反動」の文字だけ
@@ -631,7 +642,7 @@
     var balls = lane.balls;
     var rec = lane.recoil;
     if (!rec) return;
-    var ai = balls.indexOf(rec.anchor);
+    var ai = recoilIndex(lane);
     if (ai < 0) { lane.recoil = null; return; }   // anchor が消えたら反動も終わり
 
     // ※ 以前はここで毎フレーム hitCd を再スタンプしていたが、それだと不応期が
@@ -797,6 +808,7 @@
     // 波の終わりや掃討フェーズのコンボで反動が丸ごと消えないための保険。
     if (lane.recoil && removed.indexOf(lane.recoil.anchor) >= 0) {
       lane.recoil.anchor = balls[i] || balls[i - 1] || null;
+      lane.recoil.idx = balls[i] ? i : i - 1;   // 引き継ぎ先の位置も更新(recoilIndex 用)
       if (!lane.recoil.anchor) lane.recoil = null;
     }
     removed.forEach(function (b, k) {

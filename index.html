@@ -281,7 +281,16 @@
   <div id="rotateHint">📱 端末を横向きにしてください<br>この海賊船は横長の海でしか戦えません</div>
   <p class="hint" id="hintText">マウスで大砲を左右に移動、クリックで真上に発射!右クリックか Space で玉を交換。<b>Q キーか画面の 🌈 ボタンで虹玉(万能玉)を装填</b>。落ちてくる宝やパワーアップは大砲でキャッチ!<br>BGM と効果音は最初のクリックで鳴り始めます(M キーで消音)。<br>🛠 <b>E キー</b>か下のボタンで<b>コースエディタ</b>を開いて、自分だけの航路を作れます。</p>
 
-  <script src="https://code.createjs.com/1.0.0/createjs.min.js"></script>
+  <!-- CreateJS は lib/ に同梱してセルフホストする。CDN への同期読み込みは
+       「別サーバーへの接続が終わるまで起動が止まる」うえ、CDN が落ちると
+       ゲームごと起動しない単一障害点だった。同一オリジンなら GitHub Pages の
+       1接続で全部届き、オフラインの教室でも動く。万一読めなければ CDN を試す -->
+  <script src="lib/createjs.min.js"></script>
+  <script>
+    if (typeof createjs === "undefined") {
+      document.write('<script src="https://code.createjs.com/1.0.0/createjs.min.js"><\/script>');
+    }
+  </script>
   <script>
     if (typeof createjs === "undefined") {
       document.body.innerHTML =
@@ -318,15 +327,21 @@
   <script src="js/main.js"></script>
   <!-- ポーズ機能(main の後: PP.game / PP.hud / PP.audio を使う) -->
   <script src="js/pause.js"></script>
-  <!-- コース自作 API とビジュアルエディタ(main の後: PP.stage / PP.playCourse を使う) -->
-  <script src="js/course-api.js"></script>
-  <script src="js/editor.js"></script>
+  <!-- コース自作 API とビジュアルエディタ(main の後: PP.stage / PP.playCourse を使う)。
+       ゲーム本体の起動には不要な約 120KB なので defer で後回しにする
+       (defer どうしは記述順に実行されるので course-api → editor → my-course の
+        依存順はそのまま保たれる) -->
+  <script src="js/course-api.js" defer></script>
+  <script src="js/editor.js" defer></script>
   <!-- 【課題3】エディタで作った自作コースの登録(course-api の後に読む) -->
-  <script src="js/my-course.js"></script>
+  <script src="js/my-course.js" defer></script>
   <!-- Web フォントが遅れて届いた場合、キャンバスの文字を1回描き直して反映させる -->
   <script>
     if (document.fonts && document.fonts.ready) {
       document.fonts.ready.then(function () {
+        // cache() で焼いた装飾フォントの Text は自動では届いたフォントに
+        // 差し替わらないので、登録簿(config.js)経由で一度だけ焼き直す
+        if (window.PP && PP.refreshFontCaches) PP.refreshFontCaches();
         if (window.PP && PP.stage) PP.stage.update();
       });
     }

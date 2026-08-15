@@ -28,7 +28,9 @@
   var parts = [];
 
   function blank() {
-    return { level: 0, phase: 0, drip: 0 };
+    // danger/dangerHold は危険BGMのヒステリシス(入りは即・抜けは bgmRelease 秒
+    // ためらう)。境界で BGM が頭出しを繰り返すのを防ぐ(update 参照)
+    return { level: 0, phase: 0, drip: 0, danger: false, dangerHold: 0 };
   }
 
   // 樽ごとの灯り(maw)と這い寄る赤(creep)を、いまのレーン構成に合わせて作り直す。
@@ -76,6 +78,11 @@
       maw.compositeOperation = "lighter";
       maw.x = mouth.x; maw.y = mouth.y;
       maw.alpha = 0;
+      // グラデ円を一度だけビットマップに焼く。危機中は毎フレーム alpha と scale が
+      // 動くが、どちらも焼いたビットマップにそのまま掛かるので絵は同一(creep と
+      // 同じ理屈)。scale は最大 0.75+0.3+0.25≒1.3 まで上がるので、その倍率でも
+      // ボケないよう第5引数(cacheScale)で 1.35 倍の解像度で焼いておく
+      maw.cache(-90, -90, 180, 180, 1.35);
       W.addChild(maw);
 
       parts.push({
@@ -99,6 +106,13 @@
     vignette.regX = PP.W / 2; vignette.regY = PP.H / 2;
     vignette.x = PP.W / 2; vignette.y = PP.H / 2;
     vignette.alpha = 0;
+    // 【最重要の1行】画面4倍面積(2600×1400)のラジアルグラデを一度だけ焼く。
+    // cache しないと EaselJS は「値を変えていなくても」毎フレームこのグラデを
+    // 塗り直す — 樽の直前だけ急に重くなる最大の原因がこれだった。
+    // 毎フレームの alpha/scale 変更(トンネル視)は焼いたビットマップに掛かるだけ。
+    // フル解像度だと RGBA で約 15MB 食うので、ぼんやりしたグラデの性質を利用して
+    // 半分の解像度(PERF.VEIL_CACHE_SCALE)で焼き、表示時に引き伸ばす
+    vignette.cache(-PP.W / 2, -PP.H / 2, PP.W * 2, PP.H * 2, PP.PERF.VEIL_CACHE_SCALE);
     L.addChild(vignette);
 
     // 画面の縁だけを覆う赤帯(4辺)。心拍の頭で光り、すぐ減衰する。
@@ -115,6 +129,8 @@
       .drawRect(PP.W - EW, 0, EW, PP.H);
     edgePulse.compositeOperation = "lighter";
     edgePulse.alpha = 0;
+    // 4辺のグラデ帯も一度だけ焼く(vignette と同じ理屈・同じ縮小解像度)
+    edgePulse.cache(0, 0, PP.W, PP.H, PP.PERF.VEIL_CACHE_SCALE);
     L.addChild(edgePulse);
 
     // 凶兆: ゲームオーバーの文字が視界の隅にちらつく(サブリミナル風)。
@@ -124,6 +140,12 @@
     omen.textAlign = "center"; omen.textBaseline = "middle";
     omen.x = PP.W / 2; omen.y = PP.H / 2;
     omen.alpha = 0;
+    // 64px の装飾フォントを毎フレーム描かせない。中央揃え+middle 基準なので
+    // ローカル原点は文字の中央 = getBounds の範囲に余白を足して焼く。
+    // Web フォントが後から届いたら焼き直す(regFontCache: config.js)
+    var ob = omen.getBounds();
+    omen.cache(ob.x - 8, ob.y - 8, ob.width + 16, ob.height + 16);
+    PP.regFontCache(omen);
     L.addChild(omen);
 
     // 玉が呑まれた瞬間の閃光
@@ -145,6 +167,13 @@
   function drawCreep(part, n) {
     var count = Math.round(n * part.creepPts.length);
     if (count === part.creepDrawn) return;
+    // updateCache は大きなオフスクリーンの焼き直しで、この関数の中で一番高い。
+    // count は玉の微動でも 1 ずつ揺れるので、そのたびに焼き直すと危機中ほぼ
+    // 毎フレーム走ってしまう。CREEP_STEP 刻み未満の変化は見送る(alpha の脈動は
+    // 毎フレーム掛かるので、先端が数十px 刻みで伸びても気づかれない)。
+    // ただし 0 への遷移(危機の終わり)だけは必ず描き直して消し残りを防ぐ
+    if (Math.abs(count - part.creepDrawn) < PP.PERF.CREEP_STEP &&
+        !(count < 2 && part.creepDrawn >= 2)) return;
     part.creepDrawn = count;
     var g = part.creep.graphics;
     var pts = part.creepPts;
@@ -161,37 +190,89 @@
     part.creep.updateCache();   // 描き直したフレームだけビットマップへ焼き直す
   }
 
+  // ---------- 血の滴り・走査ノイズのプール ----------
+  // 心拍のたびに Shape + Tween を作り捨てると、危機中ずっと細かいゴミが出続けて
+  // GC のカクつきの種になる。Shape は使い回し、動きは update の自前積分で付ける
+  // (fx.js のパーティクルプールと同じ思想の小型版。crisis レイヤー上に置きたい
+  //  ので fx のプールは使わない — 帳や砲台との重なり順を変えないため)
+  var dripFree = [], dripActive = [];      // {s, age, dur, y0, fall}
+  var glitchFree = [], glitchActive = [];  // {s, age, dur}
+
   // 画面が血を流す。心拍の頭で滴らせる
   function drip() {
-    var L = PP.layers.crisis;
-    var s = new createjs.Shape();
+    var rec = dripFree.pop();
+    if (!rec) {
+      var s = new createjs.Shape();
+      PP.layers.crisis.addChild(s);
+      rec = { s: s, age: 0, dur: 0, y0: 0, fall: 0 };
+    }
     var w = 3 + Math.random() * 4;
     var h = 12 + Math.random() * 22;
-    s.graphics.beginFill("rgba(125,0,0,0.85)").drawRoundRect(0, 0, w, h, w / 2);
-    s.x = 20 + Math.random() * (PP.W - 40);
-    s.y = 62;
-    s.alpha = 0.9;
-    L.addChild(s);
-    createjs.Tween.get(s)
-      .to({ y: s.y + 90 + Math.random() * 160, alpha: 0 },
-          1400 + Math.random() * 1400, createjs.Ease.quadIn)
-      .call(function () { L.removeChild(s); });
+    rec.s.graphics.clear();
+    rec.s.graphics.beginFill("rgba(125,0,0,0.85)").drawRoundRect(0, 0, w, h, w / 2);
+    rec.s.x = 20 + Math.random() * (PP.W - 40);
+    rec.s.y = rec.y0 = 62;
+    rec.s.alpha = 0.9;
+    rec.s.visible = true;
+    rec.age = 0;
+    rec.dur = 1.4 + Math.random() * 1.4;
+    rec.fall = 90 + Math.random() * 160;
+    dripActive.push(rec);
   }
 
   // 赤い走査ノイズ。画面のどこかに横一線の赤いラインが走り、すぐ消える。
   // 「映像が乱れる」不穏さで、通常状態ではないことを突きつける
   function glitchLine() {
-    var L = PP.layers.crisis;
-    var s = new createjs.Shape();
+    var rec = glitchFree.pop();
+    if (!rec) {
+      var s = new createjs.Shape();
+      s.compositeOperation = "lighter";
+      PP.layers.crisis.addChild(s);
+      rec = { s: s, age: 0, dur: 0.12 };
+    }
     var h = 2 + Math.random() * 2;
-    s.graphics.beginFill("rgba(255,40,20,0.55)").drawRect(0, 0, PP.W, h);
-    s.x = 0;
-    s.y = 62 + Math.random() * (PP.H - 80);
-    s.compositeOperation = "lighter";
-    L.addChild(s);
-    createjs.Tween.get(s)
-      .to({ alpha: 0 }, 120)
-      .call(function () { L.removeChild(s); });
+    rec.s.graphics.clear();
+    rec.s.graphics.beginFill("rgba(255,40,20,0.55)").drawRect(0, 0, PP.W, h);
+    rec.s.x = 0;
+    rec.s.y = 62 + Math.random() * (PP.H - 80);
+    rec.s.alpha = 1;
+    rec.s.visible = true;
+    rec.age = 0;
+    glitchActive.push(rec);
+  }
+
+  // プールの1フレームぶんの前進。動きは元の Tween と同じ式:
+  //   滴り  = y が quadIn(加速して落ちる)・alpha も同じ曲線で 0.9→0
+  //   ノイズ = alpha が直線で 1→0(元の Tween も ease 指定なし=直線)
+  function updateVeils(dt) {
+    for (var i = dripActive.length - 1; i >= 0; i--) {
+      var r = dripActive[i];
+      r.age += dt;
+      var k = r.age / r.dur;
+      if (k >= 1) {
+        r.s.visible = false;
+        dripFree.push(r);
+        dripActive[i] = dripActive[dripActive.length - 1];
+        dripActive.pop();
+        continue;
+      }
+      var e = k * k;
+      r.s.y = r.y0 + r.fall * e;
+      r.s.alpha = 0.9 * (1 - e);
+    }
+    for (var j = glitchActive.length - 1; j >= 0; j--) {
+      var gr = glitchActive[j];
+      gr.age += dt;
+      var gk = gr.age / gr.dur;
+      if (gk >= 1) {
+        gr.s.visible = false;
+        glitchFree.push(gr);
+        glitchActive[j] = glitchActive[glitchActive.length - 1];
+        glitchActive.pop();
+        continue;
+      }
+      gr.s.alpha = 1 - gk;
+    }
   }
 
   // 樽に何個ぶん入っているか(0 = まだ口の外)
@@ -228,7 +309,17 @@
     if (st.level < 0.015 && maxWant === 0) st.level = 0;
 
     var n = st.level / 2;                    // 0..1 に正規化した深さ
-    PP.audio.setDanger(maxWant > 0);
+    // 危険BGMのヒステリシス: 入りは即、抜けは bgmRelease 秒待ってから。
+    // チェーンが危機の境界(want=0 付近)で前後に揺れるたびに setDanger が
+    // on/off を往復すると、そのたび BGM が頭出し+クロスフェードをやり直して
+    // しまう(音のバタつきと 33ms タイマーの無駄)。状態が変わる瞬間だけ呼ぶ
+    if (maxWant > 0) {
+      st.dangerHold = 0;
+      if (!st.danger) { st.danger = true; PP.audio.setDanger(true); }
+    } else if (st.danger) {
+      st.dangerHold += dt;
+      if (st.dangerHold >= C.bgmRelease) { st.danger = false; PP.audio.setDanger(false); }
+    }
     PP.audio.crisis(n);
 
     if (st.level > 0) {
@@ -240,13 +331,15 @@
         if (n > C.growlAt) PP.audio.growl((n - C.growlAt) / (1 - C.growlAt));
         var dr = (n - C.dripAt) / (1 - C.dripAt);
         if (dr > 0) {
+          // 低負荷モード(main.js の低FPS検知)では滴りの頻度を落とす
+          if (PP.quality === 0) dr *= PP.PERF.LOW.dripMul;
           st.drip += dr * 2.5;
           while (st.drip >= 1) { st.drip -= 1; drip(); }
         }
         // 心拍の頭: 画面の縁がカッと赤く光る(下の減衰でスッと引く)
         edgePulse.alpha = Math.min(0.85, 0.7 * n);
-        // 深い危機では映像が乱れる(赤い走査ノイズ)
-        if (n > C.glitchAt) {
+        // 深い危機では映像が乱れる(赤い走査ノイズ)。低負荷モードでは省く
+        if (n > C.glitchAt && (PP.quality !== 0 || PP.PERF.LOW.glitch)) {
           var lines = 1 + Math.floor(Math.random() * 3);
           for (var gi = 0; gi < lines; gi++) glitchLine();
         }
@@ -262,6 +355,10 @@
     vignette.alpha = C.vignette * n * (0.5 + 0.5 * h);
     vignette.scaleX = vignette.scaleY = 1 - C.tunnel * n;   // 視野が狭まる
     edgePulse.alpha *= Math.exp(-dt * 6);                   // 縁の光は鋭く減衰
+    // 指数減衰は漸近するだけで厳密には 0 にならない。alpha が僅かでも残っていると
+    // EaselJS は全画面の帯を毎フレーム合成し続けるので、見えない明るさになったら
+    // 0 に切り落として描画そのものをスキップさせる(alpha<=0 は描画されない)
+    if (edgePulse.alpha < 0.01) edgePulse.alpha = 0;
 
     // 凶兆: 深い危機でだけ、視界に「☠ GAME OVER ☠」が一瞬浮かんでは消える。
     // 確率的に数フレームだけ現れ、位置も僅かにズレる(グリッチ風のちらつき)
@@ -272,12 +369,22 @@
       omen.y = PP.H / 2 + (Math.random() - 0.5) * 12;
     } else {
       omen.alpha *= 0.75;   // 数フレームで残像ごと消える
+      if (omen.alpha < 0.02) omen.alpha = 0;   // edgePulse と同じ理由の 0 クランプ
     }
 
     // 樽ごとの灯り・這う赤・呼吸・ドクロ・宣告(そのレーン自身の深さで灯す)
     for (var pi = 0; pi < parts.length; pi++) {
       var part = parts[pi];
       var nLane = part.want / 2;             // このレーンの深さ(0..1)
+
+      // 完全に静まったレーン(このレーンも全体の心拍も休止)は、休止状態へ
+      // 戻し終えた次のフレームから丸ごと飛ばす。平常時のプレイでは crisis の
+      // 仕事をゼロにするための早回り(wasIdle は「前のフレームで休止値まで
+      // 戻し終えた」の印。最初の休止フレームだけは下を通って値を戻す)
+      var idle = part.want === 0 && st.level === 0;
+      if (idle && part.wasIdle) continue;   // announced/deep も休止値へ戻し済み
+      part.wasIdle = idle;
+
       part.maw.alpha = Math.min(1, nLane * (0.4 + 0.7 * h));
       part.maw.scaleX = part.maw.scaleY = 0.75 + 0.3 * nLane + 0.25 * h;
       drawCreep(part, nLane);
@@ -293,10 +400,10 @@
         if (sk) {
           if (part.want > 0) {
             sk.scaleX = sk.scaleY = 1 + (0.2 + 0.55 * nLane) * h;
-            sk.color = part.want >= 1 ? "#ff2f2f" : "#ff5d5d";
+            PP.setSkullColor(sk, part.want >= 1 ? "#ff2f2f" : "#ff5d5d");
           } else {
             sk.scaleX = sk.scaleY = 1;
-            sk.color = "#f0e6c8";
+            PP.setSkullColor(sk, "#f0e6c8");
           }
         }
       }
@@ -315,6 +422,10 @@
       else if (deep < part.deep) pushedBack(part);
       part.deep = deep;
     }
+
+    // 滴り・走査ノイズを進める(プールの自前積分)。危機を抜けた後も、
+    // 空中に残っている滴りが消えきるまでは動かし続ける
+    updateVeils(dt);
   }
 
   // 玉が1個ぶん樽に落ちた。残り個数を突きつける
@@ -339,6 +450,9 @@
   // 危機の外(クリア・ゲームオーバー)へ抜けるときは音も絵も畳む
   function stop() {
     if (!built) return;
+    // ヒステリシス中でも危険BGMは畳む(st は下で作り直すので旗も消える)。
+    // setDanger 側に「同じ曲なら何もしない」ガードがあるので冪等
+    PP.audio.setDanger(false);
     st = blank();
     createjs.Tween.removeTweens(flash);
     vignette.alpha = 0;
@@ -354,21 +468,25 @@
       parts[pi].creepDrawn = -1;
       parts[pi].announced = false;
       parts[pi].deep = 0;
+      parts[pi].wasIdle = false;   // 次の update で一度は休止値へ戻す経路を通す
       var bp = PP.barrels && PP.barrels[pi];
       if (bp) {
         bp.back.scaleX = bp.back.scaleY = 1;
         bp.front.scaleX = bp.front.scaleY = 1;
       }
     }
-    // 垂れている血・走査ノイズを片付ける(帳・閃光・縁の帯・凶兆の常設物は残す)
-    var L = PP.layers.crisis;
-    for (var i = L.children.length - 1; i >= 0; i--) {
-      var c = L.children[i];
-      if (c !== vignette && c !== flash && c !== edgePulse && c !== omen) {
-        createjs.Tween.removeTweens(c);
-        L.removeChild(c);
-      }
+    // 垂れている血・走査ノイズを片付ける。Shape はプールの持ち物なので
+    // removeChild せず、隠して空き箱(free)へ戻すだけでよい
+    for (var di = dripActive.length - 1; di >= 0; di--) {
+      dripActive[di].s.visible = false;
+      dripFree.push(dripActive[di]);
     }
+    dripActive.length = 0;
+    for (var gi = glitchActive.length - 1; gi >= 0; gi--) {
+      glitchActive[gi].s.visible = false;
+      glitchFree.push(glitchActive[gi]);
+    }
+    glitchActive.length = 0;
     PP.audio.crisis(0);
   }
 
@@ -376,7 +494,10 @@
     stop();
     for (var pi = 0; pi < parts.length; pi++) {
       var bp = PP.barrels && PP.barrels[pi];
-      if (bp && bp.skull) { bp.skull.scaleX = bp.skull.scaleY = 1; bp.skull.color = "#f0e6c8"; }
+      if (bp && bp.skull) {
+        bp.skull.scaleX = bp.skull.scaleY = 1;
+        PP.setSkullColor(bp.skull, "#f0e6c8");
+      }
     }
   }
 

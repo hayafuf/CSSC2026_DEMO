@@ -275,15 +275,24 @@
   // TODO【課題4】危機警報の音量レンジ(min=危機の入り口 / max=樽に呑まれる寸前)
   var CRISIS_VOL = { min: 0.3, max: 0.85 };
 
+  // 前回 crisis() に渡された深さ。volume / playbackRate の代入は(値が同じでも)
+  // ブラウザのメディアパイプラインに触れるため、60Hz で毎フレーム書き込むと
+  // 端末によっては音揺れやメインスレッドの引っかかりになる。聞き分けられる
+  // 変化(0.005)があったときだけ書き込む
+  var crisisLastX = -1;
   function crisis(x) {
     x = Math.max(0, Math.min(1, x || 0));
     if (x < 0.01 || muted || !unlocked) {
       if (!loopCrisis.paused) { loopCrisis.pause(); loopCrisis.currentTime = 0; }
       loopCrisis.volume = 0;
+      crisisLastX = -1;   // 次に鳴らすときは必ず音量から設定し直す
       return;
     }
-    loopCrisis.volume = CRISIS_VOL.min + (CRISIS_VOL.max - CRISIS_VOL.min) * x;
-    loopCrisis.playbackRate = 1 + 0.2 * x;    // 深いほど気ぜわしく
+    if (Math.abs(x - crisisLastX) >= 0.005) {
+      crisisLastX = x;
+      loopCrisis.volume = CRISIS_VOL.min + (CRISIS_VOL.max - CRISIS_VOL.min) * x;
+      loopCrisis.playbackRate = 1 + 0.2 * x;  // 深いほど気ぜわしく
+    }
     routeSE(loopCrisis);                        // 警報にも軽いリバーブ(一度だけ配線)
     if (loopCrisis.paused) play(loopCrisis);
   }
@@ -421,11 +430,19 @@
     });
   }
 
-  // 全音源の読み込みを待つ。onProgress(読込済, 総数) を随時呼び、
+  // 効果音の読み込みを待つ。onProgress(読込済, 総数) を随時呼び、
   // 全部揃うか TIMEOUT を過ぎたら done() を呼ぶ(音が無くても遊べるように)。
+  // BGM(tracks)は待たない: 数MB の曲を全部ダウンロードし終えるまでタイトルを
+  // 出さないのは起動が遅すぎる(特に携帯回線)。preload="auto" のままなので
+  // ブラウザは裏で取得を続け、再生できる分から鳴り始める。最悪でも「開始直後の
+  // 数秒だけ BGM が遅れる」だけで、効果音と危機警報は最初から保証される
   function preload(onProgress, done) {
     var TIMEOUT = 15000;
-    var total = sources.length;
+    var seOnly = [];
+    for (var si = 0; si < sources.length; si++) {
+      if (tracks.indexOf(sources[si]) < 0) seOnly.push(sources[si]);
+    }
+    var total = seOnly.length;
     var loaded = 0;
     var finished = false;
 
@@ -439,7 +456,7 @@
       if (onProgress) onProgress(loaded, total);
       if (loaded >= total) finish();
     }
-    sources.forEach(function (a) {
+    seOnly.forEach(function (a) {
       var settled = false;
       function hit() {
         if (settled) return;

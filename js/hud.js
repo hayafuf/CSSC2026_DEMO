@@ -73,6 +73,8 @@
   // 生存ゲージの形状キー(同じ形なら clear→グラデ生成→再描画を飛ばす)と
   // 僅少グローの点灯状態(消灯への切り替わりで一度だけ clear する)
   var lastGaugeKey = null, gaugeGlowOn = false;
+  var gaugeGlowDrawn = false;   // 点滅枠の形は一度だけ描き、以後は alpha だけ動かす
+  var lastGaugeTenth = null;    // 残り秒表示は 0.1 秒粒度。変わった時だけ文字列を作る
   // チップ構築の間引き用(初回は必ず構築する)
   var effAcc = 1;
 
@@ -376,30 +378,42 @@
       gKey = "boss";
       gaugeText.text = PP.i18n.t("hud.bossGauge");
       gaugeText.color = "#ffb0a0";
+      lastGaugeTenth = null;   // 通常ゲージへ戻った最初のフレームで必ず書き直す
     } else if (g.finishing) {
       gKey = "fin";
       var left = 0;
       for (var li = 0; li < g.lanes.length; li++) left += g.lanes[li].balls.length;
       gaugeText.text = PP.i18n.t("hud.remain", { n: left });
       gaugeText.color = C_TEAL;
+      lastGaugeTenth = null;
     } else {
       ratio = g.timeTotal > 0 ? Math.max(0, g.timeLeft / g.timeTotal) : 0;
       low = ratio < 0.25;
       if (ratio > 0.01) fillW = Math.max(6, (GAUGE_W - 3) * ratio);
       gKey = "n:" + Math.round(fillW) + (low ? "L" : "");
-      gaugeText.text = Math.max(0, g.timeLeft).toFixed(1) + "s";
+      // 表示は 0.1 秒刻みなのに 60Hz で毎フレーム文字列を作り直すのは無駄
+      // (toFixed も Text の再計測も走る)。値の刻みが変わった時だけ更新する
+      var tenth = Math.max(0, Math.round(g.timeLeft * 10));
+      if (tenth !== lastGaugeTenth) {
+        lastGaugeTenth = tenth;
+        gaugeText.text = (tenth / 10).toFixed(1) + "s";
+      }
       gaugeText.color = low ? "#ff8a6a" : C_VAL;
     }
 
-    // 残り僅少の赤く脈打つグローだけは毎フレーム(点滅アニメ)。消灯は一度だけ clear
+    // 残り僅少の赤く脈打つグロー。形は不変で明滅だけが動くので、パスの再構築は
+    // 一度きりにして毎フレームは alpha を書くだけにする(Graphics コマンド列の
+    // 作り直し+文字列連結を 60Hz で行わない)
     if (fillW > 0 && low) {
-      var glow = gaugeGlow.graphics; glow.clear();
-      var pulse = 0.35 + 0.35 * (0.5 + 0.5 * Math.sin(animT * 7));
-      glow.beginStroke("rgba(255,70,60," + pulse.toFixed(3) + ")").setStrokeStyle(3.5)
-        .drawRoundRect(-1.5, -1.5, GAUGE_W + 3, GAUGE_H + 3, 8);
+      if (!gaugeGlowDrawn) {
+        gaugeGlowDrawn = true;
+        gaugeGlow.graphics.beginStroke("rgba(255,70,60,1)").setStrokeStyle(3.5)
+          .drawRoundRect(-1.5, -1.5, GAUGE_W + 3, GAUGE_H + 3, 8);
+      }
+      gaugeGlow.alpha = 0.35 + 0.35 * (0.5 + 0.5 * Math.sin(animT * 7));
       gaugeGlowOn = true;
     } else if (gaugeGlowOn) {
-      gaugeGlow.graphics.clear();
+      gaugeGlow.alpha = 0;   // alpha=0 なら描画そのものがスキップされる
       gaugeGlowOn = false;
     }
 
