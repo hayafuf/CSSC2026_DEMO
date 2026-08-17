@@ -23,34 +23,48 @@
 
   // 玉が消えたときに呼ばれる。コンボ中はドロップ率が上がる
   // (ドロップ率は難易度で変えない。拾う気持ちよさは全難易度共通)。
-  // コース定義の dropMult でコース単位の倍率を掛けられる(例: コース5は
-  // 4レーン同時防衛が忙しいぶん、道具を多めに配って捌かせる)
+  // コース定義の dropMult はコース単位の上乗せ(基本率換算のポイント加算。
+  // 例: コース5は4レーン同時防衛が忙しいぶん、道具を多めに配って捌かせる)
   var downCd = 0;   // パワーダウンのクールダウン残り秒(連発防止)
 
   function maybeDrop(x, y) {
     var g = PP.game;
     // パワーダウン(取ってはいけない物)は独立の別ロール。
-    // コンボボーナスも dropMult も掛けない: 上手いプレイの報酬が罠では本末転倒だし、
-    // コース5(dropMult 2.5)が罠だらけになるのも防ぐ。ボス戦にも出さない。
+    // コンボや dropMult の上乗せは一切効かせない: 上手いプレイの報酬が罠では
+    // 本末転倒だし、コース5の上乗せで罠だらけになるのも防ぐ。ボス戦にも出さない。
     // クールダウン中も出さない(連鎖のたびに罠が降ってくるのを防ぐ)
     if (!g.bossMode && downCd <= 0 && Math.random() < PP.ITEMS.downChance) dropDown(x, y);
-    var chance = PP.ITEMS.dropChance + Math.min(g.combo, 5) * PP.ITEMS.comboBonus;
-    chance *= (g.builtCourse && g.builtCourse.dropMult) || 1;
-    // 【強化】「戦利品の嗅覚」等のドロップ率倍率(救済中のブースト込み。上限3倍)
-    chance *= PP.upgrades.dropMult();
-    // 危機ボーナス: 樽に呑まれ始めるほど加算で上がる(あふれ寸前で +crisisDropBonus)。
+    // ドロップ率は「加算」で統一する。以前はコース倍率×強化倍率を掛け算で
+    // 重ねていたため複利で膨らみ、全部盛りでマッチ毎ドロップがほぼ100%に達して
+    // いた(コース倍率 2.7→1.4、強化上限 2.5→2.2 と後追いで削った歴史がある)。
+    // 倍率で定義済みのデータ(コースの dropMult / 強化カードの mult)は互換の
+    // ため残し、ここで「基本率に対する上乗せポイント」へ換算してから足す。
+    // 例: コース dropMult 1.4 → +(1.4-1)×0.15 = +6pt(コンボや強化とは複利しない)
+    var base = PP.ITEMS.dropChance;
+    var chance = base + Math.min(g.combo, 5) * PP.ITEMS.comboBonus;
+    // コース補正(基本率換算の加算)
+    chance += (((g.builtCourse && g.builtCourse.dropMult) || 1) - 1) * base;
+    // 【強化】嗅覚・目利きの上乗せポイント(1段=+何pt の足し算。upgrades.js)
+    chance += PP.upgrades.dropBonus();
+    // 危機ボーナス: 樽に呑まれ始めるほど上がる(あふれ寸前で +crisisDropBonus)。
     // crisis.level() は 0(平常)〜2(あふれ寸前)の滑らかな値
     var crisisLv = (PP.crisis && PP.crisis.level) ? PP.crisis.level() : 0;
     chance += PP.ITEMS.crisisDropBonus * (crisisLv / 2);
     // ピティ(追い詰め救済): GameOver後の再挑戦や連続失敗が続くプレイヤーに
-    // 道具を厚く配る。倍率の外側で加算するので dropMult の上限(2.2)に食われない
+    // 道具を厚く配る
     var pity = 0;
     if (g.continues > 0) pity += PP.ITEMS.pityContinueBonus;
     if (g.failStreak >= PP.ITEMS.pityFailFrom) {
       pity += (g.failStreak - PP.ITEMS.pityFailFrom + 1) * PP.ITEMS.pityFailBonus;
     }
     chance += Math.min(PP.ITEMS.pityCap, pity);
-    if (Math.random() > chance) return;
+    // 救済(海神の加護)中の増配だけは意図して倍率のまま: 数秒〜十数秒の
+    // 緊急措置で、そのときの合計に比例して厚くする(常設の強化とは別扱い)
+    if (PP.upgrades.rescueActive && PP.upgrades.rescueActive()) {
+      chance *= PP.RESCUE.dropBoost;
+    }
+    // 全要素を足し切った後の総上限(取りこぼしの保険。通常はここまで届かない)
+    if (Math.random() > Math.min(PP.ITEMS.dropChanceCap, chance)) return;
     drop(x, y);
   }
 

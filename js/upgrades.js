@@ -92,25 +92,31 @@
   var choice = null;             // 選択UI {cont, rects, guardT}
 
   // ---------- 各所のフックが読む合成値 ----------
-  // ドロップ率の合成倍率(powerups.js maybeDrop)。
-  // 「目利き」系は主効果(💣🚀の重み)に加えてドロップ率も 8%/段 底上げする
-  function dropMult() {
-    var m = val("droprate");
-    m *= 1 + 0.08 * (level("bombw") + level("missw"));
-    if (rescueActive()) m *= PP.RESCUE.dropBoost;
-    return Math.min(2.2, m);   // 全部盛りでも上限2.2倍(2.5 → 2.2: コース倍率と重なると道具の仕事になりすぎた)
+  // 強化によるドロップ率の上乗せポイント(powerups.js maybeDrop が足す)。
+  // 嗅覚は dropPt/段、「目利き」系も副効果として dropPt/段 を「足し算」で積む
+  // (掛け算の倍率合成はしない。1段=+何pt が定義表からそのまま読める)。
+  // 救済(海神の加護)中の増配は倍率のまま maybeDrop 側で最後に掛ける(意図)
+  function dropBonus() {
+    var b = level("droprate") * (byId.droprate.dropPt || 0);
+    b += level("bombw") * (byId.bombw.dropPt || 0);
+    b += level("missw") * (byId.missw.dropPt || 0);
+    return b;
   }
 
   // パワーアップ抽選プールの重み補正(powerups.js drop / dropPower)。
+  // 「目利き」系は重みへ wAdd×段数 を「足す」(掛け算にしない: 足し算なら
+  // 積んだときの伸びが線形で、他アイテムの取り分の痩せ方も緩やかに頭打ちする)。
+  // 救済中のブースト(rescuePoolMult)は緊急措置なので倍率のまま。
   // 補正が無ければ元の配列をそのまま返す(浅いコピーは補正時のみ)
   function adjustPool(pool) {
-    var bw = val("bombw"), mw = val("missw");
+    var bw = level("bombw") * (byId.bombw.wAdd || 0);
+    var mw = level("missw") * (byId.missw.wAdd || 0);
     var boost = rescueActive() ? PP.RESCUE.rescuePoolMult : 1;
-    if (bw === 1 && mw === 1 && boost === 1) return pool;
+    if (bw === 0 && mw === 0 && boost === 1) return pool;
     return pool.map(function (p) {
       var w = p.w;
-      if (p.id === "bomb") w *= bw * boost;        // 救済中は立て直しの道具を厚く
-      else if (p.id === "missile") w *= mw;
+      if (p.id === "bomb") w = (w + bw) * boost;   // 救済中は立て直しの道具を厚く
+      else if (p.id === "missile") w = w + mw;
       else if (p.id === "reverse") w *= boost;     // 救済中は風系(引き潮)も厚く
       return { id: p.id, icon: p.icon, dur: p.dur, w: w };
     });
@@ -351,7 +357,37 @@
     if (id === "wildshot") {
       return t("ug.prev.wildshot", { a: PP.WILD.baseMax + lv, b: PP.WILD.baseMax + lv + 1 });
     }
-    return "×" + valAt(def, lv).toFixed(2) + " → ×" + valAt(def, lv + 1).toFixed(2);
+    if (id === "droprate") {
+      // ドロップ率への上乗せポイント(足し算)を絶対値で見せる: +2.5% → +5%
+      var fmtPt = function (lvl) {
+        return String(+(lvl * def.dropPt * 100).toFixed(1));
+      };
+      return t("ug.prev.percent", { a: fmtPt(lv), b: fmtPt(lv + 1) });
+    }
+    if (id === "bombw" || id === "missw") {
+      // 重みの足し算は素の数値だと意味が伝わらないので、素の状態と比べて
+      // 「どれだけ出やすくなるか」の +% で見せる: +0% → +26%。
+      // (絶対値の出現率表示にしないのは、コースや救済で条件が変わると
+      //  実際の確率がズレて嘘の数字になるため。相対なら常に正しい)
+      var target = id === "bombw" ? "bomb" : "missile";
+      var sum = 0, wBase = 0;
+      PP.POWERUPS.forEach(function (p) {
+        sum += p.w;
+        if (p.id === target) wBase = p.w;
+      });
+      var rel = function (lvl) {
+        var share = (wBase + lvl * def.wAdd) / (sum + lvl * def.wAdd);
+        return Math.round((share / (wBase / sum) - 1) * 100);
+      };
+      return t("ug.prev.percent", { a: rel(lv), b: rel(lv + 1) });
+    }
+    // 倍率(mult)カードの汎用プレビュー。「×1.45」の掛け算表記ではなく
+    // 「+45%」の加算表記で見せる(ドロップ率の内部処理もポイント加算に
+    // 統一済みなので、表示も「どれだけ上乗せされるか」で揃える)
+    return t("ug.prev.percent", {
+      a: Math.round((valAt(def, lv) - 1) * 100),
+      b: Math.round((valAt(def, lv + 1) - 1) * 100)
+    });
   }
 
   function closeChoiceUI() {
@@ -678,7 +714,7 @@
     level: level,
     has: has,
     val: val,
-    dropMult: dropMult,
+    dropBonus: dropBonus,
     adjustPool: adjustPool,
     clusterBoost: clusterBoost,
     requestChoice: requestChoice,
