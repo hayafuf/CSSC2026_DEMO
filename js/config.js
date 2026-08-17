@@ -52,12 +52,55 @@
   PP.DIFFICULTY = {
     easy:     { entryMult: 0.85, holeMult: 0.90, curveMult: 1.15, timeMult: 0.85, colorAdd: 0, colorMin: 4, colorMax: 6, barrelBonus: 2,  useLives: true,  bossHpMult: 0.8,  bgm: "BGM/Easy.mp3" },
     normal:   { entryMult: 1.00, holeMult: 1.00, curveMult: 1.00, timeMult: 1.00, colorAdd: 0, colorMin: 4, colorMax: 6, barrelBonus: 0,  useLives: true,  bossHpMult: 1.0,  bgm: "BGM/Game_music.mp3" },
-    hard:     { entryMult: 1.10, holeMult: 1.06, curveMult: 0.92, timeMult: 1.00, colorAdd: 1, colorMin: 4, colorMax: 7, barrelBonus: 0,  useLives: true,  bossHpMult: 1.2,  bgm: "BGM/Hard.mp3" },
+    hard:     { entryMult: 1.12, holeMult: 1.06, curveMult: 0.90, timeMult: 1.00, colorAdd: 1, colorMin: 4, colorMax: 7, barrelBonus: 0,  useLives: true,  bossHpMult: 1.2,  bgm: "BGM/Hard.mp3" },
     hardcore: { entryMult: 1.15, holeMult: 1.10, curveMult: 0.88, timeMult: 1.10, colorAdd: 1, colorMin: 4, colorMax: 7, barrelBonus: 0, useLives: false, bossHpMult: 1.35, bgm: "BGM/HardCore.mp3" }
   };
   // (holeMult/curveMult 改定: easy は速度全体の底上げ(SPEED.levelStep・コース hole)を
   //  相殺して従来の体感を維持、hard/hardcore は normal との差が +2% しかなく
   //  段差が見えなかったので明確な階段にした)
+  // ---------- ステージ個別の速度上書き(難易度×ステージ) ----------
+  // 「この難易度のこのステージだけ少し難しすぎる」を、実際に使う速度を
+  // 「そのまま書いて」直す表。倍率もパーセントも無し:
+  //   ★ ここに書いた数値が、そのままゲームで使われる速度になる ★
+  // (書いたステージには難易度倍率もレベル補正ももう掛からない。
+  //  表に無い 難易度×ステージ は従来どおりの自動計算 = 一切変わらない)
+  //
+  // 項目(px/s。省略した項目だけ従来の自動計算のまま):
+  //   entry: 洞窟付近の速度(開幕・波の出だしの圧)
+  //   hole:  樽の直前の速度(終盤のプレッシャー。一番よく効く)
+  //   curve: 減速カーブの指数(px/s ではなく形の値。大きいほど早めに減速が
+  //          始まる=樽際の立て直し時間が増えて易しい)
+  //
+  // ◆ 参考: Stage5(四叉の激流)の現在の実効値(コース値×難易度倍率×レベル補正1.30)
+  //     normal   … entry 728 / hole 20.8 / curve 2.20
+  //     hard     … entry 815 / hole 22.0 / curve 1.98   ← 上書き前の素の値
+  //     hardcore … entry 837 / hole 22.9 / curve 1.94   ← 上書き前の素の値
+  //   下の設定はここから「ほんの少し」だけ下げた値(normal より十分速いまま)。
+  //   もっと易しく/難しくしたいときは、この数値を直接書き換えるだけでよい。
+  // 適用箇所は chain.js の speedAt。ボス戦(Stage6)は bossHpMult で調整する。
+  PP.STAGE_SPEED = {
+    hard: {
+      5: { entry: 800, hole: 21.0, curve: 2.0 }
+    },
+    hardcore: {
+      5: { entry: 820, hole: 21.5, curve: 2.0 }
+    }
+  };
+  // 現在の 難易度×ステージ の上書き値を返す(無い項目は null = 自動計算)。
+  // speedAt から毎フレーム・全玉ぶん呼ばれるので、結果は難易度×レベルが
+  // 変わるまでキャッシュする(数値をいじって試すときは再読み込みで反映)
+  function ovNum(src, key) {
+    return (src && typeof src[key] === "number" && isFinite(src[key])) ? src[key] : null;
+  }
+  var ovKey = "", ovVal = { entry: null, hole: null, curve: null };
+  PP.stageSpeed = function () {
+    var key = PP.game.difficulty + ":" + PP.game.level;
+    if (key === ovKey) return ovVal;
+    var src = (PP.STAGE_SPEED[PP.game.difficulty] || {})[PP.game.level];
+    ovKey = key;
+    ovVal = { entry: ovNum(src, "entry"), hole: ovNum(src, "hole"), curve: ovNum(src, "curve") };
+    return ovVal;
+  };
   // タイトル画面のボタンの並び順(1〜4 キーもこの順)
   PP.DIFFICULTY_ORDER = ["easy", "normal", "hard", "hardcore"];
   // 現在の難易度プリセットを引くヘルパ(反映ロジック側が使う。ここは触らない)
@@ -362,6 +405,13 @@
       dripMul: 0.5         //   血の滴りを半減
     }
   };
+  // ユーザーが設定パネル(settings.js)で選んだ画質。
+  //   "auto" = 実測FPSで自動調整(従来どおり) / "high" = 常に通常 / "low" = 常に低負荷
+  // main.js の updateQuality が "auto" 以外のとき自動調整を止めてこの値に従う
+  PP.PERF.userQuality = (function () {
+    var v = PP.store ? PP.store.get("quality", "auto") : "auto";
+    return (v === "high" || v === "low") ? v : "auto";
+  })();
 
   // ---------- ゲームオーバーの演出 ----------
   // 「静止 → 吸い込み → 呑み込み → 暗黒」の4段構成。
@@ -494,7 +544,7 @@
                  // 全部無効化されて触手が無力化するので、「連続ハメだけ防ぐ」短さにする
                  hitIFrames: 1.2 },
     // 大津波: 安全地帯(光の柱)以外の低空を水壁が横断。柱の外にいると押し流される
-    tsunami:   { telegraph: 1.8, speed: 520, gapW: 170, stun: 1.5, push: 200 },
+    tsunami:   { telegraph: 1.8, speed: 520, gapW: 140, stun: 1.5, push: 200 },
     // 妖星の豪雨(改): 本物の隕石の豪雨。着弾で爆発+画面シェイク。
     // 被弾は freeze 系のスタン(ルーレットは廃止)。着弾マークは出さない
     // (炎の尾を引いて落ちるので軌道は目で読める)。
@@ -521,12 +571,12 @@
                  // swings: 往復数(2往復は長すぎた)。period: 1往復の秒数=
                  // 大きくするほど左右の振りがゆっくりになる。攻撃全体=swings×period 秒
                  emitDX: 140, emitDY: 20,   // 発射口=ボス中心±emitDX
-                 aimCrossGap: 180,          // 左舷は掃引点+gap、右舷は-gapを狙う=X字に交差。
+                 aimCrossGap: 185,          // 左舷は掃引点+gap、右舷は-gapを狙う=X字に交差。
                                             // 地上の安全地帯の幅=2×gap。当たり判定を
                                             // 「大砲の高さの線交差」判定に直したことで、
                                             // 通路幅が掃引位置に依らず一定になった(以前は
                                             // 端で線が斜めに太く判定され狭くなっていた)
-                 ampMargin: 200,            // 振り子の振幅=W/2-ampMargin(端まで振り切らない)
+                 ampMargin: 185,            // 振り子の振幅=W/2-ampMargin(端まで振り切らない)
                  stun: 5, hitCd: 1.5,     // hitCd: 被弾直後は cross 弾に当たらない(スタンロック防止。0.9 → 1.5: stun 5秒中の再被弾ループ緩和)
                  p2PeriodMul: 0.8 },        // 怒りフェーズは振り子が速くなる
     // 怒りフェーズ(HP が hpRatio 以下): 攻撃間隔短縮・弾速アップ・コンボ追撃
@@ -1208,6 +1258,13 @@
       }
     }
   };
+
+  // 前回遊んだ難易度を復元する(input.js が選択のたびに保存する)。
+  // 保存が無い/知らないキーなら既定の "normal" のまま
+  (function () {
+    var saved = PP.store ? PP.store.get("lastDiff", null) : null;
+    if (saved && PP.DIFFICULTY[saved]) PP.game.difficulty = saved;
+  })();
 
   // ステージとレイヤー(main.js の init で設定)
   PP.stage = null;

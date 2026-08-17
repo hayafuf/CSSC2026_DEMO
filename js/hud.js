@@ -35,7 +35,12 @@
   // ポーズボタン(⏸)。プレイ中だけバーの下・右端に出す。クリック判定は
   // 難易度ボタンと同じ「矩形当たり判定」方式(発射クリックと混ざらないため)
   var pauseBtn = null;
-  var PAUSE_RECT = { x: W - 46, y: 74, w: 36, h: 36 };
+  // 右上の DOM ボタン列(⛶🔊⚙ = index.html)と重ならない位置に置く。
+  // タッチ端末は指の太さぶん大きくし、DOM 列(右端 約80px 幅)の左へ寄せる。
+  // デスクトップも列の真下(旧 W-46)から左へ退避して誤クリックを防ぐ
+  var PAUSE_RECT = PP.TOUCH
+    ? { x: W - 146, y: 70, w: 48, h: 48 }
+    : { x: W - 96, y: 74, w: 36, h: 36 };
   // ⇄ 交換はタッチ端末では DOM の仮想ボタン(index.html の #tSwap)が担当する。
   // キャンバス内ボタンは廃止したが、判定関数(hitSwapBtn)は互換のため残してある
   var swapBtn = null;
@@ -182,7 +187,9 @@
 
     // 【課題5】コインとライフの表示(右端)
     hudCoinLife = new createjs.Text("", '800 18px "Cinzel","Hiragino Kaku Gothic ProN","Meiryo",serif', C_VAL);
-    hudCoinLife.x = W - 70; hudCoinLife.y = mid;   // 右上の全画面ボタン(⛶)を避ける
+    // 右上の DOM ボタン列(⛶🔊⚙)を避ける。タッチ端末はボタンが 44px と
+    // 大きく、より内側まで覆うので余分に左へ寄せる
+    hudCoinLife.x = W - (PP.TOUCH ? 110 : 70); hudCoinLife.y = mid;
     hudCoinLife.textAlign = "right"; hudCoinLife.textBaseline = "middle";
     hudCoinLife.shadow = new createjs.Shadow("rgba(0,0,0,0.65)", 0, 1, 3);
     cacheHudText(hudCoinLife, 230, 28);
@@ -197,10 +204,12 @@
       .drawRoundRect(r.x, r.y, r.w, r.h, 9)
       .setStrokeStyle(1).beginStroke("rgba(210,168,96,0.5)")
       .drawRoundRect(r.x, r.y, r.w, r.h, 9);
-    // ⏸ の縦二本線(絵文字だと環境で見た目が揺れるので図形で描く)
+    // ⏸ の縦二本線(絵文字だと環境で見た目が揺れるので図形で描く)。
+    // 矩形サイズが端末で変わるので、中心から座標を割り出す
+    var pcx = r.x + r.w / 2, pbh = r.h - 20;
     pb.graphics.beginFill("#f4e2a0")
-      .drawRoundRect(r.x + 11, r.y + 10, 5, 16, 2)
-      .drawRoundRect(r.x + 20, r.y + 10, 5, 16, 2);
+      .drawRoundRect(pcx - 7, r.y + 10, 5, pbh, 2)
+      .drawRoundRect(pcx + 2, r.y + 10, 5, pbh, 2);
     pauseBtn.addChild(pb);
     pauseBtn.visible = false;
     L.addChild(pauseBtn);

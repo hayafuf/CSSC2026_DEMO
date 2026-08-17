@@ -213,11 +213,19 @@
     var g = PP.game;
     var sp = g.speed;
     // 難易度(【課題1】config.js)は速度プロファイルそのものに効かせる:
-    // entry(序盤の圧)/ hole(終盤のプレッシャー)/ curve(どこまで速さを保つか)
+    // entry(序盤の圧)/ hole(終盤のプレッシャー)/ curve(どこまで速さを保つか)。
+    // レベル補正(levelStep)は entry と hole に個別に掛ける(結果は
+    // 「補間後に一括で掛ける」従来式と数学的に同一。こうしておくと
+    // 下のステージ個別上書きが「書いた px/s がそのまま使われる」形になる)
     var df = PP.diff();
-    var entry = sp.entry * df.entryMult;
-    var hole = sp.hole * df.holeMult;
-    var curve = sp.curve * df.curveMult;
+    var lvlMul = 1 + (g.level - 1) * sp.levelStep;
+    // ステージ個別の速度上書き(config.js の PP.STAGE_SPEED)。
+    // 指定のある項目は「その数値をそのまま」使い、難易度倍率もレベル補正も
+    // 掛けない。null(表に無い/省略)の項目は従来どおりの自動計算
+    var ov = PP.stageSpeed();
+    var entry = ov.entry !== null ? ov.entry : sp.entry * df.entryMult * lvlMul;
+    var hole = ov.hole !== null ? ov.hole : sp.hole * df.holeMult * lvlMul;
+    var curve = ov.curve !== null ? ov.curve : sp.curve * df.curveMult;
     // 海神の加護: 危機中はカーブを少し立てて(easy の curveMult と同じ向き)、
     // 樽際の減速が早めに効くようにする=立て直しの時間をわずかに足す
     if (PP.upgrades && PP.upgrades.rescueActive && PP.upgrades.rescueActive()) {
@@ -225,7 +233,6 @@
     }
     var t = Math.max(0, Math.min(1, d / lane.rail.holeD));
     var v = hole + (entry - hole) * Math.pow(1 - t, curve);
-    v *= 1 + (g.level - 1) * sp.levelStep;     // レベルで底上げ
     v *= 1 + sp.rollout * g.rolloutBoost;      // 開始直後のなだれ込み
     // 強化圧: 強化を取るほど巡航速度が少し上がる(PP.UPGRADE_PRESSURE)。
     // ロード順の保険で upgrades の存在を見る(倍率は upgrades.js が事前計算)

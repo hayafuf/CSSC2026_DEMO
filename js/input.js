@@ -194,6 +194,7 @@
     if (difficulty) {
       game.difficulty = difficulty;
       PP.hud.setDifficulty(difficulty);
+      if (PP.store) PP.store.set("lastDiff", difficulty);   // 次回起動時に復元
       return;
     }
 
@@ -348,6 +349,12 @@
   function bindKeyboard(startLevel) {
     window.addEventListener("keydown", function (event) {
       if (PP.editor && PP.editor.active) return;
+      // 設定パネル/操作説明の表示中はゲームへのキーを止める(P で裏の
+      // ゲームだけ再開してしまう事故を防ぐ)。Esc はパネルを閉じる
+      if (PP.settings && PP.settings.isOpen()) {
+        if (event.code === "Escape") PP.settings.closeTop();
+        return;
+      }
       PP.audio.unlock();
       // キー入力も確実なユーザー操作なのでロックを張り直すチャンス。
       // Esc だけは除外する: Esc はブラウザの「格納をやめる」操作そのもので、
@@ -372,6 +379,7 @@
       } else if (event.code === "KeyM") {
         PP.fx.floatText(PP.i18n.t(PP.audio.toggleMute() ? "in.mute" : "in.unmute"),
           PP.W / 2, 88, "#f0e6c8", 22);
+        if (PP.settings) PP.settings.syncMute();   // 右上 🔊 ボタンの絵と同期
       } else if (/^Digit[1-3]$/.test(event.code) && PP.game.state === "choosing") {
         PP.upgrades.chooseIndex(parseInt(event.code.charAt(5), 10) - 1);
       } else if (/^Digit[1-4]$/.test(event.code)) {
@@ -382,6 +390,7 @@
           if (key) {
             PP.game.difficulty = key;
             PP.hud.setDifficulty(key);
+            if (PP.store) PP.store.set("lastDiff", key);   // 次回起動時に復元
           }
         }
       }

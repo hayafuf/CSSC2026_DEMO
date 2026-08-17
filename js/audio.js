@@ -16,8 +16,18 @@
   var PP = window.PP;
 
   var audioCtx = null;
-  var muted = false;
+  // ミュートと BGM/SE の音量(0〜1)は設定パネル(settings.js)から変更でき、
+  // PP.store で保存・復元する(store.js は audio.js より前に読み込まれている)
+  var muted = !!(PP.store && PP.store.get("muted", false));
+  var bgmVol = clamp01(PP.store ? PP.store.get("bgmVol", 1) : 1);
+  var seVol = clamp01(PP.store ? PP.store.get("seVol", 1) : 1);
   var unlocked = false;
+
+  function clamp01(v) {
+    v = Number(v);
+    if (!isFinite(v)) return 1;
+    return Math.max(0, Math.min(1, v));
+  }
 
   // ---------- WebAudio: SE 用のリバーブ・バス ----------
   // BGM 以外の効果音(beep の合成音も mp3 も)は、この seBus を通して
@@ -85,7 +95,7 @@
   }
 
   function beep(freq, dur, type, vol) {
-    if (muted) return;
+    if (muted || seVol <= 0) return;
     try {
       var ctx = ensureCtx();
       if (!ctx) return;
@@ -94,7 +104,8 @@
       var gain = ctx.createGain();
       osc.type = type || "triangle";
       osc.frequency.setValueAtTime(freq, t);
-      gain.gain.setValueAtTime(vol || 0.12, t);
+      // WebAudio のゲインは iOS でも効くので、SE 音量はここで乗算する
+      gain.gain.setValueAtTime((vol || 0.12) * seVol, t);
       gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
       osc.connect(gain).connect(seBus || ctx.destination);
       osc.start(t);
@@ -104,7 +115,7 @@
 
   // beep の兄弟: 周波数が f0 から f1 へ滑らかに動く(ライザー/フォール用)
   function gliss(f0, f1, dur, type, vol) {
-    if (muted) return;
+    if (muted || seVol <= 0) return;
     try {
       var ctx = ensureCtx();
       if (!ctx) return;
@@ -114,7 +125,7 @@
       osc.type = type || "sawtooth";
       osc.frequency.setValueAtTime(f0, t);
       osc.frequency.linearRampToValueAtTime(f1, t + dur);
-      gain.gain.setValueAtTime(vol || 0.1, t);
+      gain.gain.setValueAtTime((vol || 0.1) * seVol, t);
       gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
       osc.connect(gain).connect(seBus || ctx.destination);
       osc.start(t);
@@ -160,7 +171,7 @@
     var pool = [];
     var last = null;
     var f = function () {
-      if (muted) return;
+      if (muted || seVol <= 0) return;
       try {
         var a = null;
         for (var i = 0; i < pool.length; i++) {
@@ -170,10 +181,10 @@
           a.currentTime = 0;        // 使い回し: 頭出しして鳴らし直す
         } else {
           a = proto.cloneNode();    // 全部再生中: 従来どおり複製を増やす
-          a.volume = vol;
           routeSE(a, true);         // BGM 以外の SE は軽いリバーブを通す(配線は恒久)
           pool.push(a);
         }
+        a.volume = vol * seVol;     // SE 音量は再生のたびに反映(iOS では無視されるが無害)
         last = a;
         var p = a.play();
         if (p && p.catch) p.catch(function () { /* 未解錠なら鳴らさない */ });
@@ -282,7 +293,7 @@
   var crisisLastX = -1;
   function crisis(x) {
     x = Math.max(0, Math.min(1, x || 0));
-    if (x < 0.01 || muted || !unlocked) {
+    if (x < 0.01 || muted || seVol <= 0 || !unlocked) {
       if (!loopCrisis.paused) { loopCrisis.pause(); loopCrisis.currentTime = 0; }
       loopCrisis.volume = 0;
       crisisLastX = -1;   // 次に鳴らすときは必ず音量から設定し直す
@@ -290,7 +301,7 @@
     }
     if (Math.abs(x - crisisLastX) >= 0.005) {
       crisisLastX = x;
-      loopCrisis.volume = CRISIS_VOL.min + (CRISIS_VOL.max - CRISIS_VOL.min) * x;
+      loopCrisis.volume = (CRISIS_VOL.min + (CRISIS_VOL.max - CRISIS_VOL.min) * x) * seVol;
       loopCrisis.playbackRate = 1 + 0.2 * x;  // 深いほど気ぜわしく
     }
     routeSE(loopCrisis);                        // 警報にも軽いリバーブ(一度だけ配線)
@@ -368,7 +379,8 @@
     // 成立しない(全曲が最大音量のまま重なる)ので、即時切り替えで代用する
     if (!canVolume) {
       tracks.forEach(function (a) {
-        if (!muted && a === current) { if (a.paused) play(a); }
+        // BGM 音量 0 は「BGM オフ」として扱う(iOS では 0〜1 の中間が作れない)
+        if (!muted && bgmVol > 0 && a === current) { if (a.paused) play(a); }
         else if (!a.paused) a.pause();
       });
       return;
@@ -378,7 +390,7 @@
       var done = true;
       var steps = Math.max(1, fadeMs / 33);
       tracks.forEach(function (a) {
-        var target = (!muted && a === current) ? a.vol : 0;
+        var target = (!muted && a === current) ? a.vol * bgmVol : 0;
         var step = a.vol / steps;
         if (Math.abs(a.volume - target) <= step) {
           a.volume = target;
@@ -574,15 +586,33 @@
     if (current === bgmNormal && !bgmNormal.paused) return;
     current = bgmNormal;
     bgmNormal.currentTime = 0;
-    bgmNormal.volume = muted ? 0 : bgmNormal.vol;
-    play(bgmNormal);
+    bgmNormal.volume = muted ? 0 : bgmNormal.vol * bgmVol;
+    // BGM オフ(音量0)なら鳴らし始めない(iOS は volume 代入が効かないため必須)
+    if (!muted && bgmVol > 0) play(bgmNormal);
     fade(300);
   }
 
   function setMuted(on) {
     muted = on;
+    if (PP.store) PP.store.set("muted", muted);
     if (unlocked) fade();
     return muted;
+  }
+
+  // ---------- 音量チャンネル(settings.js の設定パネルが呼ぶ) ----------
+  // BGM と SE を別々の 0〜1 で調整し、PP.store で保存する。
+  // iOS など HTMLAudio の volume が効かない端末(canVolume=false)では
+  // 中間音量が作れないため、設定パネル側は volumeSupported() を見て
+  // スライダーの代わりに ON/OFF トグル(0 か 1)を出す。
+  function setBgmVol(v) {
+    bgmVol = clamp01(v);
+    if (PP.store) PP.store.set("bgmVol", bgmVol);
+    if (unlocked) fade(150);   // いま流れている曲へ即反映
+  }
+  function setSeVol(v) {
+    seVol = clamp01(v);
+    if (PP.store) PP.store.set("seVol", seVol);
+    crisisLastX = -1;          // 危機警報の音量も次の更新で必ず書き直す
   }
 
   PP.audio = {
@@ -594,6 +624,14 @@
     setMuted: setMuted,
     toggleMute: function () { return setMuted(!muted); },
     isMuted: function () { return muted; },
+    setBgmVol: setBgmVol,
+    setSeVol: setSeVol,
+    getBgmVol: function () { return bgmVol; },
+    getSeVol: function () { return seVol; },
+    // 端末が音量スライダーに対応しているか(iOS は false)。
+    // canVolume は unlock() 内で実端末を調べて確定する。設定パネルは
+    // 必ずユーザー操作(=unlock 済み)から開くので、開く時点の値は正確
+    volumeSupported: function () { return canVolume; },
 
     // 大砲の発射(通常弾・爆弾)。合成音の芯に Fire.mp3 を重ねる。
     // ミサイルだけは cannon.js 側で missile.mp3 を鳴らす(二重鳴り回避)

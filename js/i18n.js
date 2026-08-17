@@ -220,6 +220,41 @@
     "in.mute": "🔇 消音",
     "in.unmute": "🔊 音あり",
 
+    // ---- index.html: 右上のボタン列(settings.js が使う title/aria) ----
+    "html.muteBtn": "消音の切り替え (M キー)",
+    "html.setBtn": "設定",
+
+    // ---- settings.js: 設定パネル ----
+    "set.title": "⚙ 設定",
+    "set.bgm": "🎵 BGM 音量",
+    "set.se": "🔔 効果音",
+    "set.mute": "🔇 消音",
+    "set.on": "オン",
+    "set.off": "オフ",
+    "set.quality": "✨ 画質",
+    "set.qAuto": "自動",
+    "set.qHigh": "高",
+    "set.qLow": "低(軽い)",
+    "set.lang": "🌐 言語",
+    "set.langLocked": "タイトル画面でのみ変更できます",
+    "set.howto": "❔ 操作説明",
+    "set.close": "✕ 閉じる",
+
+    // ---- settings.js: 操作説明(チュートリアル) ----
+    "tut.title": "🏴‍☠️ 操作方法",
+    "tut.aim": "画面をドラッグして狙いをつける",
+    "tut.move": "大砲を左右に移動(押し続けると加速)",
+    "tut.fire": "発射!(長押しで連射)",
+    "tut.swap": "手持ちの玉を交換(大砲をタップでも)",
+    "tut.wild": "虹玉(万能玉)を装填",
+    "tut.pause": "⏸ 一時停止 / ⛶ 全画面",
+    "tut.dAim": "マウスで大砲を移動、クリックで発射",
+    "tut.dSwap": "右クリックか Space で玉を交換",
+    "tut.dWild": "Q キーで虹玉(万能玉)を装填",
+    "tut.dStock": "特殊弾💣🚀は左下のスロットをクリックで交換",
+    "tut.dPause": "P で一時停止、M で消音、F で全画面",
+    "tut.ok": "⚓ 了解、出航!",
+
     // ---- course-api.js(バリデーション。エディタ経由でユーザーに見える) ----
     "api.defaultName": "無名の航路",
     "api.lane": "レーン{n}: ",
@@ -411,6 +446,38 @@
     "in.mute": "🔇 Muted",
     "in.unmute": "🔊 Sound on",
 
+    "html.muteBtn": "Toggle mute (M key)",
+    "html.setBtn": "Settings",
+
+    "set.title": "⚙ Settings",
+    "set.bgm": "🎵 Music volume",
+    "set.se": "🔔 Sound effects",
+    "set.mute": "🔇 Mute",
+    "set.on": "On",
+    "set.off": "Off",
+    "set.quality": "✨ Graphics",
+    "set.qAuto": "Auto",
+    "set.qHigh": "High",
+    "set.qLow": "Low (light)",
+    "set.lang": "🌐 Language",
+    "set.langLocked": "Can only be changed on the title screen",
+    "set.howto": "❔ How to play",
+    "set.close": "✕ Close",
+
+    "tut.title": "🏴‍☠️ How to Play",
+    "tut.aim": "Drag on the screen to aim",
+    "tut.move": "Move the cannon left / right (hold to speed up)",
+    "tut.fire": "Fire! (hold for rapid fire)",
+    "tut.swap": "Swap your ball (or tap the cannon)",
+    "tut.wild": "Load a rainbow (wild) ball",
+    "tut.pause": "⏸ pause / ⛶ fullscreen",
+    "tut.dAim": "Move the cannon with the mouse, click to fire",
+    "tut.dSwap": "Right-click or Space to swap balls",
+    "tut.dWild": "Press Q to load a rainbow (wild) ball",
+    "tut.dStock": "Click the lower-left slot to swap special shots 💣🚀",
+    "tut.dPause": "P to pause, M to mute, F for fullscreen",
+    "tut.ok": "⚓ Got it, set sail!",
+
     "api.defaultName": "Unnamed Route",
     "api.lane": "Lane {n}: ",
     "api.tooFewPoints": "Too few control points (minimum {n})",
@@ -503,6 +570,14 @@
     if ((el = document.getElementById("fsBtn"))) {
       el.title = t("html.fsBtn");
       el.setAttribute("aria-label", t("html.fsBtnAria"));
+    }
+    if ((el = document.getElementById("muteBtn"))) {
+      el.title = t("html.muteBtn");
+      el.setAttribute("aria-label", t("html.muteBtn"));
+    }
+    if ((el = document.getElementById("setBtn"))) {
+      el.title = t("html.setBtn");
+      el.setAttribute("aria-label", t("html.setBtn"));
     }
   }
 

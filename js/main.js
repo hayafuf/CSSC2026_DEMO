@@ -751,6 +751,8 @@
   // background の光の塵(内訳は config.js の PP.PERF.LOW)
   var fpsAvg = 60, qualHold = 0;
   PP.quality = 1;
+  // 保存された画質設定(settings.js / PP.PERF.userQuality)を起動時から反映する
+  if (PP.PERF.userQuality === "low") PP.quality = 0;
   // FPS の指数移動平均は品質自動調整と ?fps=1 の計測表示が共用する。
   // PERF.AUTO を切っても計測表示が生きるよう、平均の更新は判定から分離してある
   function updateFpsAvg(rawDt) {
@@ -758,6 +760,10 @@
     fpsAvg += (1 / rawDt - fpsAvg) * Math.min(1, rawDt / PP.PERF.FPS_WINDOW);
   }
   function updateQuality(rawDt) {
+    // ユーザーが画質を固定している(設定パネルで 高/低 を選択)なら自動調整は休む。
+    // 毎フレームの代入で、設定変更が次のフレームから確実に効く
+    var ovr = PP.PERF.userQuality;
+    if (ovr && ovr !== "auto") { PP.quality = ovr === "low" ? 0 : 1; return; }
     if (!PP.PERF.AUTO || rawDt <= 0) return;
     var P = PP.PERF;
     if (PP.quality === 1 && fpsAvg < P.LOW_ENTER) {
