@@ -164,10 +164,20 @@
 
   function onStageDown(event, startLevel, restartLevel) {
     if (PP.editor && PP.editor.active) return;
-    if (event.nativeEvent && event.nativeEvent.button === 2) return;
 
     var game = PP.game;
     if (game.state === "loading") return;
+
+    // 右クリック = 玉の交換。判定は contextmenu ではなく mousedown で行う:
+    // マウス格納(Pointer Lock)中のブラウザは contextmenu を発火しないため、
+    // contextmenu 頼みだとプレイ中の右クリック交換が丸ごと効かなくなる
+    // (mousedown は button=2 として通常どおり届く)。canvas 側の contextmenu は
+    // ブラウザメニューを止めるだけの役目に絞ってある
+    if (event.nativeEvent && event.nativeEvent.button === 2) {
+      if (PP.pauseCtl && PP.pauseCtl.active) return;   // ポーズ中は解除もせず素通り
+      PP.cannon.swap();
+      return;
+    }
     PP.audio.unlock();
     if (PP.pauseCtl && PP.pauseCtl.active) {
       PP.pauseCtl.resume();
@@ -453,11 +463,12 @@
 
     // ブラウザの音声自動再生制限はユーザー操作の中でのみ解除できる。
     document.addEventListener("pointerdown", function () { PP.audio.unlock(); }, { once: true });
+    // 右クリックの交換そのものは stagemousedown(button=2)が担当する。
+    // ここはブラウザのコンテキストメニューを止めるだけ: 両方で swap を呼ぶと、
+    // 格納していないとき(mousedown → contextmenu の順で両方届く)に2回交換され、
+    // 見た目が元に戻ってしまう
     document.getElementById("gameCanvas").addEventListener("contextmenu", function (event) {
       event.preventDefault();
-      if (PP.editor && PP.editor.active) return;
-      if (PP.pauseCtl && PP.pauseCtl.active) return;
-      PP.cannon.swap();
     });
 
     bindTouchButtons();
