@@ -183,6 +183,9 @@
     t.textAlign = "center";
     t.textBaseline = "middle";
     t.shadow = pal ? new createjs.Shadow("rgba(0,0,0,0.8)", 0, 1, 4) : null;
+    // 文字は生成後に変わらないので一度だけ焼く(Shadow 付き Text を素のまま
+    // 置くと、落下中ずっと毎フレーム shadowBlur 付きの再ラスタライズが走る)
+    t.cache(-28, -28, 56, 58);
     cont.addChild(t);
     if (dark) {
       // 右上の☠バッジ: 骸骨玉と同じ記号で「呪い系」だと直感で繋がるようにする
@@ -191,6 +194,7 @@
       badge.textBaseline = "middle";
       badge.x = 19; badge.y = -19;
       badge.shadow = new createjs.Shadow("rgba(0,0,0,0.9)", 0, 1, 3);
+      badge.cache(-18, -18, 36, 38);
       cont.addChild(badge);
     }
     return cont;

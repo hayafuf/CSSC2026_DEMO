@@ -151,6 +151,40 @@
     return true;
   }
 
+  // ---------- 玉 view のプール ----------
+  // makeView の Container+Bitmap×3 は、波あたり 40〜60 個が数秒おきに
+  // 生成(補給)→破棄(消滅 Tween 完了)される。中身の canvas は共有でも
+  // 器の DisplayObject が毎回ゴミになり、携帯では GC のカクつきの種になる。
+  // fx.js のパーティクルプールと同じ発想で器そのものを使い回す。
+  // 色は recolorView(共有 canvas の貼り替え)で済むのでプールは色を区別しない。
+  var viewFree = [];
+  var VIEW_POOL_MAX = 96;   // 1レーンの最大玉数 60 + 前波の残り。超えた分は普通に捨てる
+  function acquireView(colorIndex) {
+    var view = viewFree.pop();
+    if (!view) return makeView(colorIndex);
+    view.__pooled = false;
+    // 前の生涯の痕跡を全部消す: 消滅 Tween の縮小/透明、挿入演出の座標、
+    // 骸骨マーク(chain.js が base/spin/shade の後ろ=4枚目以降に addChild する。
+    // makeSkullOverlay は Tween を使わないので、外すのは子の除去だけでよい)
+    createjs.Tween.removeTweens(view);
+    view.x = 0; view.y = 0;
+    view.scaleX = 1; view.scaleY = 1;
+    view.alpha = 1; view.rotation = 0; view.visible = true;
+    view.spin.rotation = 0;
+    while (view.numChildren > 3) view.removeChildAt(3);
+    recolorView(view, colorIndex);
+    return view;
+  }
+  function releaseView(view) {
+    // makeView 製以外(宝玉・爆弾など baseBmp を持たない view)と、
+    // 二重返却(clearBalls と消滅 Tween の両方から返る等)は受け付けない
+    if (!view || !view.baseBmp || view.__pooled) return;
+    createjs.Tween.removeTweens(view);
+    if (view.parent) view.parent.removeChild(view);
+    view.__pooled = true;
+    if (viewFree.length < VIEW_POOL_MAX) viewFree.push(view);
+  }
+
   // 爆弾(キャッチして装填し、自分で撃つ)。鋳鉄の球+導火線の火花
   function makeBombView() {
     var cont = new createjs.Container();
@@ -451,6 +485,8 @@
   PP.ball = {
     makeView: makeView,
     recolorView: recolorView,
+    acquireView: acquireView,   // プールから玉 view を取得(なければ makeView)
+    releaseView: releaseView,   // 玉 view をプールへ返却(Tween 停止と除去込み)
     makeBombView: makeBombView,
     makeMissileView: makeMissileView,
     makeTreasureView: makeTreasureView,

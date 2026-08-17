@@ -723,8 +723,13 @@
   var aimDrawn = false;   // いま照準線が描かれているか(非プレイ時のクリアを1回にする)
   var aimX = null, aimSpy = null, aimTopY = null, aimSp = null;
 
+  // firstHitY(全玉走査)の間引きキャッシュ。望遠鏡中は毎フレーム呼ばれるが、
+  // 着弾円が縦に 2〜3 フレーム遅れても知覚できないので、砲が動いた(x が変わった)
+  // ときだけ即再計算し、静止中は 0.05 秒間隔まで走査を減らす(横ずれは見せない)
+  var fhCacheY = 66, fhCacheX = null, fhAge = 1;
+
   // 照準ガイド(入力が変わった tick だけ再描画)。望遠鏡が有効な間は着弾点まで伸びる
-  function updateAim() {
+  function updateAim(dt) {
     if (PP.game.state !== "playing") {
       if (aimDrawn) { aimLine.graphics.clear(); aimDrawn = false; aimX = null; }
       return;
@@ -733,7 +738,12 @@
     var spy = PP.game.effects.spyglass > 0;
     var topY;
     if (spy) {
-      topY = firstHitY(x);   // 玉は毎フレーム動くので着弾点の走査だけは毎回行う
+      fhAge += dt || 0;
+      if (x !== fhCacheX || fhAge >= 0.05) {
+        fhCacheX = x; fhAge = 0;
+        fhCacheY = firstHitY(x);
+      }
+      topY = fhCacheY;
       aimLine.alpha = 0.55;
     } else {
       topY = PP.cannon.y - MUZZLE_LEN - 90;

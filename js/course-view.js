@@ -182,15 +182,35 @@
   }
 
   // 流れる光を1フレーム進める(tick から呼ぶ)。全レーンぶん。
+  //
+  // 玉と違って淡い装飾なので、位置の更新は 60Hz でなくてよい。dt を溜めて
+  // 30Hz(低品質時 15Hz)でまとめて進める(boss.js の drawTentaclesThrottled と
+  // 同じ間引き方。溜めた dt を丸ごと渡すので流速は変わらない)。これで
+  // 毎フレームのドット数ぶんの posAtInto + atan2 + sin(4レーンで約280回)が
+  // 半分以下になる。さらに低品質時はドットを1つおきに消して、lighter 合成の
+  // blit 数そのものも半減させる(間引きだけでは描画数は減らないため)。
+  var flowAcc = 0, flowQuality = null;   // null = 次の update で必ず visibility を適用
   function updateRailFlow(dt) {
+    flowAcc += dt;
+    var step = PP.quality === 0 ? 1 / 15 : 1 / 30;
+    if (flowAcc < step) return;
+    var stepDt = flowAcc;
+    flowAcc = 0;
+    // 品質が切り替わったフレームだけ、全ドットの表示/非表示を舐め直す
+    // (毎フレーム全ドットに visible を書かない)
+    var skip = PP.quality === 0;
+    var reapply = flowQuality !== PP.quality;
+    if (reapply) flowQuality = PP.quality;
     for (var fi = 0; fi < railFlows.length; fi++) {
       var rf = railFlows[fi];
-      rf.phase = (rf.phase + rf.speed * dt) % rf.spacing;
+      rf.phase = (rf.phase + rf.speed * stepDt) % rf.spacing;
       for (var i = 0; i < rf.dots.length; i++) {
+        var dot = rf.dots[i];
+        if (reapply) dot.visible = !(skip && (i & 1));
+        if (!dot.visible) continue;
         var fd = rf.phase + i * rf.spacing;
         if (fd > rf.length) fd -= rf.length;
         var p = rf.rail.posAtInto(fd, _pos);
-        var dot = rf.dots[i];
         dot.x = p.x; dot.y = p.y;
         dot.rotation = Math.atan2(p.ty, p.tx) * 180 / Math.PI;   // 進行方向へ伸ばす
         dot.alpha = 0.35 + 0.3 * Math.sin(fd * 0.02 + rf.phase * 0.08);
@@ -838,6 +858,8 @@
   PP.courseView = {
     drawLane: drawLane,            // レーン1本の木道・洞窟・橋・樽・トンネルを描く
     updateRailFlow: updateRailFlow, // 溝を流れる光を1フレーム進める(tick から)
-    reset: function () { railFlows = []; } // コース組み直し時に流れる光の状態を捨てる
+    // コース組み直し時に流れる光の状態を捨てる。flowQuality も白紙に戻し、
+    // 低品質のまま組み直しても新しいドットに間引きが適用されるようにする
+    reset: function () { railFlows = []; flowQuality = null; }
   };
 })();

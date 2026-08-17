@@ -323,95 +323,104 @@
 
   // 骸骨玉ごとの発射管理: クールダウン → 予兆(マークが赤く明滅)→ 発射。
   // 予兆中に消された・トンネルに入った等は黙ってキャンセル(次の機会へ)
-  function updateSkullBalls(dt) {
+  //
+  // eachLaneBall のループ本体は無名関数のまま渡すと毎フレーム(全玉2周ぶん)
+  // クロージャの確保が起きるので、モジュールスコープへ巻き上げる。フレーム毎の
+  // 入力(dt・危機中か・攻撃中の個体数)はモジュール変数で受け渡す
+  var stepDt = 0, stepCrisis = false, stepAttacking = 0;
+  function countAttacking(b) {
+    if (b.skull && (b.skullTele > 0 || b.skullVolley)) stepAttacking++;
+  }
+  function stepSkullBall(b, lane) {
     var S = PP.SKULL;
+    var dt = stepDt;
+    if (!b.skull) return;
+    var fx = b.skullFx;   // ball.js makeSkullOverlay(chain.js が付ける)
+
+    if (stepCrisis || !canFire(b, lane)) {
+      b.skullTele = 0;    // 隠れたら予兆は仕切り直し
+      if (b.skullVolley) {
+        // 撃っている最中に隠れた/危機が来た: 弾幕は打ち切り(出た弾は残る)
+        b.skullVolley = null;
+        b.skullCd = nextCd();
+      }
+      // 沈黙中に CD を使い切っていたら、短めの個別 CD を引き直す。
+      // 負のまま放置すると「危機が明けた最初のフレームで、待っていた全個体が
+      // 同時に skullCd <= 0 を満たして一斉に予兆入りする」束が生まれる
+      // (冒頭コメントの『一斉発射しない』の抜け穴だった)
+      if (b.skullCd !== undefined && b.skullCd <= 0) {
+        b.skullCd = S.gateRecoverMin +
+          Math.random() * (S.gateRecoverMax - S.gateRecoverMin);
+      }
+      if (fx) fx.ring.alpha = 0.4;
+      return;
+    }
+
+    if (b.skullVolley) {
+      // 発射中: パターンの続きを撃つ(発射口は玉に追従)。マークは最速で明滅。
+      // 処理落ちフレームでは while で複数ステップまとめて撃つ
+      var v = b.skullVolley;
+      if (fx) fx.ring.alpha = 0.7 + 0.3 * Math.sin(t * 24);
+      v.timer -= dt;
+      while (v.timer <= 0 && v.step < v.steps) {
+        volleyStep(b, lane);
+        v.timer += v.gap;
+      }
+      if (v.step >= v.steps) {
+        b.skullVolley = null;
+        b.skullCd = nextCd();
+        if (fx) fx.ring.alpha = 0.4;
+      }
+      return;
+    }
+
+    if (b.skullTele > 0) {
+      // 予兆中: マークのリングを速く強く明滅させて「来るぞ」を伝える
+      b.skullTele -= dt;
+      if (fx) fx.ring.alpha = 0.55 + 0.45 * Math.sin(t * 18);
+      if (b.skullTele <= 0) {
+        startVolley(b, lane, b.skullType || pickType());
+      }
+      return;
+    }
+
+    // 通常時: ゆっくり脈動しつつクールダウンを消化
+    if (fx) fx.ring.alpha = 0.3 + 0.15 * Math.sin(t * 3);
+    b.skullCd = (b.skullCd === undefined ? S.firstDelay : b.skullCd) - dt;
+    if (b.skullCd <= 0) {
+      // 同時攻撃の全体ゲート: 予兆〜発射中が teleMaxActive 体いる、または
+      // 直前の予兆開始から teleSpacing 秒経っていないなら、少し待って
+      // 再挑戦する(=攻撃開始が階段状にばらけ、常に「どこかが撃ち、
+      // どこかが黙る」波になる。全員一斉は構造的に起きない)
+      if (stepAttacking >= S.teleMaxActive || t - lastTeleAt < S.teleSpacing) {
+        b.skullCd = S.teleRetryMin +
+          Math.random() * (S.teleRetryMax - S.teleRetryMin);
+        return;
+      }
+      stepAttacking++;
+      lastTeleAt = t;
+      // どのデバフを撃つかは予兆の時点で決め、予兆リングをその色で出す
+      // (=飛んでくる前から種類が読める)。警告音の高さも種類で変える
+      b.skullType = pickType();
+      var T = TYPES[b.skullType];
+      b.skullTele = S.telegraph;
+      lane.rail.posAtInto(b.d + (b.slide || 0), tmpPos);
+      PP.fx.ring(tmpPos.x, tmpPos.y, T.color, 8, 50, S.telegraph * 1000);
+      PP.audio.beep(T.teleBeep, 0.3, "sawtooth", 0.08);
+    }
+  }
+  function updateSkullBalls(dt) {
     // 危機(赤い帳)の最中は全骸骨が沈黙する: チェーンが樽に迫っている間は
     // 「列との勝負」に集中させ、弾幕とのリスク二重取りを起こさない(樽際の
     // 発射禁止帯と同じ思想の全体版)。クールダウンも凍結するので、危機が
     // 明けた瞬間に溜まった骸骨が一斉発射することもない
-    var crisisNow = PP.crisis && PP.crisis.level && PP.crisis.level() > 0.05;
+    stepCrisis = !!(PP.crisis && PP.crisis.level && PP.crisis.level() > 0.05);
+    stepDt = dt;
     // 同時攻撃の全体制限のため、予兆〜発射中の個体数を先に数える
     // (骸骨は最大5体=毎フレームの走査コストは無視できる)
-    var attacking = 0;
-    PP.game.eachLaneBall(function (b) {
-      if (b.skull && (b.skullTele > 0 || b.skullVolley)) attacking++;
-    });
-    PP.game.eachLaneBall(function (b, lane) {
-      if (!b.skull) return;
-      var fx = b.skullFx;   // ball.js makeSkullOverlay(chain.js が付ける)
-
-      if (crisisNow || !canFire(b, lane)) {
-        b.skullTele = 0;    // 隠れたら予兆は仕切り直し
-        if (b.skullVolley) {
-          // 撃っている最中に隠れた/危機が来た: 弾幕は打ち切り(出た弾は残る)
-          b.skullVolley = null;
-          b.skullCd = nextCd();
-        }
-        // 沈黙中に CD を使い切っていたら、短めの個別 CD を引き直す。
-        // 負のまま放置すると「危機が明けた最初のフレームで、待っていた全個体が
-        // 同時に skullCd <= 0 を満たして一斉に予兆入りする」束が生まれる
-        // (冒頭コメントの『一斉発射しない』の抜け穴だった)
-        if (b.skullCd !== undefined && b.skullCd <= 0) {
-          b.skullCd = S.gateRecoverMin +
-            Math.random() * (S.gateRecoverMax - S.gateRecoverMin);
-        }
-        if (fx) fx.ring.alpha = 0.4;
-        return;
-      }
-
-      if (b.skullVolley) {
-        // 発射中: パターンの続きを撃つ(発射口は玉に追従)。マークは最速で明滅。
-        // 処理落ちフレームでは while で複数ステップまとめて撃つ
-        var v = b.skullVolley;
-        if (fx) fx.ring.alpha = 0.7 + 0.3 * Math.sin(t * 24);
-        v.timer -= dt;
-        while (v.timer <= 0 && v.step < v.steps) {
-          volleyStep(b, lane);
-          v.timer += v.gap;
-        }
-        if (v.step >= v.steps) {
-          b.skullVolley = null;
-          b.skullCd = nextCd();
-          if (fx) fx.ring.alpha = 0.4;
-        }
-        return;
-      }
-
-      if (b.skullTele > 0) {
-        // 予兆中: マークのリングを速く強く明滅させて「来るぞ」を伝える
-        b.skullTele -= dt;
-        if (fx) fx.ring.alpha = 0.55 + 0.45 * Math.sin(t * 18);
-        if (b.skullTele <= 0) {
-          startVolley(b, lane, b.skullType || pickType());
-        }
-        return;
-      }
-
-      // 通常時: ゆっくり脈動しつつクールダウンを消化
-      if (fx) fx.ring.alpha = 0.3 + 0.15 * Math.sin(t * 3);
-      b.skullCd = (b.skullCd === undefined ? S.firstDelay : b.skullCd) - dt;
-      if (b.skullCd <= 0) {
-        // 同時攻撃の全体ゲート: 予兆〜発射中が teleMaxActive 体いる、または
-        // 直前の予兆開始から teleSpacing 秒経っていないなら、少し待って
-        // 再挑戦する(=攻撃開始が階段状にばらけ、常に「どこかが撃ち、
-        // どこかが黙る」波になる。全員一斉は構造的に起きない)
-        if (attacking >= S.teleMaxActive || t - lastTeleAt < S.teleSpacing) {
-          b.skullCd = S.teleRetryMin +
-            Math.random() * (S.teleRetryMax - S.teleRetryMin);
-          return;
-        }
-        attacking++;
-        lastTeleAt = t;
-        // どのデバフを撃つかは予兆の時点で決め、予兆リングをその色で出す
-        // (=飛んでくる前から種類が読める)。警告音の高さも種類で変える
-        b.skullType = pickType();
-        var T = TYPES[b.skullType];
-        b.skullTele = S.telegraph;
-        lane.rail.posAtInto(b.d + (b.slide || 0), tmpPos);
-        PP.fx.ring(tmpPos.x, tmpPos.y, T.color, 8, 50, S.telegraph * 1000);
-        PP.audio.beep(T.teleBeep, 0.3, "sawtooth", 0.08);
-      }
-    });
+    stepAttacking = 0;
+    PP.game.eachLaneBall(countAttacking);
+    PP.game.eachLaneBall(stepSkullBall);
   }
 
   // 妖弾の進行: 移動 → 自弾との迎撃 → 大砲への命中 → 画面外の後始末

@@ -75,11 +75,34 @@
   var lastGaugeKey = null, gaugeGlowOn = false;
   var gaugeGlowDrawn = false;   // 点滅枠の形は一度だけ描き、以後は alpha だけ動かす
   var lastGaugeTenth = null;    // 残り秒表示は 0.1 秒粒度。変わった時だけ文字列を作る
+  var gaugeTimeStr = "";        // ↑で作った残り秒の文字列(粒度が同じ間は使い回す)
   // チップ構築の間引き用(初回は必ず構築する)
   var effAcc = 1;
 
   // 桁区切り
   function comma(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
+
+  // ---------- Shadow 付き Text の cache 化 ----------
+  // Shadow 付きの Text は cache しないと、文字が変わらなくても stage.update() の
+  // たびに shadowBlur 付きのラスタライズが走る(config.js の PERF コメントの通り、
+  // 携帯ではこれが HUD 最大の負荷)。想定最大サイズの固定領域で一度だけ cache し、
+  // 以後は text/color を書いた側が updateCache() だけを呼ぶ。領域を固定にするのは、
+  // 幅が変わるたびに cache() し直すと cache canvas の再確保が起きて GC 圧になる
+  // ため(fx.js のプールと同じ「器は使い回す」発想)。
+  function cacheHudText(t, maxW, maxH, pad) {
+    pad = pad || 10;   // Shadow(offset 0-3 / blur 3-8)がはみ出さない余白
+    var x0 = t.textAlign === "center" ? -maxW / 2 : t.textAlign === "right" ? -maxW : 0;
+    var y0 = t.textBaseline === "middle" ? -maxH / 2 : 0;
+    t.cache(x0 - pad, y0 - pad, maxW + pad * 2, maxH + pad * 2);
+    PP.regFontCache(t);   // Web フォント到着時に一度だけ焼き直す(config.js)
+  }
+  // cache 済み Text の書き換え口。実際に変わったときだけ代入して焼き直す
+  function setCachedText(t, str, color) {
+    if (t.text === str && (color === undefined || t.color === color)) return;
+    t.text = str;
+    if (color !== undefined) t.color = color;
+    t.updateCache();
+  }
 
   function build() {
     var L = PP.layers.hud;
@@ -114,7 +137,7 @@
     L.addChild(bar);
 
     // ---- ステータス(絵文字アイコン + ラベル + 数値) ----
-    function stat(icon, label, x, valColor) {
+    function stat(icon, label, x, valColor, maxW) {
       var ic = new createjs.Text(icon, F_ICON, "#ffffff");
       ic.x = x; ic.y = mid; ic.textBaseline = "middle";
       var lb = new createjs.Text(label, F_LBL, C_LBL);
@@ -122,11 +145,12 @@
       var v = new createjs.Text("", F_VAL, valColor || C_VAL);
       v.x = x + 27; v.y = 25;
       v.shadow = new createjs.Shadow("rgba(0,0,0,0.65)", 0, 1, 3);
+      cacheHudText(v, maxW || 90, 30);
       L.addChild(ic, lb, v);
       return v;
     }
     hudLevel = stat("⚓", "LEVEL", 18);
-    hudScore = stat("💰", "SCORE", 106);
+    hudScore = stat("💰", "SCORE", 106, null, 200);   // カンマ付き9桁まで
     hudWave  = stat("🌊", "WAVE", 302);
     hudCombo = stat("🔥", "COMBO", 396);
 
@@ -144,6 +168,7 @@
     gaugeText.x = GAUGE_X + GAUGE_W + 12; gaugeText.y = mid;
     gaugeText.textBaseline = "middle";
     gaugeText.shadow = new createjs.Shadow("rgba(0,0,0,0.6)", 0, 1, 3);
+    cacheHudText(gaugeText, 190, 30);   // 英語の "Slay the beast!" まで収まる幅
     L.addChild(gaugeText);
 
     // ---- 有効パワーアップ(ピル型チップ + アイコン+残り秒) ----
@@ -152,6 +177,7 @@
     hudEffects = new createjs.Text("", F_EFF, C_TEAL);
     hudEffects.x = 826; hudEffects.y = mid; hudEffects.textBaseline = "middle";
     hudEffects.shadow = new createjs.Shadow("rgba(20,120,110,0.7)", 0, 0, 8);
+    cacheHudText(hudEffects, 460, 26, 20);   // blur 8 のグローが切れない余白
     L.addChild(hudEffects);
 
     // 【課題5】コインとライフの表示(右端)
@@ -159,6 +185,7 @@
     hudCoinLife.x = W - 70; hudCoinLife.y = mid;   // 右上の全画面ボタン(⛶)を避ける
     hudCoinLife.textAlign = "right"; hudCoinLife.textBaseline = "middle";
     hudCoinLife.shadow = new createjs.Shadow("rgba(0,0,0,0.65)", 0, 1, 3);
+    cacheHudText(hudCoinLife, 230, 28);
     L.addChild(hudCoinLife);
 
     // ---- ポーズボタン(全画面ボタン⛶の下に置く真鍮の小ボタン) ----
@@ -202,6 +229,7 @@
       wildCountTxt.textAlign = "center"; wildCountTxt.textBaseline = "middle";
       wildCountTxt.x = wr.x + wr.w / 2; wildCountTxt.y = wr.y + 62;
       wildCountTxt.shadow = new createjs.Shadow("rgba(0,0,0,0.65)", 0, 1, 3);
+      cacheHudText(wildCountTxt, 100, 26);
       // 「Q」のキーキャップ(右上の隅)。ショートカットの存在を画面上で教える
       var cap = new createjs.Shape();
       cap.graphics
@@ -235,23 +263,24 @@
       info.armed ? "#8ef0d0" : lit ? "rgba(202,169,106,0.8)" : "rgba(202,169,106,0.3)")
       .drawRoundRect(wr.x, wr.y, wr.w, wr.h, 12);
     wildIconTxt.alpha = lit ? 1 : 0.45;                 // 在庫0は減灯
-    wildCountTxt.text = info.armed ? PP.i18n.t("hud.wildArmed") : "x" + info.charges;
-    wildCountTxt.color = info.armed ? C_TEAL : lit ? C_VAL : "#8a8578";
+    setCachedText(wildCountTxt,
+      info.armed ? PP.i18n.t("hud.wildArmed") : "x" + info.charges,
+      info.armed ? C_TEAL : lit ? C_VAL : "#8a8578");
   }
 
   function update() {
     var g = PP.game;
-    hudLevel.text = String(g.level);
+    setCachedText(hudLevel, String(g.level));
     // 波番号はレーンごとに進むので、一番進んでいるレーンの波数を表示する
     var wave = 0;
     for (var wi = 0; wi < g.lanes.length; wi++) if (g.lanes[wi].wave > wave) wave = g.lanes[wi].wave;
     // ボス戦は補給が絶え間ない(波の番号に意味がない)ので「∞」を出す
-    hudWave.text = g.bossMode ? "∞" : String(wave);
-    hudCombo.text = g.combo >= 2 ? "x" + g.combo : "-";
+    setCachedText(hudWave, g.bossMode ? "∞" : String(wave));
     // コンボの色段階(2→黄 / 4→橙 / 6→ピンク / 8+→赤)
-    hudCombo.color = g.combo < 2 ? C_VAL
+    setCachedText(hudCombo, g.combo >= 2 ? "x" + g.combo : "-",
+      g.combo < 2 ? C_VAL
       : g.combo < 4 ? "#ffd15a" : g.combo < 6 ? "#ff9a3c"
-      : g.combo < 8 ? "#ff5d8f" : "#ff3b5b";
+      : g.combo < 8 ? "#ff5d8f" : "#ff3b5b");
     // コンボが上がった瞬間にポップ
     if (g.combo > lastCombo && g.combo >= 2) {
       createjs.Tween.get(hudCombo, { override: true })
@@ -261,8 +290,8 @@
     lastCombo = g.combo;
     // 【課題5】コインとライフ(ライフ0は "-"、ライフ回復なしの難易度では "✕")。
     // 必要枚数は【強化】「換金術」で減ることがあるので PP.coinsPerLife() を読む
-    hudCoinLife.text = "🪙 " + g.coins + "/" + PP.coinsPerLife() +
-      "   ❤ " + (PP.diff().useLives === false ? "✕" : (g.lives > 0 ? g.lives : "-"));
+    setCachedText(hudCoinLife, "🪙 " + g.coins + "/" + PP.coinsPerLife() +
+      "   ❤ " + (PP.diff().useLives === false ? "✕" : (g.lives > 0 ? g.lives : "-")));
   }
 
   // パワーアップ・状態異常のチップ行を組み立てて差し替える(0.25秒に1回)
@@ -295,6 +324,7 @@
     if (effText !== lastEffectsText) {
       lastEffectsText = effText;
       hudEffects.text = effText;
+      hudEffects.updateCache();
       effectsChip.graphics.clear();
       if (parts.length) {
         var tw = hudEffects.getMeasuredWidth();
@@ -360,6 +390,7 @@
     if (rounded !== lastScoreDrawn) {
       lastScoreDrawn = rounded;
       hudScore.text = comma(rounded);
+      hudScore.updateCache();
     }
 
     // パワーアップのチップ。表示値は Math.ceil の秒なので、配列構築+join は
@@ -376,15 +407,13 @@
       // ボス戦: 生存ゲージの代わりに討伐の合図(深紅で満たして
       // 「時間切れ待ちではない」ことを示す)。1戦につき1回しか描かない
       gKey = "boss";
-      gaugeText.text = PP.i18n.t("hud.bossGauge");
-      gaugeText.color = "#ffb0a0";
+      setCachedText(gaugeText, PP.i18n.t("hud.bossGauge"), "#ffb0a0");
       lastGaugeTenth = null;   // 通常ゲージへ戻った最初のフレームで必ず書き直す
     } else if (g.finishing) {
       gKey = "fin";
       var left = 0;
       for (var li = 0; li < g.lanes.length; li++) left += g.lanes[li].balls.length;
-      gaugeText.text = PP.i18n.t("hud.remain", { n: left });
-      gaugeText.color = C_TEAL;
+      setCachedText(gaugeText, PP.i18n.t("hud.remain", { n: left }), C_TEAL);
       lastGaugeTenth = null;
     } else {
       ratio = g.timeTotal > 0 ? Math.max(0, g.timeLeft / g.timeTotal) : 0;
@@ -392,13 +421,14 @@
       if (ratio > 0.01) fillW = Math.max(6, (GAUGE_W - 3) * ratio);
       gKey = "n:" + Math.round(fillW) + (low ? "L" : "");
       // 表示は 0.1 秒刻みなのに 60Hz で毎フレーム文字列を作り直すのは無駄
-      // (toFixed も Text の再計測も走る)。値の刻みが変わった時だけ更新する
+      // (toFixed も Text の再計測も走る)。値の刻みが変わった時だけ作り直し、
+      // 焼き直し(updateCache)は setCachedText の変化検知に任せる
       var tenth = Math.max(0, Math.round(g.timeLeft * 10));
       if (tenth !== lastGaugeTenth) {
         lastGaugeTenth = tenth;
-        gaugeText.text = (tenth / 10).toFixed(1) + "s";
+        gaugeTimeStr = (tenth / 10).toFixed(1) + "s";
       }
-      gaugeText.color = low ? "#ff8a6a" : C_VAL;
+      setCachedText(gaugeText, gaugeTimeStr, low ? "#ff8a6a" : C_VAL);
     }
 
     // 残り僅少の赤く脈打つグロー。形は不変で明滅だけが動くので、パスの再構築は
@@ -472,6 +502,11 @@
     overlayTitle.textAlign = "center";
     overlayTitle.x = W / 2; overlayTitle.y = panelBox().y + 34;
     overlayTitle.shadow = new createjs.Shadow("rgba(0,0,0,0.7)", 0, 3, 8);
+    // タイトル画面等でも stage.update は毎フレーム走るので、38px + blur 8 の
+    // 再ラスタライズを止める。fitOverlayText は「はみ出したら縮める」方式で
+    // 縮小前の実測幅は上限がないため、cache 領域は等倍の最長タイトルを
+    // 収められる広さで取る(1枚だけなのでメモリは誤差)
+    cacheHudText(overlayTitle, 1000, 110, 20);
     O.addChild(overlayTitle);
     overlaySub = new createjs.Text("", '17px "Hiragino Kaku Gothic ProN","Meiryo",sans-serif', "#f5e8c8");
     overlaySub.textAlign = "center"; overlaySub.lineHeight = 27;
@@ -706,6 +741,7 @@
     // それでも超えた分だけここで吸収する(getMeasuredWidth は最長行の実測)
     fitOverlayText(overlayTitle, PANEL.w - 36);
     fitOverlayText(overlaySub, PANEL.w - 28);
+    overlayTitle.updateCache();   // text/color/fit を確定させてから一度だけ焼く
 
     if (pauseBtn) pauseBtn.visible = false;   // 全画面パネルの上にボタンを残さない
     if (swapBtn) swapBtn.visible = false;

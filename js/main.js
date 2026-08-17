@@ -107,7 +107,13 @@
     // 各レーンのチェーン状態をリセット(玉の表示も片付ける)
     g.ballsDirty = true;
     g.lanes.forEach(function (lane) {
-      lane.balls.forEach(function (b) { if (b.view.parent) b.view.parent.removeChild(b.view); });
+      // 色玉はプールへ返す(宝玉など makeView 製でない view は releaseView が
+      // 受け取らないので、従来どおり外すだけ)。リトライ/コース替えのたびに
+      // プールが温まり、次の波の補給が丸ごと生成ゼロで済む
+      lane.balls.forEach(function (b) {
+        PP.ball.releaseView(b.view);
+        if (b.view.parent) b.view.parent.removeChild(b.view);
+      });
       lane.balls = [];
       lane.recoil = null;
       lane.wave = 0;
@@ -745,10 +751,15 @@
   // background の光の塵(内訳は config.js の PP.PERF.LOW)
   var fpsAvg = 60, qualHold = 0;
   PP.quality = 1;
+  // FPS の指数移動平均は品質自動調整と ?fps=1 の計測表示が共用する。
+  // PERF.AUTO を切っても計測表示が生きるよう、平均の更新は判定から分離してある
+  function updateFpsAvg(rawDt) {
+    if (rawDt <= 0) return;
+    fpsAvg += (1 / rawDt - fpsAvg) * Math.min(1, rawDt / PP.PERF.FPS_WINDOW);
+  }
   function updateQuality(rawDt) {
     if (!PP.PERF.AUTO || rawDt <= 0) return;
     var P = PP.PERF;
-    fpsAvg += (1 / rawDt - fpsAvg) * Math.min(1, rawDt / P.FPS_WINDOW);
     if (PP.quality === 1 && fpsAvg < P.LOW_ENTER) {
       qualHold += rawDt;
       if (qualHold >= P.HOLD) { PP.quality = 0; qualHold = 0; }
@@ -760,8 +771,51 @@
     }
   }
 
+  // ---------- FPS計測表示(?fps=1)----------
+  // 実機での軽量化の効果測定用。計測表示そのものが負荷にならないよう、
+  //   ・Shadow なしの素の Text 1 個(stage 直下=全レイヤーより上)
+  //   ・0.25 秒間引き+文字列が変わったときだけ text 代入(hud.js と同じ dirty 方式)
+  // で描く。玉数は「いま何個抱えて重いのか」の文脈を掴むために添える。
+  var fpsText = null, fpsMeterAcc = 0, fpsMeterStr = "";
+  var fpsBallCount = 0;
+  function countLaneBalls(lane) { fpsBallCount += lane.balls.length; }
+  function buildFpsMeter() {
+    fpsText = new createjs.Text("", 'bold 13px "Consolas","Menlo",monospace', "#7fffd4");
+    fpsText.x = 8; fpsText.y = PP.H - 22;
+    fpsText.mouseEnabled = false;
+    stage.addChild(fpsText);
+  }
+  function updateFpsMeter(rawDt) {
+    if (!fpsText) return;
+    fpsMeterAcc += rawDt;
+    if (fpsMeterAcc < 0.25) return;
+    fpsMeterAcc = 0;
+    fpsBallCount = 0;
+    PP.game.eachLane(countLaneBalls);
+    var s = "FPS " + fpsAvg.toFixed(1) + " | Q" + PP.quality + " | balls " + fpsBallCount;
+    if (s !== fpsMeterStr) { fpsMeterStr = s; fpsText.text = s; }
+  }
+
+  // tick 内で eachLane へ渡すループ本体。無名関数のまま渡すと毎フレーム
+  // クロージャの確保が起きて GC のゴミになるので、モジュールスコープへ
+  // 巻き上げる(ループの結果はモジュール変数 deadLaneFound で受け取る)
+  function recordLeadD(lane) {
+    if (lane.balls.length) lane.leadD = lane.balls[0].d;
+  }
+  var deadLaneFound = null;
+  function findDeadLane(lane) {
+    if (lane.balls.length > 0 &&
+        lane.balls[0].d >= lane.rail.holeD + PP.D * PP.barrelCap()) {
+      deadLaneFound = lane; return false;
+    }
+  }
+
   // ---------- メインループ ----------
   function tick(e) {
+    // FPS の平均と計測表示はポーズ中も更新する(ポーズ画面の描画負荷も見たい)
+    var rawDt = e.delta / 1000;
+    updateFpsAvg(rawDt);
+    updateFpsMeter(rawDt);
     // ポーズ(停泊)中はゲームの一切を進めない。描画だけ更新して、
     // ポーズ画面の表示とクリック(解除)を受け付ける
     if (PP.pauseCtl && PP.pauseCtl.active) {
@@ -770,7 +824,7 @@
     }
     var dt = Math.min(e.delta / 1000, 0.05);
     var g = PP.game;
-    updateQuality(e.delta / 1000);
+    updateQuality(rawDt);
 
     // マウス格納(Pointer Lock)の見張り。カード選択・クリア・ゲームオーバー等
     // 「カーソルで押す画面」へ移った瞬間に返上する(input.js watchLock)
@@ -784,9 +838,7 @@
       }
       PP.chain.update(dt);         // 全レーンのチェーンを更新
       // 先頭球の位置を毎フレーム控える(クリア時の爆発走査の終点になる)
-      g.eachLane(function (lane) {
-        if (lane.balls.length) lane.leadD = lane.balls[0].d;
-      });
+      g.eachLane(recordLeadD);
       PP.cannon.updateShots(dt);   // 命中時にその場でマッチ判定される
       PP.powerups.update(dt);
       // bossFx(addle/freeze)の減算は ↑ の powerups.update に一本化されている。
@@ -809,13 +861,9 @@
       // ゲームオーバー判定: いずれかのレーンで樽の許容個数を超えたら。
       // 許容個数は難易度で変わる(【課題1】config.js の barrelBonus → PP.barrelCap)
       // ボス戦も同じ: 補給が絶え間ない代わりに、樽を守れなければ負け
-      var deadLane = null;
-      g.eachLane(function (lane) {
-        if (lane.balls.length > 0 &&
-            lane.balls[0].d >= lane.rail.holeD + PP.D * PP.barrelCap()) {
-          deadLane = lane; return false;
-        }
-      });
+      deadLaneFound = null;
+      g.eachLane(findDeadLane);
+      var deadLane = deadLaneFound;
       if (deadLane) {
         // 【課題5-2】(模範解答つき) ライフが残っていればゲームオーバーの代わりに、
         // ライフを1つ使ってこのステージの最初からやり直す(スコアとコインは残る)。
@@ -894,7 +942,7 @@
     PP.fx.updateShake(dt);
     PP.fx.updateParticles(dt);   // プール式パーティクルの前進(fx.js)
     PP.cannon.updateHurt(dt);    // 被弾後の無敵の点滅(非プレイ時は自動で解除される)
-    PP.cannon.updateAim();
+    PP.cannon.updateAim(dt);   // dt は望遠鏡の着弾走査(firstHitY)の間引きに使う
     PP.cannon.updateGuide(dt);   // 砲の真上の現在位置ガイド(格納中のカーソル代役)
 
     renderChains();
@@ -1158,7 +1206,19 @@
     // TweenJS(同じ tick イベントで進む)にも効くので、位相機械(dt駆動)と
     // Tween(演出)の進行がタブ切替でズレなくなる(EaselJS 1.0 の maxDelta)
     if ("maxDelta" in createjs.Ticker) createjs.Ticker.maxDelta = 50;
-    createjs.Ticker.timingMode = createjs.Ticker.RAF;
+    // 120Hz/144Hz 画面の端末では素の RAF だと毎秒 120 回 tick+全描画が走り、
+    // それだけで 60Hz 端末の倍の描画負荷になる(ミドル帯スマホに多い構成)。
+    // RAF_SYNCHED は rAF の拍に同期したまま目標 FPS へ間引くモードで、
+    // 60Hz 画面では実質無変化。dt 駆動なのでゲームの進行速度も変わらない。
+    // 万一ジャダーが出た端末の切り分け用に ?hz=raf で従来挙動へ戻せる。
+    if (new URLSearchParams(location.search).get("hz") === "raf") {
+      createjs.Ticker.timingMode = createjs.Ticker.RAF;
+    } else {
+      createjs.Ticker.timingMode = createjs.Ticker.RAF_SYNCHED;
+      createjs.Ticker.framerate = 60;
+    }
+    // デバッグ: index.html?fps=1 で左下に FPS / 品質 / 玉数の計測表示を出す
+    if (new URLSearchParams(location.search).get("fps")) buildFpsMeter();
     createjs.Ticker.on("tick", tick);
     // headless smoke test でも確認できる、全同期初期化の完了マーカー。
     // audio preload の完了前でも stage・各モジュール・入力配線は利用可能になっている。

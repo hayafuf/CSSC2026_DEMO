@@ -124,7 +124,7 @@
     while (lane.pending > 0 &&
            (balls.length === 0 || lane.waveFresh || balls[balls.length - 1].d >= D)) {
       var color = PP.ball.spawnColor(lane);
-      var view = PP.ball.makeView(color);
+      var view = PP.ball.acquireView(color);   // プールの器を使い回す(ball.js)
       var d;
       if (balls.length === 0 || lane.waveFresh) {
         d = 0;                                // 新しい波は洞窟から
@@ -829,7 +829,9 @@
         .wait(k * 15)
         .to({ scaleX: 1.35, scaleY: 1.35 }, 60)
         .to({ scaleX: 0, scaleY: 0, alpha: 0 }, 100, createjs.Ease.backIn)
-        .call(function () { if (b.view.parent) b.view.parent.removeChild(b.view); });
+        // releaseView は自分(この Tween)も removeTweens で止めるが、
+        // .call は Tween の最後のアクションなので巻き添えの問題はない
+        .call(function () { PP.ball.releaseView(b.view); });
     });
     return removed.length;
   }
@@ -1027,7 +1029,7 @@
     var p = lane.rail.posAt(hit.d);
     // レール接線との内積で、樽側(前)か補給側(後)かを決定
     var dot = (sh.x - p.x) * p.tx + (sh.y - p.y) * p.ty;
-    var view = PP.ball.makeView(sh.color);
+    var view = PP.ball.acquireView(sh.color);   // プールの器を使い回す(ball.js)
     PP.layers.ballUnder.addChild(view);   // 既定は下層。交差では描画側が上層へ移す
     var newBall = {
       color: sh.color, wave: hit.wave, view: view, pull: 0, slide: 0,
