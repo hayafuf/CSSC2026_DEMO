@@ -889,9 +889,12 @@
       PP.fx.burst(PP.cannon.x, PP.cannon.y - 30, "#ffd24a", 14, 2.0);
       PP.fx.shake(14, 0.3);
     } else if (b.type === "cross") {
-      // 両舷斉射の被弾もスタン。hitCd の間は cross 弾に当たらない(スタンロック防止)
+      // 両舷斉射の被弾もスタン。hitCd の間は cross 弾に当たらない(スタンロック防止)。
+      // シールドはスタン(5秒)より長く張る必要があるため、点滅(見た目)も
+      // 共通の hitIFrames(2秒)ではなく hitCd に合わせて延長する
       g.bossFx.freeze = Math.max(g.bossFx.freeze, B.cross.stun);
       crossHitCd = B.cross.hitCd;
+      PP.cannon.setHurt(B.cross.hitCd);
       PP.audio.debuff();
       PP.fx.ring(PP.cannon.x, PP.cannon.y - 40, "#9fd8ff", 12, 100, 500);
     } else if (b.type === "randomize") {

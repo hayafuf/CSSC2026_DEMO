@@ -155,6 +155,9 @@
     game.continues++;
     game.continueStages.push(game.level);
     game.failStreak++;                 // ピティドロップの連続失敗として数える
+    // 救済: ゲームオーバーのたびに虹玉(切り札)を1個補充する(最大数まで)。
+    // ピティドロップ(powerups.js)と同じ「負けた人ほど道具が厚くなる」思想
+    game.wildCharges = Math.min(game.wildMax, game.wildCharges + 1);
     game.score = 0;
     game.coins = 0;
     game.lives = PP.LIFE.startLives;   // maxLives(3)ではなく出航時の枚数へ全回復
