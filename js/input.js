@@ -351,6 +351,7 @@
     bindFire("tFire");
     bindTap("tSwap", function () { PP.cannon.swap(); });
     bindTap("tWild", function () { PP.upgrades.toggleWild(); });   // 【新】🌈 虹玉
+    bindTap("tParry", function () { PP.upgrades.pressParry(); });  // 【強化】🛡 パリィの構え
   }
 
   function bindKeyboard(startLevel) {
@@ -383,6 +384,10 @@
       } else if (event.code === PP.WILD.key) {
         // 【新】虹玉の手動装填トグル(プレイ中のみ。詳細は upgrades.toggleWild)
         if (canPlay()) PP.upgrades.toggleWild();
+      } else if (PP.PARRY.keys.indexOf(event.code) >= 0) {
+        // 【強化】パリィの構え(妖弾返しカード所持時のみ意味を持つ)。
+        // キーリピートで窓を張り直せないよう最初の押下だけ通す
+        if (!event.repeat && canPlay()) PP.upgrades.pressParry();
       } else if (event.code === "KeyM") {
         PP.fx.floatText(PP.i18n.t(PP.audio.toggleMute() ? "in.mute" : "in.unmute"),
           PP.W / 2, 88, "#f0e6c8", 22);

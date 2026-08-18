@@ -340,6 +340,14 @@
     }
     .tbtn-wild.armed { border-color: rgba(142,240,208,.85); color: #8ef0d0; }
     .tbtn-wild.empty { opacity: .45; }
+    /* 🛡 パリィボタン(🌈 の左)。妖弾返しカードを取るまで hidden(hud.js が制御)。
+       .cd = 構え直しのクールダウン中 / .active = 受付窓が開いている間 */
+    .tbtn-parry {
+      right: calc(262px + env(safe-area-inset-right)); bottom: calc(20px + env(safe-area-inset-bottom));
+      width: 60px; height: 60px; font-size: 24px;
+    }
+    .tbtn-parry.cd { opacity: .45; }
+    .tbtn-parry.active { border-color: rgba(142,240,208,.9); color: #8ef0d0; }
     .tbtn-wild.suggest { border-color: rgba(142,240,208,.9); }
     /* 点滅は box-shadow を補間せず(毎フレーム再ペイントになる)、静的な影を
        持つ ::after の opacity で明滅させる。opacity はコンポジタで完結する */
@@ -403,12 +411,13 @@
       <button id="tRight" class="tbtn" tabindex="-1">▶</button>
       <button id="tSwap"  class="tbtn tbtn-swap" tabindex="-1">⇄</button>
       <button id="tWild"  class="tbtn tbtn-wild" tabindex="-1">🌈</button>
+      <button id="tParry" class="tbtn tbtn-parry" tabindex="-1" hidden>🛡</button>
       <button id="tFire"  class="tbtn tbtn-fire" tabindex="-1">FIRE</button>
     </div>
   </div>
   <!-- スマホ縦持ちのときだけ CSS(orientation: portrait)で表示される案内 -->
   <div id="rotateHint">📱 端末を横向きにしてください<br>この海賊船は横長の海でしか戦えません</div>
-  <p class="hint" id="hintText">マウスで大砲を左右に移動、クリックで真上に発射!右クリックか Space で玉を交換。<b>Q キーか画面の 🌈 ボタンで虹玉(万能玉)を装填</b>。落ちてくる宝やパワーアップは大砲でキャッチ!<br>BGM と効果音は最初のクリックで鳴り始めます(M キーで消音)。<br>🛠 <b>E キー</b>か下のボタンで<b>コースエディタ</b>を開いて、自分だけの航路を作れます。</p>
+  <p class="hint" id="hintText">マウスで大砲を左右に移動、クリックで真上に発射!右クリックか Space で玉を交換。<b>Q キーか画面の 🌈 ボタンで虹玉(万能玉)を装填</b>。💎 で「妖弾返し」を取れば <b>Shift キーか 🛡 ボタン</b>で敵弾をパリィ!落ちてくる宝やパワーアップは大砲でキャッチ!<br>BGM と効果音は最初のクリックで鳴り始めます(M キーで消音)。<br>🛠 <b>E キー</b>か下のボタンで<b>コースエディタ</b>を開いて、自分だけの航路を作れます。</p>
 
   <!-- CreateJS は lib/ に同梱してセルフホストする。CDN への同期読み込みは
        「別サーバーへの接続が終わるまで起動が止まる」うえ、CDN が落ちると

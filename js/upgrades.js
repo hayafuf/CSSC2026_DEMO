@@ -69,6 +69,9 @@
   // 両方持っていても待機スロット(g.special)は1つなので、先に満了した方が
   // 勝ち、負けた方は 0 で待つ=合計スループットに自然な上限がかかる(意図)
   var autoDeliverT = { autobomb: 0, automissile: 0 };
+  // パリィの構え: 受付窓の残り秒・次に構えられるまでの残り秒・
+  // この構えで弾き返し(反射)の当たりを引いているか(押した瞬間に抽選)
+  var parryWindowT = 0, parryCdT = 0, parryReflectArmed = false;
   // 強化圧(動的難易度)用: 全カードの合計段数から事前計算した倍率。
   // speedAt は毎フレーム×玉数で呼ばれるホットパスなので、カード取得時にだけ
   // 再計算してここに置く(chain.js は関数呼び出し1回で読むだけ)
@@ -102,6 +105,92 @@
     b += level("bombw") * (byId.bombw.dropPt || 0);
     b += level("missw") * (byId.missw.dropPt || 0);
     return b;
+  }
+
+  // パリィの段数ごとの受付秒(定義表 windows から引く)
+  function parryWindow(lv) {
+    if (!lv) return 0;
+    var w = byId.parry.windows;
+    return w[Math.min(lv, w.length) - 1];
+  }
+
+  // パリィの段数ごとの弾き返し確率(定義表 reflectChances から引く)
+  function parryReflectChance(lv) {
+    if (!lv) return 0;
+    var c = byId.parry.reflectChances;
+    return c[Math.min(lv, c.length) - 1];
+  }
+
+  // 【新】パリィの構え(input.js: PC は Shift キー、タッチ端末は #tParry が呼ぶ)。
+  // 押した瞬間から受付窓が開き、窓の間に大砲へ届いた敵弾を tryParry が弾く。
+  // 押すたびに固定のクールダウンを払う=連打・押しっぱなしで常時ガードには
+  // できない(空振りにもコストがある「読みの技」にする)
+  function pressParry() {
+    if (!has("parry")) return;
+    if (PP.game.state !== "playing") return;   // タッチの #tParry は状態を見ずに呼ぶため
+    if (parryCdT > 0) {
+      // まだ構え直せない: 低い空振り音だけ返す(無反応だと故障に見える)
+      PP.audio.beep(220, 0.05, "triangle", 0.04);
+      return;
+    }
+    parryWindowT = parryWindow(level("parry"));
+    parryCdT = PP.PARRY.cooldown;
+    // 弾き返せるかは「構えた瞬間」に1回だけ抽選する(弾ごとに引き直さない):
+    // 同じ構えで弾いた弾幕は全弾同じ結果になり、挙動が読みやすい
+    parryReflectArmed = Math.random() < parryReflectChance(level("parry"));
+    // 構えの合図: シールドの傘を即座に立てる(位置・alpha は update が毎フレーム追従)
+    ensureParryShield();
+    parryShield.visible = true;
+    parryShield.x = PP.cannon.x;
+    parryShield.y = PP.cannon.y - 8;
+    parryShield.alpha = 1;
+    PP.fx.ring(PP.cannon.x, PP.cannon.y - 40, "#8ef0d0", 6, 60, 260);
+    PP.audio.beep(660, 0.05, "square", 0.06);
+  }
+
+  // skull.js / boss.js の被弾判定が呼ぶ。0=不発 / 1=ガード / 2=弾き返し。
+  // ガードは受付窓内なら必ず成功し、弾き返しは pressParry で引いた確率の
+  // 当たりが出ているときだけ(Lv1 は確率 0=常にガード止まり)。
+  // 窓は消費しない: 同時に降ってきた弾幕を1回の構えでまとめて弾けるのが
+  // このカードの本領(弾幕の同時被弾がそもそもの導入動機)。
+  // どの攻撃に効くか(ボス大技の除外など)は呼び出し側の知識なのでここでは見ない
+  function tryParry() {
+    if (!has("parry") || parryWindowT <= 0) return 0;
+    return parryReflectArmed ? 2 : 1;
+  }
+
+  // 【新】🛡 パリィボタン(#tParry)と HUD が読む表示用の状態
+  function parryInfo() {
+    return { lv: level("parry"), ready: parryCdT <= 0, active: parryWindowT > 0 };
+  }
+
+  // ---------- 【強化】パリィの構えシールド(受付窓の可視化) ----------
+  // 「いま弾ける状態か」を目で読めるようにする: 受付窓の間だけ大砲に teal の
+  // 光の傘を被せ、残り時間はフェードで示す(薄くなりきったら窓も閉じる)。
+  // boss.js のシールドの泡と同じ「描くのは1回、毎フレームは alpha と座標だけ」
+  // の作法(lighter 合成なので cache はしない: 発色が変わってしまう)
+  var parryShield = null;
+  // 泡の半径: 大砲の見た目の全部(砲身の上端 -62 / 砲架と車輪の下端 +47 /
+  // 幅 ±62。cannon.js build の cache 範囲)を余白込みで包む。中心は
+  // cannon.y - 8(上下の中点)に置く=pressParry / update と揃える
+  var PARRY_RX = 76, PARRY_RY = 68;
+  function ensureParryShield() {
+    if (parryShield) return;
+    parryShield = new createjs.Shape();
+    parryShield.graphics
+      .beginRadialGradientFill(
+        ["rgba(142,240,208,0)", "rgba(142,240,208,0.10)", "rgba(142,240,208,0.30)"],
+        [0, 0.8, 1], 0, 0, 20, 0, 0, PARRY_RX)
+      .drawEllipse(-PARRY_RX, -PARRY_RY, PARRY_RX * 2, PARRY_RY * 2)
+      .setStrokeStyle(2.5).beginStroke("rgba(190,255,230,0.85)")
+      .drawEllipse(-PARRY_RX, -PARRY_RY, PARRY_RX * 2, PARRY_RY * 2);
+    parryShield.compositeOperation = "lighter";
+    parryShield.visible = false;
+    PP.layers.fx.addChild(parryShield);
+  }
+  // プレイ以外の画面へ移るとき(hud.showOverlay)と レベル開始時に隠す
+  function hideParryShield() {
+    if (parryShield) parryShield.visible = false;
   }
 
   // パワーアップ抽選プールの重み補正(powerups.js drop / dropPower)。
@@ -358,6 +447,13 @@
     if (id === "wildshot") {
       return t("ug.prev.wildshot", { a: PP.WILD.baseMax + lv, b: PP.WILD.baseMax + lv + 1 });
     }
+    if (id === "parry") {
+      // レベルの主役は弾き返し確率(ユーザー体感の「当たり」)。受付秒も
+      // 静かに広がるが、プレビューは確率の伸びで見せる
+      var pc = function (lvl) { return Math.round(def.reflectChances[lvl - 1] * 100); };
+      return lv === 0 ? t("ug.prev.parry0", { v: def.windows[0].toFixed(2) })
+        : t("ug.prev.parry", { a: pc(lv), b: pc(lv + 1) });
+    }
     if (id === "droprate") {
       // ドロップ率への上乗せポイント(足し算)を絶対値で見せる: +2.5% → +5%
       var fmtPt = function (lvl) {
@@ -402,6 +498,25 @@
     if (has("autogun")) tickAutogun(dt);
     if (has("autobomb")) tickAutoDeliver(dt, "autobomb", "bomb", "💣");
     if (has("automissile")) tickAutoDeliver(dt, "automissile", "missile", "🚀");
+    // パリィの構え: 窓・クールダウンの進行と、構えシールドの追従
+    if (parryWindowT > 0) {
+      parryWindowT -= dt;
+      if (parryWindowT <= 0) hideParryShield();
+      else if (parryShield) {
+        parryShield.x = PP.cannon.x;
+        parryShield.y = PP.cannon.y - 8;
+        // 残り時間をフェードで示す(完全に薄くなる前に窓が閉じる)
+        parryShield.alpha = 0.30 + 0.70 * (parryWindowT / parryWindow(level("parry")));
+      }
+    }
+    if (parryCdT > 0) {
+      parryCdT -= dt;
+      // 構え直せるようになった合図(小さな teal リング。音は付けない:
+      // 1.2 秒ごとに毎回鳴ると耳障りで、目で分かれば十分)
+      if (parryCdT <= 0 && has("parry")) {
+        PP.fx.ring(PP.cannon.x, PP.cannon.y - 40, "#8ef0d0", 4, 44, 220);
+      }
+    }
     tickRescue(dt);
   }
 
@@ -698,6 +813,10 @@
     autogunT = has("autogun") ? val("autogun") : 0;
     autoDeliverT.autobomb = has("autobomb") ? val("autobomb") : 0;
     autoDeliverT.automissile = has("automissile") ? val("automissile") : 0;
+    parryWindowT = 0;
+    parryCdT = 0;
+    parryReflectArmed = false;
+    hideParryShield();
     rescue.active = false;
     rescue.wild = false;
     rescue.suggest = false;
@@ -728,6 +847,10 @@
     dropBonus: dropBonus,
     adjustPool: adjustPool,
     clusterBoost: clusterBoost,
+    tryParry: tryParry,       // 【新】パリィの成否判定(skull.js / boss.js の被弾処理)
+    pressParry: pressParry,   // 【新】パリィの構え(input.js: Shift キー / #tParry)
+    parryInfo: parryInfo,     // 【新】🛡 ボタン表示用の状態(hud.js)
+    hideParryShield: hideParryShield,   // 【新】構えシールドの後始末(hud.showOverlay)
     requestChoice: requestChoice,
     pendingChoice: pendingChoice,
     openChoice: openChoice,

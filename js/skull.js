@@ -145,7 +145,10 @@
       vx: Math.cos(ang) * spd,
       vy: Math.sin(ang) * spd,
       r: PP.SKULL.orbR, type: type, view: view,
-      t: Math.random() * 6.28          // 脈動・回転用(初期値ランダムで揃い踏み防止)
+      t: Math.random() * 6.28,         // 脈動・回転用(初期値ランダムで揃い踏み防止)
+      // 【強化】パリィの弾き返し先(発射元の髑髏玉)。volleyStep がモジュール
+      // 変数で受け渡す(stepDt と同じ流儀。opts 全呼び出しの書き換えを避ける)
+      srcBall: volleySrc, srcLane: volleySrcLane
     };
     if (opts) {
       if (opts.vx !== undefined) b.vx = opts.vx;
@@ -209,11 +212,14 @@
     PP.audio.darkMagic();   // 暗黒魔法の発射音
   }
 
-  // 弾幕の1ステップぶんを発射(タイプ×変種で4パターン)
+  // 弾幕の1ステップぶんを発射(タイプ×変種で4パターン)。
+  // 発射元(パリィの弾き返し先)は spawnBullet がモジュール変数経由で弾に写す
+  var volleySrc = null, volleySrcLane = null;
   function volleyStep(b, lane) {
     var S = PP.SKULL;
     var v = b.skullVolley;
     var T = TYPES[v.type];
+    volleySrc = b; volleySrcLane = lane;
     lane.rail.posAtInto(b.d + (b.slide || 0), tmpPos);
     var x = tmpPos.x, y = tmpPos.y;
     if (v.type === "freeze" && v.variant === "B") {
@@ -319,6 +325,29 @@
     var b = bullets[i];
     if (b.view.parent) b.view.parent.removeChild(b.view);
     bullets.splice(i, 1);
+  }
+
+  // ---------- 【強化】パリィ(構えと成否判定は upgrades.js pressParry/tryParry) ----------
+  // 成功の合図。被弾ではないので shake は使わない(揺れは「食らった」の合図)。
+  // 音は上昇二連: 無敵バリアの既存 980 単発と聞き分けられるように
+  function fxParry(b, labelKey) {
+    PP.fx.ring(PP.cannon.x, PP.cannon.y - 40, "#8ef0d0", 8, 70, 350);
+    PP.fx.flash(b.x, b.y, "rgba(255,255,255,0.85)", 30);
+    PP.fx.floatText(PP.i18n.t(labelKey), PP.cannon.x, PP.cannon.y - 70, "#8ef0d0", 18);
+    PP.audio.beep(880, 0.06, "triangle", 0.08);
+    PP.audio.beep(1480, 0.09, "square", 0.06);
+  }
+
+  // 弾き返し開始(Lv2+): 弾を消さずに「撃った本人へ戻る味方の追尾弾」に作り替える。
+  // 軌道の芸(重力・蛇行・呼吸)は没収して素直な直進追尾に純化する
+  function startReflect(b) {
+    b.reflected = true;
+    b.grav = 0;
+    b.wave = null;
+    b.spdCurve = null;
+    fxParry(b, "parry.reflect");
+    PP.fx.ring(b.x, b.y, TYPES[b.type].color, 8, 60, 320);
+    PP.audio.gliss(600, 1200, 0.18, "square", 0.09);   // 上昇グリス=「返した」
   }
 
   // 骸骨玉ごとの発射管理: クールダウン → 予兆(マークが赤く明滅)→ 発射。
@@ -434,6 +463,37 @@
     for (var i = bullets.length - 1; i >= 0; i--) {
       var b = bullets[i];
       b.t += dt;
+      // 【強化】パリィの弾き返し弾: 撃った本人(髑髏玉)へ追尾して戻る味方の弾。
+      // 以降の敵弾ロジック(迎撃・大砲命中)には乗らない
+      if (b.reflected) {
+        var srcIdx = b.srcBall ? b.srcLane.balls.indexOf(b.srcBall) : -1;
+        if (srcIdx < 0) {
+          // 目標が先に消えていた: その場で霧散(空振り。直進を続けるより状態が単純)
+          PP.fx.burst(b.x, b.y, "#8ef0d0", 6, 1.0);
+          removeBullet(i);
+          continue;
+        }
+        b.srcLane.rail.posAtInto(b.srcBall.d + (b.srcBall.slide || 0), tmpPos);
+        var rdx = tmpPos.x - b.x, rdy = tmpPos.y - b.y;
+        var rd = Math.sqrt(rdx * rdx + rdy * rdy) || 1;
+        if (rd < b.r + PP.R) {
+          // 命中: destroyRange 経路なので撃破報酬(+400・ドロップ)も自動で付く
+          PP.fx.flash(tmpPos.x, tmpPos.y, "rgba(255,255,255,0.85)", 40);
+          PP.chain.destroySingle(b.srcLane, srcIdx);
+          removeBullet(i);
+          continue;
+        }
+        b.vx = rdx / rd * PP.PARRY.reflectSpeed;
+        b.vy = rdy / rd * PP.PARRY.reflectSpeed;
+        b.x += b.vx * dt;
+        b.y += b.vy * dt;
+        b.view.x = b.x; b.view.y = b.y;
+        b.view.scaleX = b.view.scaleY = BULLET_BASE * (1 + 0.14 * Math.sin(b.t * 10));
+        b.view.rotation = b.t * 160;
+        // トレイルは味方色(敵弾との見分け)
+        if (Math.random() < dt * 26) PP.fx.burst(b.x, b.y, "#8ef0d0", 1, 0.5);
+        continue;
+      }
       // freeze(錨)だけ重力で落下加速(遅く出て速く落ちる。横に逃げて躱す)。
       // b.grav があれば個別指定を優先(落錨の簾のロブ/追い錨の重い落下)
       if (b.type === "freeze") b.vy += (b.grav !== undefined ? b.grav : S.freezeGravity) * dt;
@@ -495,7 +555,19 @@
       if (Math.abs(b.x - cx) <= O.catchW &&
           b.y >= cy - O.catchTop && b.y <= cy + O.catchBottom) {
         if (playerHitCd <= 0) {
-          applyHit(b.type);
+          // 【強化】パリィ: 構え(Shift/🛡)の受付窓が開いていればガード(Lv1)/
+          // 弾き返し(Lv2+)。発射元の髑髏玉が既に消えていたらガードへ降格
+          var pr = PP.upgrades ? PP.upgrades.tryParry() : 0;
+          if (pr === 2 && b.srcBall && b.srcLane.balls.indexOf(b.srcBall) >= 0) {
+            startReflect(b);
+            continue;            // 弾は消さず、次フレームから追尾弾として飛ぶ
+          }
+          if (pr > 0) {
+            playerHitCd = PP.PARRY.guardIFrames;   // 扇の続きは既存のバリア演出が弾く
+            fxParry(b, "parry.guard");
+          } else {
+            applyHit(b.type);
+          }
         } else {
           PP.fx.burst(b.x, b.y, "#9fd8ff", 4, 0.9);
           if (parryBeepCd <= 0) {

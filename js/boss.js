@@ -107,6 +107,10 @@
   var crossCenterK = 0;     // 0→1: 両舷斉射のためにボスが中央へ寄っている度合い
   var meteorKnock = null;   // 隕石の爆風ノックバック {t, dur, fromX, toX}
   var orbHitCd = 0;         // プレイヤー被弾後の無敵秒(全妖弾共通。多段ヒット防止)
+  // 【強化】パリィ成功後の短い無敵。orbHitCd と分けるのは、あちらが触手・津波
+  // (パリィ不可の大技)の無敵判定にも共用されていて、パリィの無敵で大技まで
+  // 防げてしまう抜け穴になるため。こちらは妖弾の被弾判定だけが読む
+  var parryCd = 0;
   var parryBeepCd = 0;      // 無敵中の「弾いた」音の間引き(cross は毎秒30発来るため)
   var crossTele = [];       // 予兆の交差線(telegraph 中だけ表示)
   var crossSafe = null;     // 掃引点に追従する光の柱(2本の線の間=安全地帯の標示)
@@ -131,6 +135,10 @@
   };
   var ATTACK_KEYS = ["ink", "addle", "freeze", "shotSlow", "randomize",
                      "tentacle", "tsunami", "barrage", "cross"];
+  // 【強化】パリィが効かない大技。tentacle/tsunami は bullets を使わない別系統
+  // なので構造的にも対象外だが、予兆の「パリィ不可」表示と将来の変更保険のため
+  // 3技とも明示しておく(cross だけは弾システム内なのでこの集合が効いている)
+  var NO_PARRY = { tentacle: true, tsunami: true, cross: true };
 
   // ---------- クラーケンの作画 ----------
   // 既存の砲台・玉と同じ「ベクター+グラデーション」の文法で描く。
@@ -601,6 +609,35 @@
     var splitFxBudget = 3, splitBeeped = false;
     for (var i = bullets.length - 1; i >= 0; i--) {
       var b = bullets[i];
+      // 【強化】パリィの弾き返し弾: ボスの頭部へ追尾して戻る味方の弾。
+      // 以降の敵弾ロジック(分裂・迎撃・大砲命中・着弾)には一切乗らない
+      if (b.reflected) {
+        b.t += dt;
+        if (state === "dying" || state === "dead") {
+          removeBullet(i);   // 撃破後は目標を失うので霧散(clearBullets の保険)
+          continue;
+        }
+        var rtx = body.x, rty = body.y - 20;   // hitTest の楕円中心と同じ
+        var rdx = rtx - b.x, rdy = rty - b.y;
+        var rd = Math.sqrt(rdx * rdx + rdy * rdy) || 1;
+        b.vx = rdx / rd * PP.PARRY.reflectSpeed;
+        b.vy = rdy / rd * PP.PARRY.reflectSpeed;
+        b.x += b.vx * dt;
+        b.y += b.vy * dt;
+        b.view.x = b.x; b.view.y = b.y;
+        // トレイルは味方色(敵弾との見分け)
+        if (trailBudget > 0 && Math.random() < dt * 26) {
+          trailBudget--;
+          PP.fx.burst(b.x, b.y, "#8ef0d0", 1, 0.5);
+        }
+        if (hitTest(b.x, b.y)) {
+          // シールド/無敵で通らなくても弾は消す(貼り付き連打の防止)。
+          // 予兆中に届けば onHit 側の攻撃キャンセルが自然に発生する
+          onHit(1, b.x, b.y);
+          removeBullet(i);
+        }
+        continue;
+      }
       // ホバリング爆裂弾: 指定の高さで静止 → 溜め → 全方位リングを段階展開。
       // リングごとに半歩ずらして放つので、二段目は一段目の隙間を通ってくる
       if (b.hover && !b.hover.done && b.y >= b.hover.y) {
@@ -813,9 +850,23 @@
                  b.y >= cy - O.catchTop && b.y <= cy + O.catchBottom;
       }
       if (hitNow) {
-        var invuln = orbHitCd > 0 || (b.type === "cross" && crossHitCd > 0);
+        // パリィの無敵(parryCd)は cross には効かせない: パリィ不可の技が
+        // 「パリィ直後だけ抜けられる」と例外の意味が壊れるため
+        var invuln = orbHitCd > 0 || (b.type === "cross" ? crossHitCd > 0 : parryCd > 0);
         if (!invuln) {
-          applyOrbHit(b);
+          // 【強化】パリィ: 大技(NO_PARRY)以外の妖弾は、構え(Shift/🛡)の
+          // 受付窓が開いていればガード(Lv1)/弾き返し(Lv2+)
+          var pr = (NO_PARRY[b.type] || !PP.upgrades) ? 0 : PP.upgrades.tryParry();
+          if (pr === 2) {
+            startReflect(b);
+            continue;            // 弾は消さず、次フレームからボスへ戻る追尾弾
+          }
+          if (pr === 1) {
+            parryCd = PP.PARRY.guardIFrames;
+            fxParry(b, "parry.guard");
+          } else {
+            applyOrbHit(b);
+          }
         } else {
           // 無敵中: 弾はバリアに弾かれて消える(小さな火花+軽い音)。
           // cross は密度線なので音だけ parryBeepCd で間引く(火花は残す)
@@ -855,6 +906,30 @@
     var b = bullets[i];
     releaseOrbView(b.type, b.view);
     bullets.splice(i, 1);
+  }
+
+  // ---------- 【強化】パリィ(構えと成否判定は upgrades.js pressParry/tryParry) ----------
+  // 成功の合図(skull.js と同型)。被弾ではないので shake は使わない。
+  // 音は上昇二連: 無敵バリアの既存 980 単発と聞き分けられるように
+  function fxParry(b, labelKey) {
+    PP.fx.ring(PP.cannon.x, PP.cannon.y - 40, "#8ef0d0", 8, 70, 350);
+    PP.fx.flash(b.x, b.y, "rgba(255,255,255,0.85)", 30);
+    PP.fx.floatText(PP.i18n.t(labelKey), PP.cannon.x, PP.cannon.y - 70, "#8ef0d0", 18);
+    PP.audio.beep(880, 0.06, "triangle", 0.08);
+    PP.audio.beep(1480, 0.09, "square", 0.06);
+  }
+
+  // 弾き返し開始(Lv2+): 妖弾を消さずに「ボスへ戻る味方の追尾弾」に作り替える。
+  // 軌道の芸(蛇行・回転・ホバリング・分裂・ダッシュ・カーテン・隕石)は全部
+  // 没収して素直な直進追尾に純化する(カーテンの一斉落下や分裂に巻き込ませない)
+  function startReflect(b) {
+    b.reflected = true;
+    b.grav = 0;
+    b.wave = null; b.orbit = null; b.hover = null; b.split = null; b.dash = null;
+    b.curtain = false; b.meteor = false; b.hitsLeft = 0;
+    fxParry(b, "parry.reflect");
+    PP.fx.ring(b.x, b.y, ATTACKS[b.type].color, 8, 60, 320);
+    PP.audio.gliss(600, 1200, 0.18, "square", 0.09);   // 上昇グリス=「返した」
   }
 
   // デバフの付与(妖弾の直撃・触手突き上げの双方から呼ぶ)。
@@ -1077,6 +1152,31 @@
     createjs.Tween.removeTweens(banner);
     createjs.Tween.removeTweens(bannerText);
     banner.visible = false;
+    removeNoParryNote();   // バナーが消える経路(攻撃阻止・後片付け)では注記も道連れ
+  }
+
+  // 【強化】パリィ不可の大技の予兆に添える注記(パリィ持ちにだけ意味がある情報)。
+  // 技名バナーの帯(下端≈186)のすぐ下に出し、バナーと同じ寿命で消える
+  var noParryTxt = null;
+  function removeNoParryNote() {
+    if (!noParryTxt) return;
+    createjs.Tween.removeTweens(noParryTxt);
+    if (noParryTxt.parent) noParryTxt.parent.removeChild(noParryTxt);
+    noParryTxt = null;
+  }
+  function showNoParryNote(dur) {
+    removeNoParryNote();
+    noParryTxt = new createjs.Text(PP.i18n.t("boss.noParry"),
+      'bold 15px "Meiryo", sans-serif', "#ff9a8a");
+    noParryTxt.textAlign = "center";
+    noParryTxt.x = PP.W / 2;
+    noParryTxt.y = 200;
+    noParryTxt.shadow = new createjs.Shadow("rgba(0,0,0,0.9)", 0, 2, 6);
+    PP.layers.hud.addChild(noParryTxt);
+    createjs.Tween.get(noParryTxt)
+      .wait(Math.max(200, dur * 1000 - 300))
+      .to({ alpha: 0 }, 300)
+      .call(removeNoParryNote);
   }
 
   // ⚠予告マーカーを置く(赤い予告サークル+明滅する⚠)。timer 経過で消える。
@@ -1149,6 +1249,10 @@
     // 宣言バナー + 低い唸りの警告音。
     // チャージリングが出ている間にダメージを与えれば攻撃はキャンセルできる
     showBanner(PP.i18n.t(a.nameKey), a.color, stateT + 0.4);
+    // 大技はパリィ適用外: パリィ持ちにだけ、バナーの下へ注記を添える
+    if (NO_PARRY[key] && PP.upgrades && PP.upgrades.level("parry") > 0) {
+      showNoParryNote(stateT + 0.4);
+    }
     PP.audio.beep(140, 0.3, "sawtooth", 0.1);
     PP.audio.beep(110, 0.45, "sine", 0.09);
     // 予兆の間、画面全体に薄い血の色を差す(「来るぞ」の圧)
@@ -1948,6 +2052,7 @@
     crossCenterK = 0;
     meteorKnock = null;
     orbHitCd = 0;
+    parryCd = 0;
     parryBeepCd = 0;
     PP.cannon.clearHurt();   // ステージリセットで点滅を残留させない
     if (crossSafe) crossSafe.alpha = 0;
@@ -1999,6 +2104,7 @@
     updateChips(dt);
     if (crossHitCd > 0) crossHitCd -= dt;
     if (orbHitCd > 0) orbHitCd -= dt;
+    if (parryCd > 0) parryCd -= dt;
     if (parryBeepCd > 0) parryBeepCd -= dt;
     // 時凪のカーテン: 全段出揃って dropDelay 秒後、「全弾同時」に一斉落下。
     // 凪いでいた画面全体の弾が同じ瞬間に流れ出すのが演出の芯なので、
@@ -2161,7 +2267,10 @@
       hpCont.visible = active;
     }
     reset();
-    if (!active) removeOpeningHint();   // 非ボス面へ戻ったらヒントも片付ける
+    if (!active) {
+      removeOpeningHint();   // 非ボス面へ戻ったらヒントも片付ける
+      removeParryHint();
+    }
     if (active) {
       showBanner(PP.i18n.t("boss.banner"), "#ff5030", 3.2);
       PP.fx.screenFlash("rgba(160,20,16,0.3)", 0.3, 900);
@@ -2171,6 +2280,9 @@
       PP.audio.beep(82, 0.6, "sawtooth", 0.1);
       PP.audio.beep(110, 0.5, "sine", 0.08);
       showOpeningHint();
+      // パリィ持ちにだけ: 大技には効かないことを開幕で一度告知する
+      // (「ガードできるはず」と大技へ突っ込む理不尽を消す)
+      if (PP.upgrades && PP.upgrades.level("parry") > 0) showParryHint();
     }
   }
 
@@ -2201,6 +2313,30 @@
         if (hintTxt && hintTxt.parent) hintTxt.parent.removeChild(hintTxt);
         hintTxt = null;
       });
+  }
+
+  // 【強化】パリィ持ち向けの開幕告知(開幕ヒントのすぐ下・同じ寿命)。
+  // 大技(触手・津波・両舷斉射)にはパリィが効かないことを戦闘前に知らせる
+  var parryHintTxt = null;
+  function removeParryHint() {
+    if (!parryHintTxt) return;
+    createjs.Tween.removeTweens(parryHintTxt);
+    if (parryHintTxt.parent) parryHintTxt.parent.removeChild(parryHintTxt);
+    parryHintTxt = null;
+  }
+  function showParryHint() {
+    removeParryHint();
+    parryHintTxt = new createjs.Text(PP.i18n.t("boss.parryHint"),
+      'bold 15px "Meiryo", sans-serif', "#9fd8ff");
+    parryHintTxt.textAlign = "center";
+    parryHintTxt.x = PP.W / 2;
+    parryHintTxt.y = 190;
+    parryHintTxt.shadow = new createjs.Shadow("rgba(0,0,0,0.9)", 0, 2, 6);
+    PP.layers.hud.addChild(parryHintTxt);
+    createjs.Tween.get(parryHintTxt)
+      .wait(12000)
+      .to({ alpha: 0 }, 900)
+      .call(removeParryHint);
   }
 
   // 勝利の受け渡し(1回だけ true)。main.js の tick が levelClear() に繋ぐ

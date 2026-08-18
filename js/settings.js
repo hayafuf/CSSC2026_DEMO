@@ -171,11 +171,13 @@
       h += row("FIRE", "fire", t("tut.fire"));
       h += row("⇄", "", t("tut.swap"));
       h += row("🌈", "", t("tut.wild"));
+      h += row("🛡", "", t("tut.parry"));
       h += row("⏸", "", t("tut.pause"));
     } else {
       h += row("🖱", "", t("tut.dAim"));
       h += row("⇄", "", t("tut.dSwap"));
       h += row("🌈", "", t("tut.dWild"));
+      h += row("🛡", "", t("tut.dParry"));
       h += row("💣", "", t("tut.dStock"));
       h += row("⌨", "", t("tut.dPause"));
     }

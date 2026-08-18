@@ -94,6 +94,8 @@
     "ug.bombradius.desc": "爆弾の爆風が\n広がる",
     "ug.wildshot.name": "七海の虹玉",
     "ug.wildshot.desc": "虹玉の最大数が1増え\nその場で全回復する",
+    "ug.parry.name": "妖弾返し",
+    "ug.parry.desc": "Shift/🛡で構えて敵弾を防ぐ\nLv2から確率で弾き返す",
 
     // ---- upgrades.js: カード選択 UI・効果プレビュー ----
     "ug.ui.maxed": "💎 制覇の証 +1000",
@@ -108,6 +110,8 @@
     "ug.prev.barrelcap": "許容 {a}個 → {b}個",
     "ug.prev.coin": "必要 {a}枚 → {b}枚",
     "ug.prev.wildshot": "最大 {a}個 → {b}個(全回復)",
+    "ug.prev.parry0": "受付 {v}秒でガード",
+    "ug.prev.parry": "弾き返し {a}% → {b}%",
     "ug.ui.autoload": "{icon} 自動装填!",
     "ug.ui.rescueOn": "🌊 海神の加護!",
     "ug.ui.rescueTwo": "⚔ 加護の間は2個で消える!",
@@ -159,6 +163,8 @@
     "skull.freeze": "⛓ 動けない!",
     "skull.addle": "🌀 操作が逆に!",
     "fx.intercept": "迎撃!",
+    "parry.guard": "🛡 パリィ!",
+    "parry.reflect": "⚔ 弾き返した!",
 
     // ---- boss.js ----
     "boss.atk.ink": "―― 漆黒の墨獄 ――",
@@ -179,6 +185,8 @@
     "boss.banner": "最終海域 ―― 深淵の主 クラーケン",
     "boss.intro": "討ち取って海に平穏を!",
     "boss.hint": "🎯 頭に玉を当てて HP を削れ!   ⚡ 予兆中に当てれば攻撃を阻止!   🛡 妖弾は自弾で迎撃できる",
+    "boss.noParry": "🛡✕ パリィ不可",
+    "boss.parryHint": "🛡 大触腕・大海嘯・両舷斉射の大技はパリィできない!",
 
     // ---- main.js ----
     "main.finishing": "補給が止まった! 残りを掃討せよ!",
@@ -248,10 +256,12 @@
     "tut.fire": "発射!(長押しで連射)",
     "tut.swap": "手持ちの玉を交換(大砲をタップでも)",
     "tut.wild": "虹玉(万能玉)を装填",
+    "tut.parry": "敵弾をパリィ(「妖弾返し」カードで解放)",
     "tut.pause": "⏸ 一時停止 / ⛶ 全画面",
     "tut.dAim": "マウスで大砲を移動、クリックで発射",
     "tut.dSwap": "右クリックか Space で玉を交換",
     "tut.dWild": "Q キーで虹玉(万能玉)を装填",
+    "tut.dParry": "Shift キーで敵弾をパリィ(「妖弾返し」カードで解放)",
     "tut.dStock": "特殊弾💣🚀は左下のスロットをクリックで交換",
     "tut.dPause": "P で一時停止、M で消音、F で全画面",
     "tut.ok": "⚓ 了解、出航!",
@@ -331,6 +341,8 @@
     "ug.bombradius.desc": "Bomb blasts reach\nwider",
     "ug.wildshot.name": "Rainbow of Seven Seas",
     "ug.wildshot.desc": "Max rainbow balls +1,\nrestocked on the spot",
+    "ug.parry.name": "Parry",
+    "ug.parry.desc": "Press Shift/🛡 to block shots\nLv2+ may reflect them back",
 
     "ug.ui.maxed": "💎 Proof of Mastery +1000",
     "ug.ui.pick": "💎 Choose a gem power!",
@@ -344,6 +356,8 @@
     "ug.prev.barrelcap": "Capacity {a} → {b}",
     "ug.prev.coin": "Needs {a} → {b} coins",
     "ug.prev.wildshot": "Max {a} → {b} (restocked)",
+    "ug.prev.parry0": "Blocks in a {v}s window",
+    "ug.prev.parry": "Reflect {a}% → {b}%",
     "ug.ui.autoload": "{icon} Auto-loaded!",
     "ug.ui.rescueOn": "🌊 The Sea God's blessing!",
     "ug.ui.rescueTwo": "⚔ Pairs of 2 clear while blessed!",
@@ -390,6 +404,8 @@
     "skull.freeze": "⛓ Can't move!",
     "skull.addle": "🌀 Controls reversed!",
     "fx.intercept": "Intercepted!",
+    "parry.guard": "🛡 Parried!",
+    "parry.reflect": "⚔ Reflected!",
 
     "boss.atk.ink": "―― Jet-Black Ink Prison ――",
     "boss.atk.addle": "―― Maddening Countertide ――",
@@ -409,6 +425,8 @@
     "boss.banner": "Final Waters ―― Kraken, Lord of the Abyss",
     "boss.intro": "Slay it and bring peace to the seas!",
     "boss.hint": "🎯 Hit the head to deal damage!   ⚡ Hit during a charge-up to interrupt!   🛡 Shoot down orbs with your own balls",
+    "boss.noParry": "🛡✕ Can't parry",
+    "boss.parryHint": "🛡 Big moves (tentacle / tsunami / broadside) can't be parried!",
 
     "main.finishing": "Supply cut! Clear out the rest!",
     "main.gcNoContinue": "🏅 Conquered without a single continue!\n",
@@ -472,10 +490,12 @@
     "tut.fire": "Fire! (hold for rapid fire)",
     "tut.swap": "Swap your ball (or tap the cannon)",
     "tut.wild": "Load a rainbow (wild) ball",
+    "tut.parry": "Parry enemy shots (unlocked by the Parry card)",
     "tut.pause": "⏸ pause / ⛶ fullscreen",
     "tut.dAim": "Move the cannon with the mouse, click to fire",
     "tut.dSwap": "Right-click or Space to swap balls",
     "tut.dWild": "Press Q to load a rainbow (wild) ball",
+    "tut.dParry": "Press Shift to parry enemy shots (unlocked by the Parry card)",
     "tut.dStock": "Click the lower-left slot to swap special shots 💣🚀",
     "tut.dPause": "P to pause, M to mute, F for fullscreen",
     "tut.ok": "⚓ Got it, set sail!",

@@ -55,6 +55,7 @@
   var WILD_RECT = { x: W - 116, y: PP.H - 196, w: 92, h: 84 };
   var lastWildKey = null;      // キャンバス版の再描画間引き(状態が変わった時だけ)
   var wildDom = null, lastWildDomKey = null;   // DOM 版の書き込み間引き
+  var parryDom = null, lastParryDomKey = null; // 【強化】🛡 パリィボタン(#tParry)の間引き
   // タッチ端末では見た目はそのまま、当たり判定だけ指の太さぶん広げる
   var TOUCH_PAD = PP.TOUCH ? 12 : 0;
 
@@ -390,6 +391,22 @@
       }
     }
 
+    // 【強化】🛡 パリィボタン(タッチ端末の #tParry)。妖弾返しカードを
+    // 取るまでは隠す。#tWild と同じく、状態キーが変わったフレームだけ触る
+    if (PP.TOUCH) {
+      var pInfo = PP.upgrades.parryInfo();
+      var pKey = pInfo.lv + (pInfo.active ? "A" : pInfo.ready ? "R" : "C");
+      if (pKey !== lastParryDomKey) {
+        lastParryDomKey = pKey;
+        if (!parryDom) parryDom = document.getElementById("tParry");
+        if (parryDom) {
+          parryDom.hidden = pInfo.lv <= 0;
+          parryDom.classList.toggle("active", pInfo.active);
+          parryDom.classList.toggle("cd", !pInfo.active && !pInfo.ready);
+        }
+      }
+    }
+
     // スコアのカウントアップ(急変・減少時は即反映)
     if (g.score < dispScore || Math.abs(g.score - dispScore) > 200000) dispScore = g.score;
     else dispScore += (g.score - dispScore) * Math.min(1, dt * 9);
@@ -702,6 +719,9 @@
     var O = PP.layers.overlay;
     var s = SKINS[skin] || SKINS.normal;
     var b = panelBox();
+    // 【強化】パリィの構えシールドが overlay 越しに光り続けないように片付ける
+    // (プレイ中しか update されないため、ここで隠すのが唯一の確実な出口)
+    if (PP.upgrades && PP.upgrades.hideParryShield) PP.upgrades.hideParryShield();
     // 難易度ボタンは新しいランが始まる画面だけ(呼び出し側で state を先に確定させている)
     if (diffCont) diffCont.visible = canPickDifficulty();
     // 言語ボタンも「新しいランが始まる画面」だけ(難易度と同じ条件)
