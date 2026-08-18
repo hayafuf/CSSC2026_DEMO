@@ -495,6 +495,28 @@
     return bmp;
   }
 
+  // 妖弾 view のプール(ball.js の acquireView/releaseView と同型)。
+  // 三段分裂は一瞬で数十発を生む=Bitmap の生成/破棄が GC スパイクになるため、
+  // 使い終わった Bitmap を type 別に取り置いて使い回す。
+  // 注意: viewScale(spawnBullet)が baseScale を破壊的に乗算するので、
+  // 再利用時は必ず焼き込み時の素の倍率(orbCanvas[type].base)へ戻す
+  var orbFree = {};             // type → Bitmap[]
+  var ORB_POOL_MAX = 48;        // type 別の取り置き上限(小弾ラッシュのピーク分)
+  function acquireOrbView(type) {
+    var pool = orbFree[type];
+    var bmp = pool && pool.pop();
+    if (!bmp) return makeOrbView(type);
+    bmp.baseScale = orbCanvas[type].base;
+    bmp.scaleX = bmp.scaleY = bmp.baseScale;
+    bmp.alpha = 1; bmp.visible = true; bmp.rotation = 0;
+    return bmp;
+  }
+  function releaseOrbView(type, bmp) {
+    if (bmp.parent) bmp.parent.removeChild(bmp);
+    var pool = orbFree[type] || (orbFree[type] = []);
+    if (pool.length < ORB_POOL_MAX) pool.push(bmp);
+  }
+
   // opts(省略可)で弾に「軌道の芸」を持たせる:
   //   wave:  { amp, freq, ph } … 左右に蛇行しながら進む(snake 弾)
   //   spin:  rad/s … 速度ベクトルを毎フレーム回す=弧を描いて曲がる(渦巻き弾)
@@ -509,7 +531,12 @@
   //   split: { t, count, speed, r, idx } … t 秒後に小弾リングへ割れる時限分裂
   //   viewScale: 見た目の倍率(判定半径と見た目を揃える)
   function spawnBullet(type, x, y, vx, vy, grav, r, opts) {
-    var view = makeOrbView(type);
+    // 同時数の上限。分裂の連鎖で弾数が伸びると迎撃判定 O(弾×自弾) と描画の
+    // 両方が膨らむため、超過スポーンは静かに捨てる(分裂の末端=小弾から
+    // 削られるので、被弾判定の主役である初段・二段には影響しない)
+    var cap = (PP.quality === 0 && PP.PERF.LOW.bulletMax) || PP.BOSS.bulletMax;
+    if (bullets.length >= cap) return;
+    var view = acquireOrbView(type);
     view.x = x; view.y = y;
     bulletCont.addChild(view);
     var hitR = r + PP.R * 0.9;   // 自弾との迎撃半径(毎フレーム再計算しない)
@@ -554,7 +581,7 @@
 
   function clearBullets() {
     for (var i = 0; i < bullets.length; i++) {
-      if (bullets[i].view.parent) bullets[i].view.parent.removeChild(bullets[i].view);
+      releaseOrbView(bullets[i].type, bullets[i].view);
     }
     bullets.length = 0;
   }
@@ -826,7 +853,7 @@
 
   function removeBullet(i) {
     var b = bullets[i];
-    if (b.view.parent) b.view.parent.removeChild(b.view);
+    releaseOrbView(b.type, b.view);
     bullets.splice(i, 1);
   }
 

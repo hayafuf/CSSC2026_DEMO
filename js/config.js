@@ -80,7 +80,7 @@
   // 適用箇所は chain.js の speedAt。ボス戦(Stage6)は bossHpMult で調整する。
   PP.STAGE_SPEED = {
     hard: {
-      5: { entry: 810, hole: 21.0, curve: 2.1 }
+      5: { entry: 820, hole: 21.0, curve: 2.1 }
     },
     hardcore: {
       5: { entry: 810, hole: 19.0, curve: 2.3 }
@@ -402,7 +402,11 @@
       shardMul: 0.5,       //   玉消去の破片・きらめきの個数倍率
       motes: false,        //   背景の光の塵を止める
       glitch: false,       //   危機の走査ノイズを出さない
-      dripMul: 0.5         //   血の滴りを半減
+      dripMul: 0.5,        //   血の滴りを半減
+      ballSpin: false,     //   玉の回転レイヤー(塗装の合わせ目)を隠す。玉200個で
+                           //   描画コールが 600→400 になる。base+shade は残すので
+                           //   立体感は保たれる(main.js の placeBall 参照)
+      bulletMax: 90        //   ボス妖弾の同時数上限(通常時は PP.BOSS.bulletMax)
     }
   };
   // ユーザーが設定パネル(settings.js)で選んだ画質。
@@ -471,6 +475,9 @@
     telegraphSlow: 0.2, // 予兆中の移動速度倍率(遅くなる=狙い目を作る)
     hitRX: 88,          // 当たり判定(頭部中心の楕円)の横半径。見た目より小さめ=遠距離砲戦の緊張感
     hitRY: 50,          // 同・縦半径
+    bulletMax: 140,     // 妖弾の同時数上限。三段分裂の理論ピーク(140〜170)の
+                        // 病的ケースだけを削る値。超過スポーンは静かに捨てる
+                        // (boss.js spawnBullet)。低負荷時は PP.PERF.LOW.bulletMax
     // 弾種ごとのダメージ。ミサイルは貫通で確実に当たるので 1(お手軽大ダメージ禁止)。
     // 爆弾は不貫通=列の隙間を通し切らないと届かないので、通せたご褒美に 2
     dmg: { shot: 1, bomb: 2, missile: 1 },

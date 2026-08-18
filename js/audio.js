@@ -51,10 +51,16 @@
       seBus.gain.value = 1;
       var dry = audioCtx.createGain(); dry.gain.value = 1;
       seBus.connect(dry); dry.connect(audioCtx.destination);
-      var conv = audioCtx.createConvolver();
-      conv.buffer = makeImpulse(0.5, 2.4);        // 約0.5秒で減衰する短い残響
-      var wet = audioCtx.createGain(); wet.gain.value = 0.16;   // 軽め
-      seBus.connect(conv); conv.connect(wet); wet.connect(audioCtx.destination);
+      // ConvolverNode は毎サンプル 0.5秒×2ch の畳み込みを行う、モバイル
+      // Web Audio で最も CPU を食うノード。レンダースレッドが間に合わないと
+      // 音がブツ切れになるため、タッチ端末では残響を掛けず dry のみで鳴らす
+      // (wet 0.16 の薄い響きが消えるだけで、音そのものは同一)。
+      if (!PP.TOUCH) {
+        var conv = audioCtx.createConvolver();
+        conv.buffer = makeImpulse(0.5, 2.4);        // 約0.5秒で減衰する短い残響
+        var wet = audioCtx.createGain(); wet.gain.value = 0.16;   // 軽め
+        seBus.connect(conv); conv.connect(wet); wet.connect(audioCtx.destination);
+      }
     } catch (e) { seBus = null; }
   }
   function makeImpulse(seconds, decay) {
@@ -342,7 +348,11 @@
   function track(src, vol) {
     var a = new Audio(src);
     a.loop = true;
-    a.preload = "auto";
+    // 携帯対応: BGM は全7曲で計 30MB 超あり、"auto" だとページを開いただけで
+    // 全曲のダウンロードとデコードが走って帯域・メモリ・電池を食う。
+    // タッチ端末は "none" にして、実際に鳴らすとき(play() がロードを
+    // 兼ねる)まで読み込まない。PC は従来どおり先読みして頭出しを速くする
+    a.preload = PP.TOUCH ? "none" : "auto";
     a.volume = 0;
     a.vol = vol || BGM_VOL;      // その曲の再生音量
     sources.push(a);
@@ -354,7 +364,8 @@
   var bgmOver = track("BGM/gameover_BGM.mp3", 0.5);
   var bgmBoss = track("BGM/BOSS_BGM.mp3");    // ボス戦(クラーケンの海域)専用曲
   // 難易度ごとの通常曲(config.js の PP.DIFFICULTY の bgm)を実体化して使い回す。
-  // 既定曲は起動時に読み込み済み。学生が追加した曲は最初に鳴らすときに読み込む
+  // 既定曲は PC なら起動時に読み込み済み(タッチ端末は鳴らすときに読み込む)。
+  // 学生が追加した曲は最初に鳴らすときに読み込む
   var normalBySrc = { "BGM/Game_music.mp3": bgmNormal };
   function normalTrackFor(src) {
     if (!src) return normalBySrc["BGM/Game_music.mp3"];
@@ -370,6 +381,13 @@
       var p = a.play();
       if (p && p.catch) p.catch(function () { /* 未解錠 */ });
     } catch (e) { /* 無音でも続行 */ }
+  }
+
+  // 頭出し。preload="none" の未ロード曲(readyState 0)に currentTime を
+  // 代入すると iOS Safari が例外を投げることがあるためガードする
+  // (未ロードなら再生はどのみち先頭から始まるので頭出し不要)
+  function rewind(a) {
+    if (a.readyState > 0) { try { a.currentTime = 0; } catch (e) { /* 無視 */ } }
   }
 
   // current へクロスフェード(他の曲は 0 まで下げて停止)
@@ -528,7 +546,7 @@
     var want = on ? bgmDanger : bgmNormal;
     if (want === current) return;
     // 曲を切り替えるときは頭出しして、危険の始まりが分かるようにする
-    want.currentTime = 0;
+    rewind(want);
     current = want;
     fade();
   }
@@ -568,7 +586,7 @@
   // ゲームオーバー BGM をゆっくり立ち上げる
   function overBgm() {
     if (!unlocked) return;
-    bgmOver.currentTime = 0;
+    rewind(bgmOver);
     current = bgmOver;
     fade(2200);
   }
@@ -585,11 +603,18 @@
     // すでに通常曲が流れているなら止めない(レベル間で曲を切らない)
     if (current === bgmNormal && !bgmNormal.paused) return;
     current = bgmNormal;
-    bgmNormal.currentTime = 0;
+    rewind(bgmNormal);
     bgmNormal.volume = muted ? 0 : bgmNormal.vol * bgmVol;
     // BGM オフ(音量0)なら鳴らし始めない(iOS は volume 代入が効かないため必須)
     if (!muted && bgmVol > 0) play(bgmNormal);
     fade(300);
+    // 遅延ロード(preload="none")の穴埋め: 危機曲だけは先読みしておく。
+    // 初回の危機は突然来るので、そこからロードすると数秒無音になってしまう
+    // (ボス戦は setDanger が曲を替えないので不要)
+    if (!(PP.game && PP.game.bossMode) && bgmDanger.preload === "none" &&
+        bgmDanger.readyState === 0) {
+      try { bgmDanger.preload = "auto"; bgmDanger.load(); } catch (e) { /* 無視 */ }
+    }
   }
 
   function setMuted(on) {

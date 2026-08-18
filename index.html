@@ -144,6 +144,18 @@
     #fsBtn   { top: 8px; }
     #muteBtn { top: 60px; }
     #setBtn  { top: 112px; }
+    /* ---- タッチ端末の GPU 節約 ----
+       blur(34px) の 150% サイズ固定レイヤーを transform で漂わせ続けると、
+       GPU が毎フレーム巨大なぼかしテクスチャを再合成し、ゲームの真裏で
+       休みなく発熱する。静止画にして filter も外す(ぼかし前提の淡い
+       ラジアルなので opacity を少し下げれば見分けがつかない)。 */
+    body::before { animation: none; filter: none; opacity: .7; }
+    /* 枠の光アニメも停止(横持ち media は高さ条件付きなのでここでも指定) */
+    #gameCanvas { animation: none; }
+    /* backdrop-filter は背後のレイヤーを毎フレーム読み戻してぼかすため
+       モバイルでは非常に高価。暗幕は濃くして視認性を補償する。 */
+    .fs-btn, #setBack, p.hint { -webkit-backdrop-filter: none; backdrop-filter: none; }
+    #setBack { background: rgba(4, 7, 12, .85); }
   }
 
   /* ---------- 設定パネル・操作説明(DOM 層) ----------
@@ -328,13 +340,18 @@
     }
     .tbtn-wild.armed { border-color: rgba(142,240,208,.85); color: #8ef0d0; }
     .tbtn-wild.empty { opacity: .45; }
-    .tbtn-wild.suggest {
+    .tbtn-wild.suggest { border-color: rgba(142,240,208,.9); }
+    /* 点滅は box-shadow を補間せず(毎フレーム再ペイントになる)、静的な影を
+       持つ ::after の opacity で明滅させる。opacity はコンポジタで完結する */
+    .tbtn-wild.suggest::after {
+      content: ""; position: absolute; inset: -6px; border-radius: 50%;
+      box-shadow: 0 0 22px rgba(142,240,208,.85);
       animation: wildPulse .8s ease-in-out infinite;
-      border-color: rgba(142,240,208,.9);
+      pointer-events: none;
     }
     @keyframes wildPulse {
-      0%, 100% { box-shadow: 0 4px 14px rgba(0,0,0,.45), 0 0 6px rgba(142,240,208,.25); }
-      50%      { box-shadow: 0 4px 14px rgba(0,0,0,.45), 0 0 22px rgba(142,240,208,.85); }
+      0%, 100% { opacity: .25; }
+      50%      { opacity: 1; }
     }
     .tbtn-fire {
       right: calc(12px + env(safe-area-inset-right)); bottom: calc(12px + env(safe-area-inset-bottom));

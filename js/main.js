@@ -799,6 +799,8 @@
     fpsBallCount = 0;
     PP.game.eachLane(countLaneBalls);
     var s = "FPS " + fpsAvg.toFixed(1) + " | Q" + PP.quality + " | balls " + fpsBallCount;
+    // ボス戦中は妖弾数も添える(弾数上限 bulletMax・プールの調整用)
+    if (PP.boss && PP.boss.isActive()) s += " | orbs " + PP.boss.getBulletCount();
     if (s !== fpsMeterStr) { fpsMeterStr = s; fpsText.text = s; }
   }
 
@@ -817,17 +819,26 @@
   }
 
   // ---------- メインループ ----------
+  var pauseDrawn = false;   // ポーズ画面を描き終えたか(tick 冒頭参照)
   function tick(e) {
     // FPS の平均と計測表示はポーズ中も更新する(ポーズ画面の描画負荷も見たい)
     var rawDt = e.delta / 1000;
     updateFpsAvg(rawDt);
     updateFpsMeter(rawDt);
-    // ポーズ(停泊)中はゲームの一切を進めない。描画だけ更新して、
-    // ポーズ画面の表示とクリック(解除)を受け付ける
+    // ポーズ(停泊)中はゲームの一切を進めない。盤面は完全に静止しているので
+    // 最初の1フレーム(オーバーレイの表示)だけ描いたら以後の再描画をやめる。
+    // 60fps で全画面を描き直し続けるとポーズ中でも端末が発熱するため。
+    // ?fps=1 のときだけは計測表示を動かし続ける(ポーズ画面の負荷も見たい)。
+    // pause() は showPause() → Ticker.paused の順なので、ここに来る最初の
+    // フレームでオーバーレイは配置済み=1回の update で正しく写る(pause.js)
     if (PP.pauseCtl && PP.pauseCtl.active) {
-      stage.update(e);
+      if (!pauseDrawn || fpsText) {
+        stage.update(e);
+        pauseDrawn = true;
+      }
       return;
     }
+    pauseDrawn = false;   // 解除されたら次のポーズでまた1回描く
     var dt = Math.min(e.delta / 1000, 0.05);
     var g = PP.game;
     updateQuality(rawDt);
@@ -977,6 +988,7 @@
 
   // 玉1個の表示をレール上へ配置する(座標・割り込みスライド・樽沈み・回転・可視)。
   // 立体交差の上下判定に使う実効弧長 vd(= d + slide)を返す。
+  var showSpin = true;   // 回転レイヤーを見せるか(renderChains が毎フレーム更新)
   function placeBall(b, rail) {
     // slide: 割り込みで押し広げられた分を遅れて追従。ins: 着弾点から枠へ滑り込む
     var vd = b.d + (b.slide || 0);
@@ -1001,7 +1013,15 @@
     }
     b.view.x = vx;
     b.view.y = vy;
-    if (b.view.spin) b.view.spin.rotation = vd * PP.SPIN_K;
+    // 回転レイヤー(塗装の合わせ目)は低負荷モードでは隠す: 玉200個で描画
+    // コールが 600→400 になる。base+shade は残すので立体感は保たれる。
+    // visible をここで毎フレーム同期するので、auto の途中切替・プール再利用・
+    // ユーザー設定変更のどの経路でも自動で追従する(大砲の装填玉は placeBall を
+    // 通らないが 2〜3 個なので対象外)
+    if (b.view.spin) {
+      if (b.view.spin.visible !== showSpin) b.view.spin.visible = showSpin;
+      if (showSpin) b.view.spin.rotation = vd * PP.SPIN_K;
+    }
     // 洞窟の外側だけ非表示にする。トンネル内の玉は描画したままにする:
     // 覆い(tunnel 層は玉より上)が不透明なので自然に隠れ、覆いに開けた
     // 舷窓の穴からだけ覗く(撃てない判定は cannon.js が rail.tunnelAt で行う)。
@@ -1017,6 +1037,8 @@
   function renderChains() {
     var g = PP.game;
     var lanes = g.lanes;
+    // 低負荷モードなら回転レイヤーを隠す(placeBall で毎フレーム同期)
+    showSpin = PP.quality !== 0 || PP.PERF.LOW.ballSpin !== false;
     var canRestack = g.state === "playing" && g.hasOverpass;
     var needRestack = false;
     var li, bi, lane, balls, b, vd, target;

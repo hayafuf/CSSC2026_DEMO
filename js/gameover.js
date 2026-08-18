@@ -72,8 +72,11 @@
     var L = PP.layers.doom;
 
     // 彩度を抜く: canvas の合成モードで下のレイヤーの色をそのまま殺す。
+    // "saturation" は分離不能ブレンド=GPU の高速パスから外れて CPU で
+    // 全画面を計算する最重量級。モバイルと低画質設定では既存のフォールバック
+    // (暗幕 0.4)で近似する。desat は毎フレーム描かれるのでここが効く
     desat = new createjs.Shape();
-    if (canBlend("saturation")) {
+    if (canBlend("saturation") && !PP.TOUCH && PP.PERF.userQuality !== "low") {
       desat.graphics.beginFill("#707070").drawRect(0, 0, PP.W, PP.H);
       desat.compositeOperation = "saturation";
       desatMax = 0.95;
