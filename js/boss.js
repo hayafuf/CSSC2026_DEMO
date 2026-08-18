@@ -2063,7 +2063,12 @@
         charge.graphics.clear();
         state = "recover";
         var P2 = B.phase2;
-        if (phase2 && !queuedAttack && fired !== "ink" && fired !== "freeze" &&
+        // 両舷斉射(cross)はコンボの起点にしない: 振り子の掃引そのものが
+        // swings×period 秒かけて画面を薙ぎ払う長い攻撃で、撃ち終わった直後も
+        // まだ弾が降っている。そこへ短予兆(comboTelegraph)の追撃を重ねると、
+        // 降り注ぐ線を避けながら次の予兆を読むことになり、見てから捌けない
+        if (phase2 && !queuedAttack &&
+            fired !== "ink" && fired !== "freeze" && fired !== "cross" &&
             Math.random() < P2.comboChance) {
           queuedAttack = Math.random() < 0.5 ? "ink" : "freeze";
           stateT = P2.comboDelay;

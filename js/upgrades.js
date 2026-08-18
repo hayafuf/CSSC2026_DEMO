@@ -20,8 +20,9 @@
  *      プレイヤーの操作(Qキー / 🌈 ボタンの toggleWild)だけ。当たった
  *      連なりを色に関係なく炸裂で吹き飛ばす(chain.js wildBlast。最大
  *      PP.WILD.blastCap 個)。ストック制(PP.game.wildCharges)で、
- *      回復はカード「七海の虹玉」(最大+1&全回復)とラン開始時、
- *      そしてゲームオーバーからのコンティニューで+1(input.js)。
+ *      回復はカード「七海の虹玉」(最大+1&全回復)とラン開始時、そして
+ *      ゲームオーバーからのコンティニュー(こちらも最大+1&全回復。input.js)。
+ *      最大数の計算は加算元が2つあるので recalcWildMax() の1か所に集約する。
  *      ※自動装填にしないのは「切り札をいつ切るか」のリスクとリターンを
  *        機械ではなくプレイヤーの判断に残すため
  *   2) 撃った弾の割り込みに限り2個で消える(chain.js resolveMatchAt)
@@ -188,7 +189,7 @@
     }
     // 【新】七海の虹玉: 最大ストック+1、そしてその場で全回復
     if (id === "wildshot") {
-      g.wildMax = PP.WILD.baseMax + g.upgrades[id];
+      recalcWildMax();
       g.wildCharges = g.wildMax;
     }
     recalcPressure();   // 強化を取るほど海も牙を剥く(chain.js が読む倍率を更新)
@@ -658,6 +659,15 @@
     PP.fx.floatText(PP.i18n.t("ug.ui.wildArmed"), PP.cannon.x, PP.cannon.y - 72, "#8ef0d0", 16);
   }
 
+  // 虹玉の最大ストックを組み直す。加算元が2つ(カード「七海の虹玉」の段数と、
+  // コンティニュー報酬 wildBonus)あるので、代入は必ずここ1か所に集める。
+  // 別々の場所で g.wildMax へ代入すると、あとから走った側が相手の加算を消してしまう
+  function recalcWildMax() {
+    var g = PP.game;
+    g.wildMax = PP.WILD.baseMax + level("wildshot") + (g.wildBonus || 0);
+    return g.wildMax;
+  }
+
   // HUD(キャンバス内 🌈 ボタン)と DOM(#tWild)が毎フレーム読む表示用の状態
   function wildInfo() {
     return {
@@ -704,8 +714,9 @@
   function onRunReset() {
     PP.game.upgrades = {};
     queued = 0;
-    PP.game.wildMax = PP.WILD.baseMax;
-    PP.game.wildCharges = PP.WILD.baseMax;
+    PP.game.wildBonus = 0;   // コンティニュー報酬もランの終わりで消える
+    recalcWildMax();
+    PP.game.wildCharges = PP.game.wildMax;
     recalcPressure();   // 段数が消えたので強化圧も平常へ戻す
     onLevelStart();
   }
@@ -731,6 +742,7 @@
     consumeWild: consumeWild,
     toggleWild: toggleWild,   // 【新】虹玉の手動装填トグル(Qキー / 🌈 ボタン)
     wildInfo: wildInfo,       // 【新】🌈 ボタン表示用の状態(残数・装填・提案)
+    recalcWildMax: recalcWildMax, // 【新】虹玉の最大ストックを組み直す(input.js のコンティニュー)
     // 強化圧(動的難易度)。chain.js が毎フレーム読むので事前計算値を返すだけ
     speedPressure: function () { return pressureSpeedMul; },
     skullPressure: function () { return pressureSkullMul; },
