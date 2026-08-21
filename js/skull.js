@@ -587,22 +587,34 @@
   }
 
   // ---------- 墨だまり(パワーダウン🦑を取ってしまったときの目つぶし) ----------
-  // boss.js splatInk と同じ描き方。効果時間は取ったアイテムの dur に合わせる
+  // boss.js splatInk と同じ方式: 巨大な放射グラデを毎回描かず、単位サイズ
+  // (半径256)で一度だけ焼いた canvas を全ブロブで共有し、scale で伸縮する
+  // (放射グラデは線形スケールで見た目が一致する)。効果時間は取った
+  // アイテムの dur に合わせる
+  var INK_UR = 256, inkCanvas = null;
+  function bakeInk() {
+    var sh = new createjs.Shape();
+    // ボスの墨(ほぼ真っ黒)より薄めにする: 「見づらいが、うっすら透けて見える」
+    // 程度に留めて、理不尽さより駆け引き(避けそこねのペナルティ)に寄せる
+    sh.graphics.beginRadialGradientFill(
+      ["rgba(10,8,14,0.72)", "rgba(10,8,14,0.66)", "rgba(10,8,14,0.5)", "rgba(10,8,14,0)"],
+      [0, 0.55, 0.82, 1],
+      0, 0, 0, 0, 0, INK_UR).drawCircle(0, 0, INK_UR);
+    sh.cache(-INK_UR, -INK_UR, INK_UR * 2, INK_UR * 2);
+    return sh.cacheCanvas;
+  }
   function splatInk(count, dur) {
     ensureCont();
     if (!cont) return;
     var B = PP.BOSS.ink;   // 墨の半径レンジはボスの定義を借りる
+    if (!inkCanvas) inkCanvas = bakeInk();
     for (var i = 0; i < count; i++) {
       var r = (B.rMin + Math.random() * (B.rMax - B.rMin)) * 1.25;
       var bx = 120 + Math.random() * (PP.W - 240);
       var by = 140 + Math.random() * (PP.H - 260);
-      var sh = new createjs.Shape();
-      // ボスの墨(ほぼ真っ黒)より薄めにする: 「見づらいが、うっすら透けて見える」
-      // 程度に留めて、理不尽さより駆け引き(避けそこねのペナルティ)に寄せる
-      sh.graphics.beginRadialGradientFill(
-        ["rgba(10,8,14,0.72)", "rgba(10,8,14,0.66)", "rgba(10,8,14,0.5)", "rgba(10,8,14,0)"],
-        [0, 0.55, 0.82, 1],
-        0, 0, 0, 0, 0, r).drawCircle(0, 0, r);
+      var sh = new createjs.Bitmap(inkCanvas);
+      sh.regX = sh.regY = INK_UR;
+      sh.scaleX = sh.scaleY = r / INK_UR;
       sh.x = bx; sh.y = by;
       sh.alpha = 0;
       createjs.Tween.get(sh).to({ alpha: 1 }, 220);

@@ -161,19 +161,31 @@
   // 溝を流れる光(コースティクス)。玉より下・レールより上の railFlow レイヤーに、
   // 一定間隔の光の筋を置き、tick で phase を進めてゴール方向へ流す。レーンごとに1組。
   var railFlows = [];
+  // 光ドットの絵は全部同じなので、焼き込み canvas は1枚だけ作って全ドットで
+  // 共有する(Bitmap 参照)。以前は1ドット=1 cacheCanvas で、4レーンなら
+  // 約280枚の小さな canvas を抱えていた。メモリの無駄に加え、WebGL 描画では
+  // 「1バッチに載るテクスチャは8枚まで」の制約でバッチが細切れになる
+  var flowDotCanvas = null;
+  function bakeFlowDot() {
+    var rad = PP.R * 0.5;
+    var s = new createjs.Shape();
+    s.graphics.beginRadialGradientFill(
+      ["rgba(150,214,232,0.5)", "rgba(96,176,214,0.16)", "rgba(96,176,214,0)"],
+      [0, 0.5, 1], 0, 0, 0, 0, 0, rad).drawCircle(0, 0, rad);
+    s.cache(-rad, -rad, rad * 2, rad * 2);
+    return s.cacheCanvas;
+  }
   function buildRailFlow(rail) {
     var R = PP.R;
     PP.layers.railFlow.compositeOperation = "lighter";
+    if (!flowDotCanvas) flowDotCanvas = bakeFlowDot();
     var SP = R * 5.2;                                   // 光の間隔(px)
     var n = Math.max(3, Math.round(rail.length / SP));
     var dots = [];
+    var rad = R * 0.5;
     for (var i = 0; i < n; i++) {
-      var s = new createjs.Shape();
-      var rad = R * 0.5;
-      s.graphics.beginRadialGradientFill(
-        ["rgba(150,214,232,0.5)", "rgba(96,176,214,0.16)", "rgba(96,176,214,0)"],
-        [0, 0.5, 1], 0, 0, 0, 0, 0, rad).drawCircle(0, 0, rad);
-      s.cache(-rad, -rad, rad * 2, rad * 2);
+      var s = new createjs.Bitmap(flowDotCanvas);
+      s.regX = s.regY = rad;             // 中心基準(回転・配置は従来と同じ座標系)
       s.scaleX = 2.4; s.scaleY = 0.8;   // 進行方向へ伸ばす楕円(定数なので一度だけ設定)
       PP.layers.railFlow.addChild(s);
       dots.push(s);

@@ -191,6 +191,11 @@
     hg.setStrokeStyle(3.5, "butt").beginStroke("#6a5238")
       .moveTo(58, -70).lineTo(72, -88).endStroke();
     hg.beginFill("#8a8a92").moveTo(70, -85).lineTo(78, -96).lineTo(75, -83).closePath();
+    // 頭は完全に静的なのに、cache しないと放射グラデ+曲線+傷跡の全パスを
+    // 毎フレーム再ラスタライズしてしまう(ボス戦中ずっと)。一度だけ焼いて
+    // 以後はビットマップ1枚の blit にする。境界はパスの最遠点+ストローク幅
+    // (x±96, y-122〜46)に余白を足した値
+    head.cache(-100, -128, 200, 180);
     body.addChild(head);
 
     // 生体発光の斑点(通常=青緑 / 怒り=血赤 の2セットを重ね、alpha で切替+明滅)
@@ -204,6 +209,10 @@
     }
     biolumA.compositeOperation = biolumB.compositeOperation = "lighter";
     biolumB.alpha = 0;
+    // 斑点も静的(明滅は alpha 操作のみ)。cache 後も compositeOperation と
+    // alpha はビットマップの描画時に効くので、見た目は変わらない
+    biolumA.cache(-76, -104, 152, 96);
+    biolumB.cache(-76, -104, 152, 96);
     body.addChild(biolumA, biolumB);
 
     // 怒りフェーズの赤いリムライト(普段は透明。enterPhase2 で灯る)
@@ -215,6 +224,7 @@
       .curveTo(96, -40, 78, 26);
     rageRim.compositeOperation = "lighter";
     rageRim.alpha = 0;
+    rageRim.cache(-102, -128, 204, 162);   // 静的ストローク。灯すのは alpha だけ
     body.addChild(rageRim);
 
     // 目(血赤の眼球+縦スリット瞳)。瞳は update で大砲の方を向く。
@@ -226,6 +236,9 @@
         .drawCircle(0, 0, 30);
       glow.compositeOperation = "lighter";
       glow.x = ex; glow.y = -18;
+      // 目の各層も描画内容は静的(動くのは x/y と alpha)。放射グラデを
+      // 毎フレーム描き直さないよう、それぞれ一度だけ焼く
+      glow.cache(-32, -32, 64, 64);
       eyeGlows.push(glow);
       var eye = new createjs.Shape();
       eye.graphics
@@ -234,9 +247,11 @@
         .drawEllipse(-15, -17, 30, 34)
         .setStrokeStyle(2).beginStroke("#050a08").drawEllipse(-15, -17, 30, 34);
       eye.x = ex; eye.y = -18;
+      eye.cache(-18, -20, 36, 40);
       var pupil = new createjs.Shape();
       pupil.graphics.beginFill("#050202").drawEllipse(-2.8, -13, 5.6, 26);
       pupil.x = ex; pupil.y = -18;
+      pupil.cache(-5, -15, 10, 30);
       body.addChild(glow, eye, pupil);
       return pupil;
     }
@@ -249,6 +264,8 @@
     browL.graphics.beginFill("#06120c").moveTo(-62, -48).lineTo(-12, -38).lineTo(-54, -24).closePath();
     var browR = new createjs.Shape();
     browR.graphics.beginFill("#06120c").moveTo(62, -48).lineTo(12, -38).lineTo(54, -24).closePath();
+    browL.cache(-64, -50, 54, 28);
+    browR.cache(10, -50, 54, 28);
     body.addChild(browL, browR);
 
     // くちばし(大きく裂けた口+骨白の牙)。妖弾はここから吐き出される
@@ -262,6 +279,7 @@
       .moveTo(12, 15).lineTo(8, 24).lineTo(5, 15).closePath()
       .moveTo(-4, 30).lineTo(-2, 22).lineTo(1, 29).closePath()
       .moveTo(5, 29).lineTo(3, 22).lineTo(0, 28).closePath();
+    beak.cache(-16, 12, 32, 24);
     body.addChild(beak);
 
     // シールドの泡(3発被弾ごとの無敵中だけ光る。普段は透明)
@@ -274,6 +292,7 @@
       .drawEllipse(-108, -128, 216, 216);
     shield.compositeOperation = "lighter";
     shield.alpha = 0;
+    shield.cache(-112, -132, 224, 224);   // 点灯は alpha 操作のみ
     body.addChild(shield);
 
     // 被弾の白フラッシュ(普段は透明)
@@ -282,6 +301,7 @@
       .moveTo(-78, 26).curveTo(-96, -40, -52, -88).curveTo(0, -122, 52, -88)
       .curveTo(96, -40, 78, 26).curveTo(40, 46, 0, 46).curveTo(-40, 46, -78, 26).closePath();
     hurt.alpha = 0;
+    hurt.cache(-100, -128, 200, 180);
     body.addChild(hurt);
 
     return body;
@@ -1182,24 +1202,47 @@
   // ⚠予告マーカーを置く(赤い予告サークル+明滅する⚠)。timer 経過で消える。
   // 解決(触手の突き上げ)は fireAttack 側が pendingZones を読んで行う
   var pendingZones = [];
-  // ⚠マーカーは「静的な塗り(cache)」「脈動する外周リング(cache して alpha だけ
-  // 動かす)」「収束する内リング(細い1本なので毎フレーム描いても軽い)」の
-  // 3枚に分け、毎フレームの clear+3円+rgba文字列連結をやめる
+  // ⚠マーカーの部品は「基準サイズで一度だけ焼いた共有 canvas」を
+  // Bitmap + scale で使い回す。攻撃のたびに半径違いの cache を焼き直す方式は、
+  // Canvas2D では焼きコストが、WebGL では新規テクスチャの生成・破棄が毎回
+  // 走ってしまう。線幅も scale と一緒に伸縮するが、2〜3px 級の差は判別できない
+  var WARN_R0 = 64;   // 焼き込みの基準半径
+  var warnFillC = null, warnRingC = null, warnConvC = null, warnTxtC = null;
+  function bakeWarn() {
+    if (warnFillC) return;
+    var s = new createjs.Shape();
+    s.graphics.beginFill("rgba(255,48,32,0.14)").drawCircle(0, 0, WARN_R0);
+    s.cache(-WARN_R0 - 2, -WARN_R0 - 2, WARN_R0 * 2 + 4, WARN_R0 * 2 + 4);
+    warnFillC = s.cacheCanvas;
+    s = new createjs.Shape();
+    s.graphics.setStrokeStyle(3).beginStroke("#ff3020").drawCircle(0, 0, WARN_R0);
+    s.cache(-WARN_R0 - 4, -WARN_R0 - 4, WARN_R0 * 2 + 8, WARN_R0 * 2 + 8);
+    warnRingC = s.cacheCanvas;
+    s = new createjs.Shape();
+    s.graphics.setStrokeStyle(2).beginStroke("rgba(255,120,90,0.8)").drawCircle(0, 0, WARN_R0);
+    s.cache(-WARN_R0 - 3, -WARN_R0 - 3, WARN_R0 * 2 + 6, WARN_R0 * 2 + 6);
+    warnConvC = s.cacheCanvas;
+    var t = new createjs.Text("⚠", "700 34px sans-serif", "#ffd24a");
+    t.textAlign = "center"; t.textBaseline = "middle";
+    t.shadow = new createjs.Shadow("rgba(0,0,0,0.9)", 0, 2, 6);
+    t.cache(-28, -28, 56, 60);   // 字形+影(下2px/ぼかし6px)ぶんの余白
+    warnTxtC = t.cacheCanvas;
+  }
+  function warnBitmap(canvas, x, y, scale) {
+    var b = new createjs.Bitmap(canvas);
+    b.regX = canvas.width / 2;   // 共有 canvas の中心=マーカーの中心
+    b.regY = canvas.height / 2;
+    b.x = x; b.y = y;
+    if (scale) b.scaleX = b.scaleY = scale;
+    return b;
+  }
   function addWarning(x, y, r, timer) {
-    var fillSh = new createjs.Shape();
-    fillSh.graphics.beginFill("rgba(255,48,32,0.14)").drawCircle(0, 0, r);
-    fillSh.cache(-r - 2, -r - 2, r * 2 + 4, r * 2 + 4);
-    fillSh.x = x; fillSh.y = y;
-    var ringSh = new createjs.Shape();
-    ringSh.graphics.setStrokeStyle(3).beginStroke("#ff3020").drawCircle(0, 0, r);
-    ringSh.cache(-r - 4, -r - 4, r * 2 + 8, r * 2 + 8);
-    ringSh.x = x; ringSh.y = y;
-    var sh = new createjs.Shape();     // 収束リング(毎フレーム描き直し)
-    sh.x = x; sh.y = y;
-    var txt = new createjs.Text("⚠", "700 34px sans-serif", "#ffd24a");
-    txt.textAlign = "center"; txt.textBaseline = "middle";
-    txt.x = x; txt.y = y;
-    txt.shadow = new createjs.Shadow("rgba(0,0,0,0.9)", 0, 2, 6);
+    bakeWarn();
+    var k = r / WARN_R0;
+    var fillSh = warnBitmap(warnFillC, x, y, k);
+    var ringSh = warnBitmap(warnRingC, x, y, k);
+    var sh = warnBitmap(warnConvC, x, y, k);   // 収束リング(scale で縮める)
+    var txt = warnBitmap(warnTxtC, x, y);      // ⚠は半径によらず等倍
     warnCont.addChild(fillSh, ringSh, sh, txt);
     warnings.push({ x: x, y: y, r: r, timer: timer, total: timer,
                     sh: sh, fill: fillSh, ring: ringSh, txt: txt });
@@ -1232,10 +1275,9 @@
       }
       var k = 1 - w.timer / w.total;                 // 0→1 で収束
       w.ring.alpha = 0.5 + 0.3 * Math.sin(t * 12);
-      var g = w.sh.graphics;
-      g.clear();
-      g.setStrokeStyle(2).beginStroke("rgba(255,120,90,0.8)")
-        .drawCircle(0, 0, w.r * (1 - k * 0.85));     // 内側へ収束するリング=残り時間
+      // 内側へ収束するリング=残り時間。焼き済みリングを scale で縮めるだけ。
+      // 旧実装の「毎フレーム clear→パス再構築」はここでは丸ごと消えている
+      w.sh.scaleX = w.sh.scaleY = (w.r * (1 - k * 0.85)) / WARN_R0;
       w.txt.alpha = 0.6 + 0.4 * Math.sin(t * 10);
     }
   }

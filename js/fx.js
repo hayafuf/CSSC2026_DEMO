@@ -319,26 +319,37 @@
   }
 
   // 浮かび上がる数字/文言。輪郭付き + 出現ポップ。
-  // 文字列が毎回違うのでプールでの使い回しは効かないが、生成直後に cache して
-  // 「生存中の約1秒 × 60フレーム、shadowBlur 付きテキストを描き直す」のを
-  // 1回のラスタライズに変える。ポップで 1.12 倍まで拡大されるので、その分
-  // 少し高い解像度(1.25)で焼いてボケを防ぐ
+  // Text 実体はプールで使い回す: 旧実装は呼び出しごとに Text+Shadow を新規生成し、
+  // 都度サイズの cache canvas を確保していた(スコア連鎖中は毎フレーム数個)。
+  // 器を最長文言が入る固定領域で一度だけ確保し、以後は text/font/color を
+  // 書いて updateCache するだけにする(hud.js cacheHudText と同じ「器は使い回す」
+  // 発想。canvas の作り捨ては GC 圧に加え、WebGL ではテクスチャの生成・破棄になる)。
+  // ポップで 1.12 倍まで拡大されるので、少し高い解像度(1.25)で焼いてボケを防ぐ
+  var floatFree = [];
   function floatText(str, x, y, color, size) {
     var fx = PP.layers.fx;
-    var t = new createjs.Text(str, "700 " + (size || 18) + 'px "Cinzel","Hiragino Kaku Gothic ProN","Meiryo",serif', color);
-    t.textAlign = "center"; t.textBaseline = "middle";
+    var t = floatFree.pop();
+    if (!t) {
+      t = new createjs.Text("", "", "#fff");
+      t.textAlign = "center"; t.textBaseline = "middle";
+      t.shadow = new createjs.Shadow("rgba(0,0,0,0.85)", 0, 2, 4);
+      // 最長文言(40px の見出し・英語ヒント文)+影がゆったり収まる固定領域
+      t.cache(-240, -36, 480, 84, 1.25);
+    }
+    t.text = str;
+    t.color = color;
+    t.font = "700 " + (size || 18) + 'px "Cinzel","Hiragino Kaku Gothic ProN","Meiryo",serif';
+    t.updateCache();
     t.x = x; t.y = y;
-    t.shadow = new createjs.Shadow("rgba(0,0,0,0.85)", 0, 2, 4);
-    var tb = t.getBounds();
-    if (tb) t.cache(tb.x - 8, tb.y - 8, tb.width + 16, tb.height + 20, 1.25);
+    t.alpha = 1;
     t.scaleX = t.scaleY = 0.4;
     fx.addChild(t);
-    createjs.Tween.get(t)
+    createjs.Tween.get(t, { override: true })   // 再利用時: 前回の Tween を確実に殺す
       .to({ scaleX: 1.12, scaleY: 1.12 }, 130, createjs.Ease.backOut)
       .to({ scaleX: 1, scaleY: 1 }, 90);
     createjs.Tween.get(t)
       .to({ y: y - 42, alpha: 0 }, 960, createjs.Ease.quadOut)
-      .call(function () { fx.removeChild(t); });
+      .call(function () { fx.removeChild(t); floatFree.push(t); });
   }
 
   // ---------- 画面の揺れ ----------
@@ -380,10 +391,19 @@
     for (var i = 0; i < refs.length; i++) { refs[i].x = 0; refs[i].y = 0; }
   }
 
+  // その場に灯って消えるグロー1粒(イントロ彗星の尾など)。プール経由なので
+  // 呼び捨てでよい。size は表示半径 px、durMs かけて縮みながら alpha a0→0。
+  // 消え方は spawnDot の quadOut(旧トレイルの k² フェードと同じ曲線)
+  function glowDot(x, y, color, size, durMs, a0, shrink) {
+    var s0 = size / DOT_R;
+    var s1 = s0 * (shrink === undefined ? 0.5 : shrink);
+    spawnDot(dotFor(color), "lighter", x, y, x, y, s0, s0, s1, s1, durMs, { a0: a0 });
+  }
+
   PP.fx = {
     particles: particles, burst: burst, floatText: floatText,
     ring: ring, flash: flash, splash: splash, missileTrail: missileTrail,
-    screenFlash: screenFlash,
+    screenFlash: screenFlash, glowDot: glowDot,
     updateParticles: updateParticles, particleLoad: particleLoad,
     shake: shake, updateShake: updateShake, resetShake: resetShake
   };

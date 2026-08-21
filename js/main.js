@@ -291,54 +291,24 @@
     for (var i = 0; i < intro.parts.length; i++) {
       var pt = intro.parts[i];
       if (pt.comet && pt.comet.parent) pt.comet.parent.removeChild(pt.comet);
-      if (pt.trail) {
-        createjs.Tween.removeTweens(pt.trail);
-        if (pt.trail.parent) pt.trail.parent.removeChild(pt.trail);
-      }
+      // 尾はプールのグロー粒(fx.glowDot)なので後始末不要 — 0.55秒で勝手に消える
     }
     intro = null;
   }
 
   // 彗星の尾のパラメータ。尾は「塗り残した線」ではなく、頭が通り過ぎたあと
-  // 時間差でスッと消えていく(彗星の頭 makeComet と同じ 白熱→金→橙 の配色)
+  // 時間差でスッと消えていく(彗星の頭 makeComet と同じ 白熱→金→橙 の配色)。
+  // 旧実装は全頂点を毎フレーム多層ストロークで描き直していた(尾の長さぶんの
+  // パス再構築が毎フレーム)。いまは頭が通過した地点に fx プールのグロー粒を
+  // 2層置くだけ: 頭は等速で進むので「距離による減衰」と「時間による減衰」は
+  // 同じ曲線になり、quadOut(k²)フェードが旧実装の外層 0.25k² と一致する
   var INTRO_TAIL_TIME = 0.55;   // 頭が通ってから尾のその地点が消えるまでの秒数
-  var INTRO_TAIL_STEP = 14;     // 尾の頂点間隔 px(小さいほど曲線が滑らか)
+  var INTRO_TAIL_STEP = 14;     // 尾の粒の間隔 px(小さいほど曲線が滑らか)
 
-  // 尾の描画用シェイプ(毎フレーム全消し→描き直し。加算合成で発光して見える)
-  function makeIntroTrail() {
-    var s = new createjs.Shape();
-    s.compositeOperation = "lighter";
-    PP.layers.fx.addChild(s);
-    return s;
-  }
-
-  // 頭(pt.d)から離れすぎた頂点を尾の末端から捨てる
-  function pruneIntroTail(pt) {
-    var tailLen = pt.speed * INTRO_TAIL_TIME;
-    while (pt.tailPts.length && pt.d - pt.tailPts[0].d > tailLen) pt.tailPts.shift();
-  }
-
-  // 尾を描く: 頭に近いほど太く白熱し、末端へ向かって金→橙に冷めながら細く消える
-  function drawIntroTail(pt) {
-    var tg = pt.trail.graphics;
-    tg.clear();
-    var pts = pt.tailPts;
-    if (pts.length < 2) return;
-    var tailLen = pt.speed * INTRO_TAIL_TIME;
-    for (var j = 1; j < pts.length; j++) {
-      var a = pts[j - 1], b = pts[j];
-      var k = 1 - (pt.d - b.d) / tailLen;   // 1=頭の直後、0=消える寸前
-      if (k <= 0) continue;
-      // 外層: 橙の淡いグロー
-      tg.setStrokeStyle(3 + 15 * k * k, "round", "round")
-        .beginStroke("rgba(255,150,40," + (0.25 * k * k).toFixed(3) + ")")
-        .moveTo(a.x, a.y).lineTo(b.x, b.y).endStroke();
-      // 芯: 白熱(頭)→ 金(末端)。makeComet の放射グラデと同じ温度感
-      tg.setStrokeStyle(1.5 + 4.5 * k, "round", "round")
-        .beginStroke("rgba(255," + Math.round(200 + 52 * k) + "," +
-                     Math.round(90 + 140 * k) + "," + (0.9 * k).toFixed(3) + ")")
-        .moveTo(a.x, a.y).lineTo(b.x, b.y).endStroke();
-    }
+  // 尾の1点ぶんのグローを灯す(外層=橙の淡い光 / 芯=白熱の金)
+  function spawnIntroTailGlow(x, y) {
+    PP.fx.glowDot(x, y, "#ff9628", 9, INTRO_TAIL_TIME * 1000, 0.25, 0.2);
+    PP.fx.glowDot(x, y, "#ffeccc", 3.5, INTRO_TAIL_TIME * 1000, 0.85, 0.35);
   }
 
   function startIntro() {
@@ -346,11 +316,11 @@
     var parts = [];
     g.eachLane(function (lane) {
       var p0 = lane.rail.posAt(0);
-      var pt = { lane: lane, d: 0, tailPts: [], lastTailD: 0,
+      var pt = { lane: lane, d: 0, lastTailD: 0,
                  nextSpark: 0, nextRing: 0, n: 0,
                  // 順番になぞるので、長いレーンは maxLaneTime 秒に収まるよう加速する
                  speed: Math.max(PP.INTRO.speed, lane.rail.holeD / PP.INTRO.maxLaneTime),
-                 trail: makeIntroTrail(), comet: makeComet() };
+                 comet: makeComet() };
       pt.comet.x = p0.x; pt.comet.y = p0.y;
       pt.comet.visible = false;   // 自分の番が来るまで隠しておく
       parts.push(pt);
@@ -382,16 +352,8 @@
   function updateIntro(dt) {
     if (!intro) { PP.game.state = "playing"; return; }   // UI 無しの保険
     intro.t += dt;
-
-    // なぞり終えたレーンの尾: 仮想の頭(pt.d)を進め続けることで、
-    // 樽に吸い込まれるように末端からスッと消えていく
-    for (var i = 0; i < intro.idx && i < intro.parts.length; i++) {
-      var ft = intro.parts[i];
-      if (!ft.tailPts.length) continue;
-      ft.d += ft.speed * dt;
-      pruneIntroTail(ft);
-      drawIntroTail(ft);
-    }
+    // なぞり終えたレーンの尾はプールの粒が各自の寿命で勝手に消えていく
+    // (旧実装のような「仮想の頭を進めて描き直す」処理は不要になった)
     if (intro.idx >= intro.parts.length) return;   // 全レーン到達後の保険
 
     var pt = intro.parts[intro.idx];
@@ -400,15 +362,13 @@
     var end = pt.lane.rail.holeD;
     var hp = pt.lane.rail.posAt(Math.min(pt.d, end));
 
-    // 尾の頂点をレール弧長 INTRO_TAIL_STEP ごとに拾う(曲線でも滑らかな尾になる)
+    // 尾の粒をレール弧長 INTRO_TAIL_STEP ごとに灯す(曲線でも滑らかな尾になる)
     var headD = Math.min(pt.d, end);
     while (pt.lastTailD + INTRO_TAIL_STEP <= headD) {
       pt.lastTailD += INTRO_TAIL_STEP;
       var tp = pt.lane.rail.posAt(pt.lastTailD);
-      pt.tailPts.push({ x: tp.x, y: tp.y, d: pt.lastTailD });
+      spawnIntroTailGlow(tp.x, tp.y);
     }
-    pruneIntroTail(pt);
-    drawIntroTail(pt);
 
     pt.comet.x = hp.x; pt.comet.y = hp.y;
     pt.comet.scaleX = pt.comet.scaleY = 1.2 + 0.35 * Math.sin(intro.t * 22);
@@ -455,11 +415,8 @@
       for (var i = 0; i < intro.parts.length; i++) {
         var pt = intro.parts[i];
         if (pt.comet.parent) pt.comet.parent.removeChild(pt.comet);
-        (function (tr) {
-          createjs.Tween.get(tr, { override: true })
-            .to({ alpha: 0 }, 800)
-            .call(function () { if (tr.parent) tr.parent.removeChild(tr); });
-        })(pt.trail);
+        // 尾のグロー粒はプールが各自の寿命で消してくれる(旧実装の
+        // 「軌跡 Shape をフェードさせて除去する Tween」は丸ごと不要)
       }
       intro = null;
     }
@@ -791,6 +748,9 @@
     fpsText = new createjs.Text("", 'bold 13px "Consolas","Menlo",monospace', "#7fffd4");
     fpsText.x = 8; fpsText.y = PP.H - 22;
     fpsText.mouseEnabled = false;
+    // 計測表示自身が負荷にならないよう固定領域で cache(更新は 0.25s に1回、
+    // 文字列が変わったときだけ updateCache)
+    fpsText.cache(-4, -4, 340, 26);
     stage.addChild(fpsText);
   }
   function updateFpsMeter(rawDt) {
@@ -803,7 +763,7 @@
     var s = "FPS " + fpsAvg.toFixed(1) + " | Q" + PP.quality + " | balls " + fpsBallCount;
     // ボス戦中は妖弾数も添える(弾数上限 bulletMax・プールの調整用)
     if (PP.boss && PP.boss.isActive()) s += " | orbs " + PP.boss.getBulletCount();
-    if (s !== fpsMeterStr) { fpsMeterStr = s; fpsText.text = s; }
+    if (s !== fpsMeterStr) { fpsMeterStr = s; fpsText.text = s; fpsText.updateCache(); }
   }
 
   // tick 内で eachLane へ渡すループ本体。無名関数のまま渡すと毎フレーム

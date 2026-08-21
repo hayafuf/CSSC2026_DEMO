@@ -15,7 +15,22 @@
   var loadSlot;      // 装填した玉の置き場(砲身と砲口の縁の間の層)
   var currentView;   // 装填中の玉
   var nextView;      // 次弾の表示
-  var aimLine;       // 照準ガイド
+  var aimLine;       // 照準ガイド(Container: 破線 Bitmap + 望遠鏡の着弾リング)
+  // 破線は「最大長ぶんを事前に焼いた縦長 canvas」を sourceRect で必要な長さ
+  // だけ切り出して貼る。旧実装は入力が変わるたびに数十本の線分パスを組み
+  // 直していた(望遠鏡中は砲を動かすたび=実質毎フレーム)。色は3種
+  // (通常/ミサイル/爆弾)を焼き分ける。破線の位相は下端(砲口側)基準で
+  // 焼いてあるので、下から切り出せば旧実装と同じ見た目になる
+  var aimDashCanvas = null, aimDash = null, aimRing = null, aimSrcRect = null;
+  var AIM_TOP = 66;           // 照準線の最遠端(HUD 下端)= firstHitY の下限と同じ
+  var AIM_Y0 = 0, AIM_H = 0;  // 破線の下端 y と全長(build で確定)
+  function bakeAimDash(color) {
+    var s = new createjs.Shape();
+    var g = s.graphics.setStrokeStyle(2).beginStroke(color);
+    for (var cy = AIM_H; cy > 0; cy -= 14) g.moveTo(2, cy).lineTo(2, Math.max(cy - 7, 0));
+    s.cache(0, 0, 4, AIM_H);
+    return s.cacheCanvas;
+  }
   var stockSlot;     // 特殊弾のストックスロット(大砲の左脇に追従)
   var stockIcon;     // スロット内の特殊弾アイコン(spark トゥイーン後始末用)
   var stockLabel;    // スロットの状態表示(「待機」/「装填中」)
@@ -322,9 +337,26 @@
   function build() {
     var layer = PP.layers.cannon;
 
-    // 照準ガイド(絶対座標で描画)
-    aimLine = new createjs.Shape();
+    // 照準ガイド(絶対座標で配置。作画は焼き置き=モジュール冒頭の解説参照)
+    aimLine = new createjs.Container();
     aimLine.alpha = 0.25;
+    AIM_Y0 = PP.cannon.y - MUZZLE_LEN - PP.R - 8;   // 装填玉の上端(updateAim と同式)
+    AIM_H = AIM_Y0 - AIM_TOP;
+    aimDashCanvas = {
+      "#f5e8c8": bakeAimDash("#f5e8c8"),   // 通常弾
+      "#7ad9ff": bakeAimDash("#7ad9ff"),   // ミサイル
+      "#ff7a3c": bakeAimDash("#ff7a3c")    // 爆弾
+    };
+    aimDash = new createjs.Bitmap(aimDashCanvas["#f5e8c8"]);
+    aimSrcRect = new createjs.Rectangle(0, 0, 4, AIM_H);
+    aimDash.sourceRect = aimSrcRect;   // 中身は updateAim が毎回書き換える(器は共有)
+    var ringS = new createjs.Shape();
+    ringS.graphics.beginStroke("#ffe08a").setStrokeStyle(2).drawCircle(0, 0, 7);
+    ringS.cache(-9, -9, 18, 18);
+    aimRing = new createjs.Bitmap(ringS.cacheCanvas);
+    aimRing.regX = aimRing.regY = 9;
+    aimRing.visible = false;
+    aimLine.addChild(aimDash, aimRing);
     layer.addChild(aimLine);
 
     root = new createjs.Container();
@@ -372,6 +404,10 @@
     nextLabel.textAlign = "center";
     nextLabel.textBaseline = "middle";
     nextLabel.shadow = new createjs.Shadow("rgba(0,0,0,0.8)", 0, 1, 1);
+    // 影付き Text は cache しないと毎フレーム字形+影を再ラスタライズする
+    // (hud.js cacheHudText と同じ理屈。器は固定し、文字替え側が updateCache)
+    nextLabel.cache(-36, -11, 72, 22);
+    PP.regFontCache(nextLabel);   // Cinzel 到着時に焼き直す
     root.addChild(nextLabel);
 
     // 特殊弾のストックスロット(大砲の左脇=次弾ラックの鏡像。特殊弾を
@@ -395,6 +431,8 @@
     stockLabel.textAlign = "center";
     stockLabel.textBaseline = "middle";
     stockLabel.shadow = new createjs.Shadow("rgba(0,0,0,0.8)", 0, 1, 1);
+    stockLabel.cache(-32, -10, 64, 20);
+    PP.regFontCache(stockLabel);
     stockSlot.addChild(stockLabel);
     var caption = new createjs.Text(PP.i18n.t(PP.TOUCH ? "cannon.swapTouch" : "cannon.swapKey"),
       '700 10px "Hiragino Kaku Gothic ProN","Meiryo",serif', "#f5e8c8");
@@ -402,14 +440,19 @@
     caption.textAlign = "center";
     caption.textBaseline = "middle";
     caption.shadow = new createjs.Shadow("rgba(0,0,0,0.8)", 0, 1, 1);
+    caption.cache(-54, -10, 108, 20);
+    PP.regFontCache(caption);
     stockSlot.addChild(caption);
     root.addChild(stockSlot);   // 大砲コンテナの子にして横移動に追従させる
 
-    // 言語切り替え時: build で文字を焼き込んだラベルだけ貼り替える。
+    // 言語切り替え時: build で文字を焼き込んだラベルだけ貼り替える
+    // (cache 済みなので、貼り替えたら updateCache で焼き直す)。
     // stockLabel は refreshStock が状態から毎回組み直すので、それを呼べば足りる
     PP.i18n.onChange(function () {
       nextLabel.text = PP.i18n.t("cannon.next");
+      nextLabel.updateCache();
       caption.text = PP.i18n.t(PP.TOUCH ? "cannon.swapTouch" : "cannon.swapKey");
+      caption.updateCache();
       refreshStock();
     });
   }
@@ -420,6 +463,9 @@
     guide.visible = false;
     guideCore = new createjs.Shape();
     drawGuideCore(false);
+    // 色替え(逆操作)のときだけ drawGuideCore が描き直し+updateCache する。
+    // cache が無いと後光グラデ+菱形を毎フレーム再ラスタライズしてしまう
+    guideCore.cache(-26, -26, 52, 52);
     guide.addChild(guideCore);
     root.addChild(guide);
   }
@@ -446,6 +492,7 @@
     // 中央の稜線(磨いた金属のスペキュラ)
     g.setStrokeStyle(1).beginStroke(addle ? "#ffe6ef" : BRZ.SPEC)
       .moveTo(0, -6).lineTo(0, 13);
+    if (guideCore.cacheCanvas) guideCore.updateCache();   // 色替えのときだけ焼き直す
   }
 
   // 毎フレーム更新(main.js の tick が updateAim と並べて呼ぶ)。
@@ -492,6 +539,7 @@
       stockIcon.alpha = 1;
       stockLabel.text = PP.i18n.t("cannon.wait");
     }
+    stockLabel.updateCache();   // cache 済みなので貼り替えたら焼き直す
     stockSlot.addChildAt(stockIcon, 1);   // 台座の上・ラベルの下
   }
 
@@ -731,7 +779,7 @@
   // 照準ガイド(入力が変わった tick だけ再描画)。望遠鏡が有効な間は着弾点まで伸びる
   function updateAim(dt) {
     if (PP.game.state !== "playing") {
-      if (aimDrawn) { aimLine.graphics.clear(); aimDrawn = false; aimX = null; }
+      if (aimDrawn) { aimLine.visible = false; aimDrawn = false; aimX = null; }
       return;
     }
     var x = PP.cannon.x;
@@ -752,17 +800,18 @@
     var sp = (PP.game.special && PP.game.specialLoaded) ? PP.game.special : null;
     if (aimDrawn && x === aimX && spy === aimSpy && topY === aimTopY && sp === aimSp) return;
     aimDrawn = true; aimX = x; aimSpy = spy; aimTopY = topY; aimSp = sp;
-    var g = aimLine.graphics;
-    g.clear();
-    g.setStrokeStyle(2).beginStroke(
-      sp === "missile" ? "#7ad9ff" : sp === "bomb" ? "#ff7a3c" : "#f5e8c8");
-    // 装填した玉(砲口の -52 に原寸で乗る)の上端から引き始める。玉に食い込ませない。
-    for (var y = PP.cannon.y - MUZZLE_LEN - PP.R - 8; y > topY; y -= 14) {
-      g.moveTo(x, y).lineTo(x, Math.max(y - 7, topY));
-    }
-    if (spy) {
-      g.beginStroke("#ffe08a").setStrokeStyle(2).drawCircle(x, topY, 7);
-    }
+    aimLine.visible = true;
+    // 破線: 色に対応する焼き置き canvas から、topY までの長さぶんを下端側から
+    // 切り出す(位相が下端基準なので、旧実装のパス描画と同じ見た目になる)
+    aimDash.image = aimDashCanvas[
+      sp === "missile" ? "#7ad9ff" : sp === "bomb" ? "#ff7a3c" : "#f5e8c8"];
+    var h = Math.max(0, AIM_Y0 - Math.max(topY, AIM_TOP));
+    aimSrcRect.y = AIM_H - h;
+    aimSrcRect.height = h;
+    aimDash.x = x - 2;            // 焼き込みの中心線(x=2)を砲の x に合わせる
+    aimDash.y = AIM_Y0 - h;
+    aimRing.visible = spy;
+    if (spy) { aimRing.x = x; aimRing.y = topY; }
   }
 
   // 真上に撃ったとき最初に当たるチェーン玉の高さ(なければ HUD 下端 66)。

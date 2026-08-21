@@ -140,14 +140,20 @@
         .drawCircle(rx, mid, 5.4);
       g.beginFill("rgba(255,248,220,0.6)").drawCircle(rx - 1.6, mid - 2, 1.5);
     });
+    // 帯は100%静的なのに、cache しないと多段グラデ+仕切り+リベットの全パスを
+    // 毎フレーム再ラスタライズしてしまう。一度だけ焼いて blit にする
+    // (+2 は最下段の影ぶん)
+    bar.cache(0, 0, W, BAR + 2);
     L.addChild(bar);
 
     // ---- ステータス(絵文字アイコン + ラベル + 数値) ----
     function stat(icon, label, x, valColor, maxW) {
       var ic = new createjs.Text(icon, F_ICON, "#ffffff");
       ic.x = x; ic.y = mid; ic.textBaseline = "middle";
+      cacheHudText(ic, 30, 30, 4);   // 絵文字も静的: 毎フレームの字形整形を止める
       var lb = new createjs.Text(label, F_LBL, C_LBL);
       lb.x = x + 27; lb.y = 9;
+      cacheHudText(lb, 70, 16, 4);   // ラベルは英字固定(言語切替の対象外)
       var v = new createjs.Text("", F_VAL, valColor || C_VAL);
       v.x = x + 27; v.y = 25;
       v.shadow = new createjs.Shadow("rgba(0,0,0,0.65)", 0, 1, 3);
@@ -163,12 +169,19 @@
     // ---- 生存ゲージ ----
     var gl = new createjs.Text("SURVIVAL", F_LBL, C_LBL);
     gl.x = GAUGE_X; gl.y = 9;
+    cacheHudText(gl, 100, 16, 4);
     L.addChild(gl);
     gaugeGlow = new createjs.Shape();       // 低下時の赤/teal グロー(枠の外)
     gaugeGlow.x = GAUGE_X; gaugeGlow.y = GAUGE_Y;
+    // パスは初回の低残量時に一度だけ描かれる(updateEffects)。器を先に固定して
+    // おき、描いた側が updateCache する(setCachedText と同じ「器は使い回す」方式)
+    gaugeGlow.cache(-4, -4, GAUGE_W + 8, GAUGE_H + 8);
     L.addChild(gaugeGlow);
     gaugeBar = new createjs.Shape();
     gaugeBar.x = GAUGE_X; gaugeBar.y = GAUGE_Y;
+    // バー形状は gKey が変わったフレームだけ再描画される。cache が無いと
+    // 「変わらないフレーム」も毎回グラデをラスタライズし直してしまう
+    gaugeBar.cache(-2, -2, GAUGE_W + 4, GAUGE_H + 4);
     L.addChild(gaugeBar);
     gaugeText = new createjs.Text("", F_GT, C_VAL);
     gaugeText.x = GAUGE_X + GAUGE_W + 12; gaugeText.y = mid;
@@ -179,6 +192,9 @@
 
     // ---- 有効パワーアップ(ピル型チップ + アイコン+残り秒) ----
     effectsChip = new createjs.Shape();
+    // チップの形は文字列が変わったときだけ描き直される(rebuildEffectChips が
+    // updateCache する)。領域は hudEffects の cache 幅(460+余白)に合わせて固定
+    effectsChip.cache(812, 13, 500, 36);
     L.addChild(effectsChip);
     hudEffects = new createjs.Text("", F_EFF, C_TEAL);
     hudEffects.x = 826; hudEffects.y = mid; hudEffects.textBaseline = "middle";
@@ -211,6 +227,7 @@
     pb.graphics.beginFill("#f4e2a0")
       .drawRoundRect(pcx - 7, r.y + 10, 5, pbh, 2)
       .drawRoundRect(pcx + 2, r.y + 10, 5, pbh, 2);
+    pb.cache(r.x - 2, r.y - 2, r.w + 4, r.h + 4);   // 完全に静的
     pauseBtn.addChild(pb);
     pauseBtn.visible = false;
     L.addChild(pauseBtn);
@@ -230,11 +247,14 @@
         .setStrokeStyle(2).beginStroke("rgba(142,240,208,0.8)")
         .drawRoundRect(wr.x - 3, wr.y - 3, wr.w + 6, wr.h + 6, 14);
       wildGlow.visible = false;
+      wildGlow.cache(wr.x - 8, wr.y - 8, wr.w + 16, wr.h + 16);   // 明滅は alpha のみ
       wildBg = new createjs.Shape();   // 形は redrawWildBtn() が状態に応じて描く
+      wildBg.cache(wr.x - 3, wr.y - 3, wr.w + 6, wr.h + 6);   // 器を固定(redraw側がupdateCache)
       wildIconTxt = new createjs.Text("🌈",
         '26px "Segoe UI Emoji","Apple Color Emoji","Noto Color Emoji",sans-serif', "#ffffff");
       wildIconTxt.textAlign = "center"; wildIconTxt.textBaseline = "middle";
       wildIconTxt.x = wr.x + wr.w / 2; wildIconTxt.y = wr.y + 30;
+      cacheHudText(wildIconTxt, 40, 40, 6);   // 減灯は alpha のみ=焼き直し不要
       wildCountTxt = new createjs.Text("", '700 18px "Cinzel", serif', C_VAL);
       wildCountTxt.textAlign = "center"; wildCountTxt.textBaseline = "middle";
       wildCountTxt.x = wr.x + wr.w / 2; wildCountTxt.y = wr.y + 62;
@@ -247,9 +267,11 @@
         .drawRoundRect(wr.x + wr.w - 24, wr.y - 8, 24, 22, 5)
         .setStrokeStyle(1.2).beginStroke("rgba(202,169,106,0.75)")
         .drawRoundRect(wr.x + wr.w - 24, wr.y - 8, 24, 22, 5);
+      cap.cache(wr.x + wr.w - 26, wr.y - 10, 28, 26);   // キーキャップも静的
       var capTxt = new createjs.Text("Q", '700 13px "Cinzel", serif', "#f4e2a0");
       capTxt.textAlign = "center"; capTxt.textBaseline = "middle";
       capTxt.x = wr.x + wr.w - 12; capTxt.y = wr.y + 3;
+      cacheHudText(capTxt, 24, 18, 4);
       wildBtn.addChild(wildGlow, wildBg, wildIconTxt, wildCountTxt, cap, capTxt);
       wildBtn.visible = false;
       L.addChild(wildBtn);
@@ -272,6 +294,7 @@
     g.setStrokeStyle(1.6).beginStroke(
       info.armed ? "#8ef0d0" : lit ? "rgba(202,169,106,0.8)" : "rgba(202,169,106,0.3)")
       .drawRoundRect(wr.x, wr.y, wr.w, wr.h, 12);
+    wildBg.updateCache();   // 状態が変わったときだけ焼き直す(呼び出し側が変化検知済み)
     wildIconTxt.alpha = lit ? 1 : 0.45;                 // 在庫0は減灯
     setCachedText(wildCountTxt,
       info.armed ? PP.i18n.t("hud.wildArmed") : "x" + info.charges,
@@ -344,6 +367,7 @@
           .beginStroke("rgba(142,240,208,0.5)").setStrokeStyle(1.2)
           .drawRoundRect(hudEffects.x - 12, 15, tw + 24, 32, 16);
       }
+      effectsChip.updateCache();   // 変化したフレームだけ焼き直す
     }
   }
 
@@ -465,6 +489,7 @@
         gaugeGlowDrawn = true;
         gaugeGlow.graphics.beginStroke("rgba(255,70,60,1)").setStrokeStyle(3.5)
           .drawRoundRect(-1.5, -1.5, GAUGE_W + 3, GAUGE_H + 3, 8);
+        gaugeGlow.updateCache();   // 初回だけ焼く(以後は alpha 操作のみ)
       }
       gaugeGlow.alpha = 0.35 + 0.35 * (0.5 + 0.5 * Math.sin(animT * 7));
       gaugeGlowOn = true;
@@ -484,28 +509,26 @@
       gg.beginLinearGradientFill(["#ff9a8a", "#e04848", "#7a1420"], [0, 0.5, 1], 0, 0, 0, GAUGE_H)
         .drawRoundRect(1.5, 1.5, GAUGE_W - 3, GAUGE_H - 3, 5.5);
       gg.setStrokeStyle(1.5).beginStroke("#ff6a5a").drawRoundRect(0, 0, GAUGE_W, GAUGE_H, 7);
-      return;
-    }
-
-    if (g.finishing) {
+    } else if (g.finishing) {
       gg.beginLinearGradientFill(["#b6ffe6", "#8ef0d0", "#3fbfa0"], [0, 0.5, 1], 0, 0, 0, GAUGE_H)
         .drawRoundRect(1.5, 1.5, GAUGE_W - 3, GAUGE_H - 3, 5.5);
       gg.setStrokeStyle(1.5).beginStroke("#8ef0d0").drawRoundRect(0, 0, GAUGE_W, GAUGE_H, 7);
-      return;
+    } else {
+      if (fillW > 0) {
+        var cols = low ? ["#ff9a6a", "#ff5b4a", "#c81e1e"] : ["#ffe89a", "#f0c040", "#b8860b"];
+        gg.beginLinearGradientFill(cols, [0, 0.5, 1], 0, 0, 0, GAUGE_H)
+          .drawRoundRect(1.5, 1.5, fillW, GAUGE_H - 3, 5.5);
+        // 上端の照り
+        gg.beginFill("rgba(255,255,255,0.28)").drawRoundRect(2.5, 2.5, fillW - 2, 3, 2);
+      }
+      // 目盛り
+      gg.setStrokeStyle(1).beginStroke("rgba(0,0,0,0.35)");
+      for (var t = 1; t < 4; t++) { var mx = 1.5 + (GAUGE_W - 3) * (t / 4); gg.moveTo(mx, 2).lineTo(mx, GAUGE_H - 2); }
+      gg.endStroke();
+      gg.setStrokeStyle(1.5).beginStroke("#c9a86a").drawRoundRect(0, 0, GAUGE_W, GAUGE_H, 7);
     }
-
-    if (fillW > 0) {
-      var cols = low ? ["#ff9a6a", "#ff5b4a", "#c81e1e"] : ["#ffe89a", "#f0c040", "#b8860b"];
-      gg.beginLinearGradientFill(cols, [0, 0.5, 1], 0, 0, 0, GAUGE_H)
-        .drawRoundRect(1.5, 1.5, fillW, GAUGE_H - 3, 5.5);
-      // 上端の照り
-      gg.beginFill("rgba(255,255,255,0.28)").drawRoundRect(2.5, 2.5, fillW - 2, 3, 2);
-    }
-    // 目盛り
-    gg.setStrokeStyle(1).beginStroke("rgba(0,0,0,0.35)");
-    for (var t = 1; t < 4; t++) { var mx = 1.5 + (GAUGE_W - 3) * (t / 4); gg.moveTo(mx, 2).lineTo(mx, GAUGE_H - 2); }
-    gg.endStroke();
-    gg.setStrokeStyle(1.5).beginStroke("#c9a86a").drawRoundRect(0, 0, GAUGE_W, GAUGE_H, 7);
+    // 3分岐とも最後にここへ合流して一度だけ焼く(early return だと焼き漏れる)
+    gaugeBar.updateCache();
   }
 
   // ---------- オーバーレイ ----------
@@ -524,6 +547,15 @@
     overlayGlow = new createjs.Shape(); O.addChild(overlayGlow);
     overlayPanel = new createjs.Shape(); O.addChild(overlayPanel);
     overlayDiv = new createjs.Shape(); O.addChild(overlayDiv);
+    // この4枚は showOverlay() のときしか描き替わらないのに、表示中(タイトル
+    // 画面=常時)は毎フレーム全画面グラデ+パネル装飾を再ラスタライズしていた。
+    // 器を固定して cache し、showOverlay 側が updateCache で焼き直す。
+    // 全画面の暗幕とソフトグローはぼんやりした絵なので半解像度で焼く(crisis.js と同じ)
+    var pb0 = panelBox();
+    overlayBg.cache(0, 0, W, PP.H, PP.PERF.VEIL_CACHE_SCALE);
+    overlayGlow.cache(pb0.x - 32, pb0.y - 32, PANEL.w + 64, PANEL.h + 64, PP.PERF.VEIL_CACHE_SCALE);
+    overlayPanel.cache(pb0.x - 4, pb0.y - 4, PANEL.w + 8, PANEL.h + 8);
+    overlayDiv.cache(W / 2 - 134, pb0.y + 66 - 10, 268, 20);
     overlayTitle = new createjs.Text("", 'bold 38px "Cinzel Decorative","Hiragino Kaku Gothic ProN","Meiryo",serif', "#ffdf8a");
     overlayTitle.textAlign = "center";
     overlayTitle.x = W / 2; overlayTitle.y = panelBox().y + 34;
@@ -537,6 +569,8 @@
     overlaySub = new createjs.Text("", '17px "Hiragino Kaku Gothic ProN","Meiryo",sans-serif', "#f5e8c8");
     overlaySub.textAlign = "center"; overlaySub.lineHeight = 27;
     overlaySub.x = W / 2; overlaySub.y = panelBox().y + 108;
+    // 本文も表示中は不変(明滅は alpha のみ)。最長5行ぶんの器で cache する
+    cacheHudText(overlaySub, 1000, 150, 12);
     O.addChild(overlaySub);
     buildDiffButtons(O);   // 難易度ボタン(【課題1】)はオーバーレイと一緒に表示される
     buildOverButtons(O);   // ゲームオーバーの進路ボタン(over 画面だけ visible)
@@ -562,16 +596,21 @@
     var y = panelBox().y + PANEL.h + 34;
     diffCap = new createjs.Text(PP.i18n.t("hud.diffCaption"), '13px "Meiryo", sans-serif', C_LBL);
     diffCap.textAlign = "center"; diffCap.x = W / 2; diffCap.y = y - 22;
+    cacheHudText(diffCap, 420, 18, 6);   // 言語切替時は relabel が updateCache する
     diffCont.addChild(diffCap);
     keys.forEach(function (key, i) {
       var bx = x0 + i * (DIFF_BTN.w + DIFF_BTN.gap);
       var s = new createjs.Shape();
+      // 形は選択が変わったときだけ redrawDiffButtons が描き直す。器を固定 cache
+      s.cache(bx - 3, y - 3, DIFF_BTN.w + 6, DIFF_BTN.h + 6);
       diffCont.addChild(s);
       var t1 = new createjs.Text((i + 1) + "  " + key.toUpperCase(), F_LBL, C_LBL);
       t1.textAlign = "center"; t1.x = bx + DIFF_BTN.w / 2; t1.y = y + 9;
+      cacheHudText(t1, DIFF_BTN.w, 16, 4);
       var t2 = new createjs.Text(PP.i18n.t("diff." + key + ".name"), 'bold 17px "Meiryo", sans-serif', C_VAL);
       t2.textAlign = "center"; t2.x = bx + DIFF_BTN.w / 2; t2.y = y + 27;
       t2.langKey = "diff." + key + ".name";   // relabel が貼り替えるための控え
+      cacheHudText(t2, DIFF_BTN.w + 24, 22, 6);
       diffCont.addChild(t1, t2);
       diffNameTexts.push(t2);
       diffShapes.push(s);
@@ -597,6 +636,7 @@
     if (!PP.TOUCH) {
       overCap = new createjs.Text(PP.i18n.t("hud.overCaption"), '13px "Meiryo", sans-serif', C_LBL);
       overCap.textAlign = "center"; overCap.x = W / 2; overCap.y = y - 22;
+      cacheHudText(overCap, 420, 18, 6);
       overCont.addChild(overCap);
     }
     defs.forEach(function (d, i) {
@@ -610,11 +650,13 @@
         .setStrokeStyle(d.hot ? 2.5 : 1.2)
         .beginStroke(d.hot ? "#f0c040" : "rgba(202,169,106,0.5)")
         .drawRoundRect(bx, y, OVER_BTN.w, OVER_BTN.h, 12);
+      s.cache(bx - 3, y - 3, OVER_BTN.w + 6, OVER_BTN.h + 6);   // 完全に静的
       overCont.addChild(s);
       var t = new createjs.Text(PP.i18n.t(d.labelKey), 'bold 17px "Meiryo", sans-serif', d.hot ? "#ffdf8a" : C_VAL);
       t.textAlign = "center";
       t.x = bx + OVER_BTN.w / 2; t.y = y + OVER_BTN.h / 2 - 9;
       t.langKey = d.labelKey;
+      cacheHudText(t, OVER_BTN.w, 22, 6);
       overCont.addChild(t);
       overLabels.push(t);
       overRects.push({ id: d.id, x: bx, y: y, w: OVER_BTN.w, h: OVER_BTN.h });
@@ -640,9 +682,11 @@
       .drawRoundRect(x, y, LANG_BTN.w, LANG_BTN.h, 10)
       .setStrokeStyle(1.2).beginStroke("rgba(202,169,106,0.5)")
       .drawRoundRect(x, y, LANG_BTN.w, LANG_BTN.h, 10);
+    langShape.cache(x - 2, y - 2, LANG_BTN.w + 4, LANG_BTN.h + 4);   // 完全に静的
     langText = new createjs.Text(PP.i18n.t("hud.langBtn"), 'bold 15px "Meiryo", sans-serif', C_VAL);
     langText.textAlign = "center"; langText.textBaseline = "middle";
     langText.x = x + LANG_BTN.w / 2; langText.y = y + LANG_BTN.h / 2 + 1;
+    cacheHudText(langText, LANG_BTN.w, 20, 4);
     langCont.addChild(langShape, langText);
     langCont.visible = false;
     O.addChild(langCont);
@@ -660,11 +704,13 @@
   // 表示のたびに t() を引くので、ここで面倒を見るのは「一度だけ作った文字」のみ
   function relabel() {
     var t = PP.i18n.t;
-    if (diffCap) diffCap.text = t("hud.diffCaption");
-    diffNameTexts.forEach(function (tx) { tx.text = t(tx.langKey); });
-    if (overCap) overCap.text = t("hud.overCaption");
-    overLabels.forEach(function (tx) { tx.text = t(tx.langKey); });
-    if (langText) langText.text = t("hud.langBtn");
+    // どのラベルも cache 済みなので、代入ではなく setCachedText で
+    // 「変わったときだけ焼き直す」(直接 .text に書くと表示が更新されない)
+    if (diffCap) setCachedText(diffCap, t("hud.diffCaption"));
+    diffNameTexts.forEach(function (tx) { setCachedText(tx, t(tx.langKey)); });
+    if (overCap) setCachedText(overCap, t("hud.overCaption"));
+    overLabels.forEach(function (tx) { setCachedText(tx, t(tx.langKey)); });
+    if (langText) setCachedText(langText, t("hud.langBtn"));
   }
 
   // (x, y) が進路ボタンの上なら "continue" / "title"(外れ・非表示中は null)
@@ -698,6 +744,7 @@
       g.setStrokeStyle(on ? 2.5 : 1.2)
         .beginStroke(on ? "#f0c040" : "rgba(202,169,106,0.5)")
         .drawRoundRect(r.x, r.y, r.w, r.h, 12);
+      diffShapes[i].updateCache();   // 選択変更時のみ呼ばれる=焼き直しもそのときだけ
     });
   }
 
@@ -763,6 +810,12 @@
     overlayDiv.graphics.beginFill(s.edge)
       .moveTo(cx, dy - 6).lineTo(cx + 7, dy).lineTo(cx, dy + 6).lineTo(cx - 7, dy).closePath();
 
+    // 描き替えた4枚をここで一度だけ焼き直す(以後の毎フレームは blit のみ)
+    overlayBg.updateCache();
+    overlayGlow.updateCache();
+    overlayPanel.updateCache();
+    overlayDiv.updateCache();
+
     overlayTitle.color = s.title; overlayTitle.text = title;
     overlaySub.color = s.sub; overlaySub.text = sub;
     // 安全弁: パネル幅に入らない見出し・本文は丸ごと縮めて収める。
@@ -771,6 +824,7 @@
     fitOverlayText(overlayTitle, PANEL.w - 36);
     fitOverlayText(overlaySub, PANEL.w - 28);
     overlayTitle.updateCache();   // text/color/fit を確定させてから一度だけ焼く
+    overlaySub.updateCache();
 
     if (pauseBtn) pauseBtn.visible = false;   // 全画面パネルの上にボタンを残さない
     if (swapBtn) swapBtn.visible = false;

@@ -48,6 +48,16 @@
     }
   }
 
+  // 渦の絵は全レーン同一なので、一度だけ焼いた canvas を共有する
+  // (bakeOneSplat と同じ焼き置きイディオム。回転や拡縮は Bitmap の transform で)
+  var vortexCanvas = null;
+  function bakeVortex() {
+    var sh = new createjs.Shape();
+    drawVortex(sh.graphics);
+    sh.cache(-88, -88, 176, 176);   // 最大半径 80 + ストローク半幅 + 余白
+    return sh.cacheCanvas;
+  }
+
   // 樽ごとの渦を、いまのレーン構成に合わせて作り直す
   function buildVortexes() {
     var L = PP.layers.doom;
@@ -55,11 +65,12 @@
       if (vortexes[k].shape.parent) L.removeChild(vortexes[k].shape);
     }
     vortexes = [];
+    if (!vortexCanvas) vortexCanvas = bakeVortex();
     var lanes = PP.game.lanes || [];
     for (var li = 0; li < lanes.length; li++) {
       var mouth = lanes[li].rail.posAt(lanes[li].rail.length - 1);
-      var v = new createjs.Shape();
-      drawVortex(v.graphics);
+      var v = new createjs.Bitmap(vortexCanvas);
+      v.regX = v.regY = 88;
       v.x = mouth.x; v.y = mouth.y;
       v.alpha = 0;
       v.scaleX = v.scaleY = 0.25;
@@ -85,38 +96,48 @@
       desatMax = 0.4;
     }
     desat.alpha = 0;
+    // 単色の全画面フィルは、ごく小さく焼いて引き伸ばしても完全に同じ絵
+    // (fx.js bakeSolid と同じ理屈)。cache が無いと演出中ずっと毎フレーム
+    // 全画面 fillRect のパス処理が走る
+    desat.cache(0, 0, PP.W, PP.H, 0.05);
     L.addChild(desat);
 
     // 樽ごとの渦(脱色の"上"に置くので、ここだけが血の色で残る)
     buildVortexes();
 
-    // 血の帳(周辺減光)。心音に合わせて脈打たせる
+    // 血の帳(周辺減光)。心音に合わせて脈打たせる。ぼんやりした放射グラデ
+    // なので半解像度で焼いても見分けが付かない(crisis.js の帳と同じ)
     vignette = new createjs.Shape();
     vignette.graphics.beginRadialGradientFill(
       ["rgba(120,0,0,0)", "rgba(74,0,0,0.55)", "rgba(24,0,0,0.97)"], [0, 0.5, 1],
       PP.W / 2, PP.H / 2, 60, PP.W / 2, PP.H / 2, 580)
       .drawRect(0, 0, PP.W, PP.H);
     vignette.alpha = 0;
+    vignette.cache(0, 0, PP.W, PP.H, PP.PERF.VEIL_CACHE_SCALE);
     L.addChild(vignette);
 
     dark = new createjs.Shape();
     dark.graphics.beginFill("#000").drawRect(0, 0, PP.W, PP.H);
     dark.alpha = 0;
+    dark.cache(0, 0, PP.W, PP.H, 0.05);
     L.addChild(dark);
 
-    // 闇の奥からこちらへ迫ってくるドクロ
+    // 闇の奥からこちらへ迫ってくるドクロ。300px の字形整形は1フレームでも
+    // 重いので焼き込み、迫る演出は scale で行う(1.25 倍時も許容できる甘さ)
     bigSkull = new createjs.Text("☠", "bold 300px serif", "#8c0f0f");
     bigSkull.textAlign = "center";
     bigSkull.textBaseline = "middle";
     bigSkull.x = PP.W / 2; bigSkull.y = PP.H / 2 - 8;
     bigSkull.alpha = 0;
     bigSkull.scaleX = bigSkull.scaleY = 0.5;
+    bigSkull.cache(-175, -185, 350, 370);
     L.addChild(bigSkull);
 
     // 一瞬だけ視界を焼く血の色
     flash = new createjs.Shape();
     flash.graphics.beginFill("#7d0000").drawRect(0, 0, PP.W, PP.H);
     flash.alpha = 0;
+    flash.cache(0, 0, PP.W, PP.H, 0.05);
     L.addChild(flash);
 
     built = true;

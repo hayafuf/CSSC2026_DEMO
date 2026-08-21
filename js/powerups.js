@@ -172,26 +172,51 @@
   // 「何色が消えるか」がアイテムの見た目だけで分かるようにする。
   // dark=true はパワーダウン用: 毒々しい紫のグロー+☠バッジ+棘付きの縁で
   // 「取ってはいけない」を遠目でも一瞬で伝える(パワーアップの金縁と明確に区別)
+  // アイテムの円盤と警告グローは「種類×色」が有限なので、焼いた canvas を
+  // マップで共有する(ドロップのたびに Shape+グラデを組み直さない。
+  // 落下中ずっと続く毎フレームのベクタ再描画も、これで blit 1枚になる)
+  var itemGlowCanvas = null;
+  var itemBgCanvas = {};   // キー: "c<colorIndex>" / "dark" / "std"
+  function bakeItemGlow() {
+    var s = new createjs.Shape();
+    s.graphics
+      .beginRadialGradientFill(["rgba(176,64,255,0.55)", "rgba(176,64,255,0)"], [0.4, 1],
+        0, 0, 6, 0, 0, 44)
+      .drawCircle(0, 0, 44);
+    s.cache(-46, -46, 92, 92);
+    return s.cacheCanvas;
+  }
+  function bakeItemBg(pal, dark) {
+    var s = new createjs.Shape();
+    s.graphics.beginFill(pal ? pal.main : (dark ? "#1a0e26" : "rgba(10,16,26,0.78)"))
+      .beginStroke(pal ? pal.light : (dark ? "#b040ff" : "#f0c040")).setStrokeStyle(dark ? 4 : 3)
+      .drawCircle(0, 0, 26);
+    s.cache(-30, -30, 60, 60);
+    return s.cacheCanvas;
+  }
+  function centerBitmap(canvas) {
+    var b = new createjs.Bitmap(canvas);
+    b.regX = canvas.width / 2;
+    b.regY = canvas.height / 2;
+    return b;
+  }
+
   function makeItemView(icon, colorIndex, dark) {
     var cont = new createjs.Container();
     var pal = (colorIndex !== null && colorIndex !== undefined) ? PP.PALETTE[colorIndex] : null;
     if (dark) {
       // 外周の警告グロー(強めに脈動させる。金色と絶対に見間違えない紫)
-      var glow = new createjs.Shape();
-      glow.graphics
-        .beginRadialGradientFill(["rgba(176,64,255,0.55)", "rgba(176,64,255,0)"], [0.4, 1],
-          0, 0, 6, 0, 0, 44)
-        .drawCircle(0, 0, 44);
+      if (!itemGlowCanvas) itemGlowCanvas = bakeItemGlow();
+      var glow = centerBitmap(itemGlowCanvas);
       cont.addChild(glow);
       createjs.Tween.get(glow, { loop: true })
         .to({ alpha: 0.25, scaleX: 0.8, scaleY: 0.8 }, 340, createjs.Ease.quadInOut)
         .to({ alpha: 1, scaleX: 1.15, scaleY: 1.15 }, 340, createjs.Ease.quadInOut);
       cont.pulse = glow;   // 後始末用(update が removeChild する前に止める)
     }
-    var bg = new createjs.Shape();
-    bg.graphics.beginFill(pal ? pal.main : (dark ? "#1a0e26" : "rgba(10,16,26,0.78)"))
-      .beginStroke(pal ? pal.light : (dark ? "#b040ff" : "#f0c040")).setStrokeStyle(dark ? 4 : 3)
-      .drawCircle(0, 0, 26);
+    var bgKey = pal ? "c" + colorIndex : (dark ? "dark" : "std");
+    if (!itemBgCanvas[bgKey]) itemBgCanvas[bgKey] = bakeItemBg(pal, dark);
+    var bg = centerBitmap(itemBgCanvas[bgKey]);
     cont.addChild(bg);
     var t = new createjs.Text(icon, "30px serif", "#fff");
     t.textAlign = "center";

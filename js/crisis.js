@@ -148,10 +148,12 @@
     PP.regFontCache(omen);
     L.addChild(omen);
 
-    // 玉が呑まれた瞬間の閃光
+    // 玉が呑まれた瞬間の閃光。単色の全画面フィルはごく小さく焼いて
+    // 引き伸ばしても同じ絵(fx.js bakeSolid と同じ理屈)
     flash = new createjs.Shape();
     flash.graphics.beginFill("#a00000").drawRect(0, 0, PP.W, PP.H);
     flash.alpha = 0;
+    flash.cache(0, 0, PP.W, PP.H, 0.05);
     L.addChild(flash);
 
     st = blank();
@@ -198,18 +200,37 @@
   var dripFree = [], dripActive = [];      // {s, age, dur, y0, fall}
   var glitchFree = [], glitchActive = [];  // {s, age, dur}
 
+  // 滴りと走査ノイズの絵は「大きさが違うだけ」なので、一度焼いた canvas を
+  // 全部で共有し、個体差は scale で付ける(course-view の光ドットと同じ手)。
+  // 旧実装は spawn のたびに graphics を組み直していた=cache も効かず、
+  // 生きている間ずっと毎フレームのベクタ再ラスタライズになっていた
+  var dripCanvas = null, glitchCanvas = null;
+  function bakeDrip() {
+    var s = new createjs.Shape();
+    s.graphics.beginFill("rgba(125,0,0,0.85)").drawRoundRect(0, 0, 5, 23, 2.5);
+    s.cache(0, 0, 5, 23);
+    return s.cacheCanvas;
+  }
+  function bakeGlitch() {
+    var s = new createjs.Shape();
+    s.graphics.beginFill("rgba(255,40,20,0.55)").drawRect(0, 0, 8, 8);
+    s.cache(0, 0, 8, 8);
+    return s.cacheCanvas;
+  }
+
   // 画面が血を流す。心拍の頭で滴らせる
   function drip() {
     var rec = dripFree.pop();
     if (!rec) {
-      var s = new createjs.Shape();
+      if (!dripCanvas) dripCanvas = bakeDrip();
+      var s = new createjs.Bitmap(dripCanvas);
       PP.layers.crisis.addChild(s);
       rec = { s: s, age: 0, dur: 0, y0: 0, fall: 0 };
     }
     var w = 3 + Math.random() * 4;
     var h = 12 + Math.random() * 22;
-    rec.s.graphics.clear();
-    rec.s.graphics.beginFill("rgba(125,0,0,0.85)").drawRoundRect(0, 0, w, h, w / 2);
+    rec.s.scaleX = w / 5;    // 焼き込み(5×23)からの伸縮。角丸の歪みは判別不可
+    rec.s.scaleY = h / 23;
     rec.s.x = 20 + Math.random() * (PP.W - 40);
     rec.s.y = rec.y0 = 62;
     rec.s.alpha = 0.9;
@@ -225,14 +246,15 @@
   function glitchLine() {
     var rec = glitchFree.pop();
     if (!rec) {
-      var s = new createjs.Shape();
+      if (!glitchCanvas) glitchCanvas = bakeGlitch();
+      var s = new createjs.Bitmap(glitchCanvas);
       s.compositeOperation = "lighter";
+      s.scaleX = PP.W / 8;   // 横幅は常に全画面(単色なので伸ばしても同じ絵)
       PP.layers.crisis.addChild(s);
       rec = { s: s, age: 0, dur: 0.12 };
     }
     var h = 2 + Math.random() * 2;
-    rec.s.graphics.clear();
-    rec.s.graphics.beginFill("rgba(255,40,20,0.55)").drawRect(0, 0, PP.W, h);
+    rec.s.scaleY = h / 8;
     rec.s.x = 0;
     rec.s.y = 62 + Math.random() * (PP.H - 80);
     rec.s.alpha = 1;
