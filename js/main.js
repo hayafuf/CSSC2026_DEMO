@@ -57,6 +57,10 @@
   // レベルでコースが替わるたびに呼ぶ。全レーンのレールを組み直し、path/barrel/
   // tunnel レイヤーの溝・洞窟・樽・覆いを描き直して、危機/ゲームオーバー演出を合わせる。
   function buildCourse(course) {
+    // 交差一覧のキャッシュを明示的に捨てる。キャッシュはコースオブジェクトの
+    // 同一性で判定されるため、エディタが同じオブジェクトの制御点を書き替えて
+    // 試遊した場合に古い交差を掴み続ける(rail.js invalidateCrossings 参照)
+    PP.rail.invalidateCrossings();
     // 速度はコースごとの設計。レーン長が違うので、px/s の一式もコースと一緒に差し替える。
     PP.game.speed = PP.speedProfile(course);
     var lanes = buildLanes(course);
@@ -76,9 +80,12 @@
     // 各レーンの木道・洞窟・立体交差の橋・樽・トンネルを描く(作画は course-view.js)
     // 交差点の一覧は石橋のアーチ割り(橋脚を交差点に立てず、下の道を塞がない)に使う。
     // courseCrossings は全レーンを measure し直す O(n^2) なので、レーンごとではなく
-    // ここで1回だけ引いて配る。
+    // ここで1回だけ引いて配る。上の buildLanes → rail.create → raisedOverOf が
+    // 同じ計算を既に済ませてキャッシュを温めているので、メモ化版から貰えば
+    // フル計算はコース組み直しにつき1回で済む(以前は素の courseCrossings を
+    // 呼んでいたため、コース5規模ではレベル開始時の一発ハングが倍になっていた)
     PP.courseView.reset();
-    var crossings = PP.rail.courseCrossings(course);
+    var crossings = PP.rail.cachedCrossings(course);
     for (var i = 0; i < lanes.length; i++) PP.courseView.drawLane(lanes[i], crossings, i);
     // 危機/ゲームオーバー演出が参照する樽パーツ一覧
     PP.barrels = lanes.map(function (l) { return l.barrel; });

@@ -47,9 +47,18 @@
     var na = aXs.length - 1, nb = bXs.length - 1;
     for (var i = 0; i < na; i++) {
       var ax = aXs[i], ay = aYs[i], bx = aXs[i + 1], by = aYs[i + 1];
+      // セグメント i の外接矩形を先に出しておき、重ならない相手は除算入りの
+      // segHit を呼ばずに落とす。全セグメント対の総当たり(4レーンのコースで
+      // 約100万対)は変わらないが、直線サンプリングの折れ線では大半の対が
+      // ここで弾かれるので、レベル開始時の一発ハングが実測で桁落ちする
+      var ix0 = ax < bx ? ax : bx, ix1 = ax < bx ? bx : ax;
+      var iy0 = ay < by ? ay : by, iy1 = ay < by ? by : ay;
       for (var j = self ? i + 2 : 0; j < nb; j++) {
         if (self && bCum[j] - aCum[i] < MIN_GAP) continue;
-        var t = segHit(ax, ay, bx, by, bXs[j], bYs[j], bXs[j + 1], bYs[j + 1]);
+        var jx = bXs[j], jx2 = bXs[j + 1], jy = bYs[j], jy2 = bYs[j + 1];
+        if ((jx < ix0 && jx2 < ix0) || (jx > ix1 && jx2 > ix1) ||
+            (jy < iy0 && jy2 < iy0) || (jy > iy1 && jy2 > iy1)) continue;
+        var t = segHit(ax, ay, bx, by, jx, jy, jx2, jy2);
         if (t < 0) continue;
         var db = bCum[j] + t * (bCum[j + 1] - bCum[j]);
         var x = bXs[j] + t * (bXs[j + 1] - bXs[j]);
@@ -346,6 +355,13 @@
   PP.rail = {
     create: create,
     measure: measure,
-    courseCrossings: courseCrossings   // 作者向け検証(自己交差+レーン間交差の列挙)
+    courseCrossings: courseCrossings,  // 作者向け検証(自己交差+レーン間交差の列挙)
+    cachedCrossings: cachedCrossings,  // 同上のメモ化版(main.js buildCourse が使う。
+                                       // create → raisedOverOf が先に温めるので、
+                                       // 直後の橋の作画で O(n^2) を計算し直さない)
+    // キャッシュの明示失効。キャッシュはコースオブジェクトの同一性で判定して
+    // いるため、エディタが同一オブジェクトの制御点を書き替えて試遊した場合に
+    // 古い交差一覧を掴み続ける。コースを組み直す入口(buildCourse)で必ず呼ぶ
+    invalidateCrossings: function () { _ccCourse = null; _ccResult = null; }
   };
 })();
