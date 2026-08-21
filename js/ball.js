@@ -158,7 +158,14 @@
   // fx.js のパーティクルプールと同じ発想で器そのものを使い回す。
   // 色は recolorView(共有 canvas の貼り替え)で済むのでプールは色を区別しない。
   var viewFree = [];
-  var VIEW_POOL_MAX = 96;   // 1レーンの最大玉数 60 + 前波の残り。超えた分は普通に捨てる
+  // プール容量: 1レーンの最大玉数 60 × レーン数 + 前波の残り。超えた分は普通に捨てる。
+  // 固定の 96 だと4レーンのコース(在庫 ~150 玉)ではレベル終了や大連鎖の返却が
+  // 溢れて捨てられ、直後の補給が makeView(Container+Bitmap×3)の新規生成に
+  // なって GC が振動する。レーン数に追従させる
+  function viewPoolMax() {
+    var lanes = (PP.game && PP.game.lanes && PP.game.lanes.length) || 1;
+    return 60 * lanes + 36;
+  }
   function acquireView(colorIndex) {
     var view = viewFree.pop();
     if (!view) return makeView(colorIndex);
@@ -182,7 +189,7 @@
     createjs.Tween.removeTweens(view);
     if (view.parent) view.parent.removeChild(view);
     view.__pooled = true;
-    if (viewFree.length < VIEW_POOL_MAX) viewFree.push(view);
+    if (viewFree.length < viewPoolMax()) viewFree.push(view);
   }
 
   // 爆弾(キャッチして装填し、自分で撃つ)。鋳鉄の球+導火線の火花

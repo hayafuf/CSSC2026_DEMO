@@ -52,7 +52,9 @@
   //   easeIn      true で quadIn(加速)。血の滴りなど「落ちる」動きに使う
   //   a0          開始 alpha(省略時 1)
   function spawnDot(img, comp, x0, y0, tx, ty, s0x, s0y, s1x, s1y, durMs, opts) {
-    if (pActive.length >= MAX_P) return;
+    // 低負荷モードは天井を下げる(PERF.LOW.maxP)。生成の唯一の入口なので
+    // ここ1か所のゲートで全種(リング/フラッシュ/シャード/火花)に効く
+    if (pActive.length >= (PP.quality === 0 ? PP.PERF.LOW.maxP : MAX_P)) return;
     var b = pFree.pop();
     if (!b) {
       b = new createjs.Bitmap(null);
