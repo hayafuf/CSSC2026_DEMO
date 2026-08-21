@@ -2,7 +2,22 @@
  * audio.js — 効果音と BGM
  *
  * ・短い電子音は WebAudio(beep)で合成する
- * ・素材のある音(SE/*.mp3)と BGM(BGM/*.mp3)は HTMLAudio で鳴らす
+ * ・素材のある音(SE/*.mp3)は2方式を自動で使い分ける:
+ *     "buffer" … fetch + decodeAudioData で AudioBuffer(生のPCM)に展開し、
+ *                鳴らすたびに使い捨ての BufferSource で再生する(http 配信=
+ *                本番・スマホ向け)。従来方式は SE の数だけ HTMLAudio を常駐させ、
+ *                タッチ端末では全クローンが MediaElementSource として WebAudio に
+ *                繋ぎっぱなしになり、無音でもオーディオスレッドが全員ぶんの処理を
+ *                続けてしまう。端末が発熱でクロックを落とすとこの常設負荷が
+ *                処理の締切を割り、「SE がぷつぷつ途切れる」直接の原因になる。
+ *                Buffer 方式なら常駐はデコード済み PCM(ただのメモリ)だけで、
+ *                鳴っていない SE の実行コストはゼロになる
+ *     "html"   … 従来の HTMLAudio クローン方式。file:// で直接開いた開発環境では
+ *                Chrome が同じフォルダの fetch も遮断するため、こちらへ自動で落ちる
+ *   (判定は preload() の冒頭で1回だけ。?se=html / ?se=buffer で強制切替できる)
+ * ・BGM(BGM/*.mp3)は常に HTMLAudio。全7曲・約34MB を PCM に展開すると
+ *   数百MB になってモバイルのメモリを食い潰すため、Buffer 化はしない
+ *   (HTMLAudio は再生しながら少しずつデコードするストリーミング方式)
  * ・音源の読み込みには時間がかかるので、main.js は preload() の完了を
  *   待ってからタイトルを出す。ゲーム開始(クリック)と同時に BGM が
  *   頭から鳴るように、読み込み前にゲームを始めてしまわない。
@@ -38,7 +53,18 @@
 
   function ensureCtx() {
     if (!audioCtx) {
-      try { audioCtx = new (window.AudioContext || window.webkitAudioContext)(); }
+      try {
+        var AC = window.AudioContext || window.webkitAudioContext;
+        // latencyHint: タッチ端末は "balanced"(バッファ1段多め)にする。
+        // 既定の "interactive" は遅延最小のかわりに余裕もゼロで、発熱で
+        // CPU クロックが落ちるとレンダーが締切を割って音が途切れる。
+        // 詳しくは config.js の PP.AUDIO を参照
+        try {
+          audioCtx = new AC({ latencyHint: PP.TOUCH ? PP.AUDIO.LATENCY_TOUCH : "interactive" });
+        } catch (e2) {
+          audioCtx = new AC();   // オプション引数に未対応の古いブラウザ
+        }
+      }
       catch (e) { return null; }
     }
     if (audioCtx.state === "suspended") { try { audioCtx.resume(); } catch (e) {} }
@@ -90,8 +116,10 @@
       var src = ctx.createMediaElementSource(el);
       src.connect(seBus);
       el._seSrc = src;
-      activeSE.push(src);
+      // 台帳(activeSE)に載せるのは使い捨てクローンだけ。恒久配線の
+      // クローンまで載せると外す機会がなく、配列が増える一方になる(リーク)
       if (!persistent) {
+        activeSE.push(src);
         el.addEventListener("ended", function () {
           try { src.disconnect(); } catch (e) {}
           var k = activeSE.indexOf(src); if (k >= 0) activeSE.splice(k, 1);
@@ -100,8 +128,40 @@
     } catch (e) { /* フォールバック: そのまま destination で鳴る */ }
   }
 
+  // ---------- SE の再生方式("buffer" / "html")の判定 ----------
+  // どちらで鳴らすかは preload() の冒頭で一度だけ決める(ファイル先頭の
+  // 解説を参照)。判定は「実際に fetch できるか」を試すのが最も確実:
+  // file:// 直開きの Chrome は同じフォルダのファイルの fetch も遮断するので、
+  // その環境では自動的に従来の HTMLAudio 方式へ落ちる(開発は今までどおり)。
+  var seMode = null;        // "buffer" / "html"。null は判定前(音は鳴らさない)
+  var seBuffers = {};       // src → デコード済み AudioBuffer("buffer" モード)
+  var seVoices = 0;         // 再生中のサンプル SE 総数(全体上限 SE_VOICE_MAX 用)
+  var SE_PROBE = "SE/hit_the_ball.mp3";   // 能力判定に使う小さめの実在ファイル
+
+  function decideSeMode(cb) {
+    if (seMode) { cb(); return; }
+    var forced = null;
+    try { forced = new URLSearchParams(location.search).get("se"); } catch (e) {}
+    if (forced === "html" || forced === "buffer") { seMode = forced; cb(); return; }
+    // fetch が無い/AudioContext が作れない環境は従来方式しか選べない
+    if (!window.fetch || !ensureCtx()) { seMode = "html"; cb(); return; }
+    fetch(SE_PROBE).then(function (res) {
+      seMode = res.ok ? "buffer" : "html";
+      cb();
+    }).catch(function () { seMode = "html"; cb(); });
+  }
+
+  // 合成音の同時発音数。クリア走査(sweepTick)やイントロは毎秒数十発を
+  // 重ねる設計で、1発ごとに Oscillator+Gain の2ノードを生成する。上限なしだと
+  // 弱い端末で「音の処理のためにゲームがカクつく」逆転が起きるため、
+  // PP.AUDIO.SYNTH_MAX で頭打ちにする。超過時は「新しい1発を鳴らさない」:
+  // 密集した連打の1個抜けは、鳴っている音を途中で切るより耳につかない
+  var synthActive = 0;
+  function synthDone() { synthActive = Math.max(0, synthActive - 1); }
+
   function beep(freq, dur, type, vol) {
     if (muted || seVol <= 0) return;
+    if (synthActive >= PP.AUDIO.SYNTH_MAX) return;
     try {
       var ctx = ensureCtx();
       if (!ctx) return;
@@ -114,14 +174,17 @@
       gain.gain.setValueAtTime((vol || 0.12) * seVol, t);
       gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
       osc.connect(gain).connect(seBus || ctx.destination);
+      osc.onended = synthDone;   // 鳴り終わったら同時発音数を返す
       osc.start(t);
       osc.stop(t + dur);
+      synthActive++;
     } catch (e) { /* 無音でも続行 */ }
   }
 
   // beep の兄弟: 周波数が f0 から f1 へ滑らかに動く(ライザー/フォール用)
   function gliss(f0, f1, dur, type, vol) {
     if (muted || seVol <= 0) return;
+    if (synthActive >= PP.AUDIO.SYNTH_MAX) return;
     try {
       var ctx = ensureCtx();
       if (!ctx) return;
@@ -134,8 +197,10 @@
       gain.gain.setValueAtTime((vol || 0.1) * seVol, t);
       gain.gain.exponentialRampToValueAtTime(0.001, t + dur);
       osc.connect(gain).connect(seBus || ctx.destination);
+      osc.onended = synthDone;
       osc.start(t);
       osc.stop(t + dur);
+      synthActive++;
     } catch (e) { /* 無音でも続行 */ }
   }
 
@@ -163,22 +228,72 @@
     } catch (e) { try { a.muted = false; } catch (e2) {} }
   }
 
-  // 同じ音が重なっても切れないよう、複製した実体をプールして鳴らす。
-  // 再生中(= ended でも paused でもない)の実体は絶対に奪わないので、
-  // 重なりの聴こえ方は「毎回複製」と同一のまま、Audio 要素と WebAudio 配線の
-  // 生成が実同時再生数(通常 2〜4 個)で頭打ちになる。
-  // 長い音(ゲームオーバーの吸い込み)はリスタート時に止めたいので、
-  // 最後に鳴らした実体を覚えておいて stop() で黙らせられるようにする。
+  // SE の再生関数を作る。戻り値 f は「呼ぶと1回鳴る」関数で、
+  // f.stop()(最後の1発を黙らせる)と f.prime()(html モードの iOS 解錠)を持つ。
+  // 呼び出し側(全73箇所)は再生方式を知らなくてよい: f() の中で seMode を見て
+  // 振り分ける。seMode が未確定(preload 前)のうちは鳴らさない — 従来も
+  // 読み込み完了前は実質無音なので、聴こえ方は変わらない。
+  //
+  // "buffer" モード: 再生のたびに BufferSource+Gain を作って使い捨てる。
+  //   WebAudio ではこれが正道(ノード生成は軽量で、再生済みノードは GC が
+  //   まとめて回収する)。常駐する実体が無いので、鳴っていない SE のコストはゼロ。
+  //   音量は GainNode に書くため iOS でも効く(HTMLAudio の volume 無視問題も解決)。
+  //
+  // "html" モード(従来): 複製した実体をプールして鳴らす。再生中の実体は
+  //   奪わないので、重なりの聴こえ方は「毎回複製」と同一のまま、Audio 要素と
+  //   WebAudio 配線の生成が実同時再生数(通常 2〜4 個)で頭打ちになる。
   function sfx(src, vol) {
-    var proto = new Audio(src);
-    proto.preload = "auto";
-    proto.volume = vol;
-    sources.push(proto);
+    // ---- "buffer" モードの状態: いま鳴っているボイスの台帳 ----
+    var voices = [];
+    // ---- "html" モードの状態(preloadHtml() が initHtml() で遅延生成) ----
+    var proto = null;
     var pool = [];
     var last = null;
-    var f = function () {
-      if (muted || seVol <= 0) return;
+
+    // HTMLAudio の実体化。"buffer" モードでは1個も作らないため、
+    // モード確定後(preloadHtml)までこのタイミングを遅らせている
+    function initHtml() {
+      if (proto) return;
+      proto = new Audio(src);
+      proto.preload = "auto";
+      proto.volume = vol;
+      sources.push(proto);
+    }
+
+    function dropVoice(v) {
+      var k = voices.indexOf(v);
+      if (k >= 0) { voices.splice(k, 1); seVoices = Math.max(0, seVoices - 1); }
+      try { v.gain.disconnect(); } catch (e) { /* 無視 */ }
+    }
+    function stopVoice(v) {
+      try { v.node.onended = null; v.node.stop(); } catch (e) { /* 停止済みなら無視 */ }
+      dropVoice(v);
+    }
+    function playBuffer() {
+      var buf = seBuffers[src];
+      if (!buf || !audioCtx) return;   // デコード失敗した SE は無音のまま続行
+      // 同一SEの重なり上限: 超過したら最古を止めて枠を空ける(新しい音を優先。
+      // 同じ音の4枚重ねと5枚重ねは聴き分けられないが、頭の立ち上がりは目立つ)
+      while (voices.length >= PP.AUDIO.SE_PER_MAX) stopVoice(voices[0]);
+      // 全体上限: ここまで鳴っていれば1発足しても聴感は変わらないので鳴らさない
+      if (seVoices >= PP.AUDIO.SE_VOICE_MAX) return;
       try {
+        var node = audioCtx.createBufferSource();
+        node.buffer = buf;
+        var g = audioCtx.createGain();
+        g.gain.value = vol * seVol;
+        node.connect(g);
+        g.connect(seBus || audioCtx.destination);
+        var v = { node: node, gain: g };
+        node.onended = function () { dropVoice(v); };
+        voices.push(v);
+        seVoices++;
+        node.start();
+      } catch (e) { /* 無音でも続行 */ }
+    }
+    function playHtml() {
+      try {
+        initHtml();   // 念のため(通常は preloadHtml が実体化済み)
         var a = null;
         for (var i = 0; i < pool.length; i++) {
           if (pool[i].ended || pool[i].paused) { a = pool[i]; break; }
@@ -195,16 +310,31 @@
         var p = a.play();
         if (p && p.catch) p.catch(function () { /* 未解錠なら鳴らさない */ });
       } catch (e) { /* 無音でも続行 */ }
+    }
+
+    var f = function () {
+      if (muted || seVol <= 0) return;
+      if (seMode === "buffer") playBuffer();
+      else if (seMode === "html") playHtml();
     };
+    // 長い音(ゲームオーバーの吸い込み・ボス警報)はリスタート時に止めたいので、
+    // 最後に鳴らした1発を黙らせられるようにする
     f.stop = function () {
+      if (seMode === "buffer") {
+        if (voices.length) stopVoice(voices[voices.length - 1]);
+        return;
+      }
       if (!last) return;
       try { last.pause(); last.currentTime = 0; } catch (e) { /* 無視 */ }
       last = null;
     };
-    // 携帯対応: 最初のタップの中で解錠済みのクローンを1つ用意しておく。
-    // iOS では解錠済みの実体しか tick からの再生ができないため、これが無いと
-    // 「タップ以外のきっかけで鳴る音」(波の補給音など)が鳴らない
+    // 携帯対応("html" モードのみ): 最初のタップの中で解錠済みのクローンを
+    // 1つ用意しておく。iOS では解錠済みの実体しか tick からの再生ができない。
+    // "buffer" モードでは不要 — AudioContext さえ resume すれば BufferSource は
+    // どこからでも(tick やタイマーからでも)鳴らせる
     f.prime = function () {
+      if (seMode !== "html") return;
+      initHtml();
       if (pool.length) return;
       var a = proto.cloneNode();
       a.volume = vol;
@@ -212,6 +342,8 @@
       pool.push(a);
       bless(a);
     };
+    f.src = src;             // preloadBuffers がデコード対象を集めるのに使う
+    f.initHtml = initHtml;   // preloadHtml が全SEの実体化に使う
     sfxAll.push(f);
     return f;
   }
@@ -284,34 +416,89 @@
   // 樽に呑まれかけている間ずっと鳴らし続ける。深さ(0〜1)で音量とピッチが
   // 上がり、逃げ場がなくなる感じを作る。BGM とは別系統なので、
   // 危険曲の上に警報として重なる。
-  var loopCrisis = new Audio("SE/crisis.mp3");
-  loopCrisis.loop = true;
-  loopCrisis.preload = "auto";
-  loopCrisis.volume = 0;
-  sources.push(loopCrisis);
+  var CRISIS_SRC = "SE/crisis.mp3";
   // TODO【課題4】危機警報の音量レンジ(min=危機の入り口 / max=樽に呑まれる寸前)
   var CRISIS_VOL = { min: 0.3, max: 0.85 };
+
+  // "html" モードの警報ループ(遅延生成: "buffer" モードでは1個も作らない)
+  var loopCrisis = null;
+  function initLoopCrisis() {
+    if (loopCrisis) return;
+    loopCrisis = new Audio(CRISIS_SRC);
+    loopCrisis.loop = true;
+    loopCrisis.preload = "auto";
+    loopCrisis.volume = 0;
+    sources.push(loopCrisis);
+  }
 
   // 前回 crisis() に渡された深さ。volume / playbackRate の代入は(値が同じでも)
   // ブラウザのメディアパイプラインに触れるため、60Hz で毎フレーム書き込むと
   // 端末によっては音揺れやメインスレッドの引っかかりになる。聞き分けられる
   // 変化(0.005)があったときだけ書き込む
   var crisisLastX = -1;
-  function crisis(x) {
-    x = Math.max(0, Math.min(1, x || 0));
+
+  // "buffer" モードの警報: loop=true の BufferSource を1本だけ常駐させ、
+  // 深さは Gain と playbackRate に書くだけ。止めるときは stop() して捨て、
+  // 次の危機で作り直す(BufferSource は使い捨てが WebAudio の流儀)
+  var crisisNode = null, crisisGain = null;
+  function crisisBuffer(x) {
+    if (x < 0.01 || muted || seVol <= 0 || !unlocked) {
+      if (crisisNode) {
+        try { crisisNode.stop(); } catch (e) { /* 停止済みなら無視 */ }
+        crisisNode = null;
+      }
+      crisisLastX = -1;   // 次に鳴らすときは必ず音量から設定し直す
+      return;
+    }
+    if (!crisisNode) {
+      var buf = seBuffers[CRISIS_SRC];
+      if (!buf || !audioCtx) return;
+      try {
+        crisisNode = audioCtx.createBufferSource();
+        crisisNode.buffer = buf;
+        crisisNode.loop = true;
+        if (!crisisGain) {
+          crisisGain = audioCtx.createGain();
+          crisisGain.connect(seBus || audioCtx.destination);
+        }
+        crisisGain.gain.value = 0;   // 音量は下の共通処理で書く
+        crisisNode.connect(crisisGain);
+        crisisNode.start();
+        crisisLastX = -1;
+      } catch (e) { crisisNode = null; return; }
+    }
+    if (Math.abs(x - crisisLastX) >= 0.005) {
+      crisisLastX = x;
+      crisisGain.gain.value = (CRISIS_VOL.min + (CRISIS_VOL.max - CRISIS_VOL.min) * x) * seVol;
+      crisisNode.playbackRate.value = 1 + 0.2 * x;  // 深いほど気ぜわしく
+    }
+  }
+
+  // "html" モードの警報(従来実装)
+  function crisisHtml(x) {
+    if (!loopCrisis) {
+      if (x < 0.01) return;   // 鳴らすものが無ければ黙らせるものも無い
+      initLoopCrisis();
+    }
     if (x < 0.01 || muted || seVol <= 0 || !unlocked) {
       if (!loopCrisis.paused) { loopCrisis.pause(); loopCrisis.currentTime = 0; }
       loopCrisis.volume = 0;
-      crisisLastX = -1;   // 次に鳴らすときは必ず音量から設定し直す
+      crisisLastX = -1;
       return;
     }
     if (Math.abs(x - crisisLastX) >= 0.005) {
       crisisLastX = x;
       loopCrisis.volume = (CRISIS_VOL.min + (CRISIS_VOL.max - CRISIS_VOL.min) * x) * seVol;
-      loopCrisis.playbackRate = 1 + 0.2 * x;  // 深いほど気ぜわしく
+      loopCrisis.playbackRate = 1 + 0.2 * x;
     }
     routeSE(loopCrisis);                        // 警報にも軽いリバーブ(一度だけ配線)
     if (loopCrisis.paused) play(loopCrisis);
+  }
+
+  function crisis(x) {
+    x = Math.max(0, Math.min(1, x || 0));
+    if (seMode === "buffer") crisisBuffer(x);
+    else if (seMode === "html") crisisHtml(x);
   }
 
   // 玉が1個ぶん樽に落ちた。腹に来る重い衝撃
@@ -434,8 +621,10 @@
     tracks.forEach(function (a) {
       if (!a.paused) { pausedTracks.push(a); a.pause(); }
     });
-    pausedCrisisLoop = !loopCrisis.paused;
+    pausedCrisisLoop = !!(loopCrisis && !loopCrisis.paused);
     if (pausedCrisisLoop) loopCrisis.pause();
+    // "buffer" モードの SE・警報ループはすべて WebAudio 上にあるので、
+    // AudioContext の suspend 1発でまとめて止まる(復帰は resume)
     if (audioCtx && audioCtx.state === "running") {
       try { audioCtx.suspend(); } catch (e) { /* 無視 */ }
     }
@@ -460,27 +649,74 @@
     });
   }
 
-  // 効果音の読み込みを待つ。onProgress(読込済, 総数) を随時呼び、
-  // 全部揃うか TIMEOUT を過ぎたら done() を呼ぶ(音が無くても遊べるように)。
+  // 効果音の読み込みを待つ。まず再生方式を判定し(decideSeMode)、
+  //   "buffer" … 全 SE を fetch + decodeAudioData で AudioBuffer に展開する
+  //   "html"   … ここで初めて HTMLAudio を生成し、canplaythrough を待つ(従来)
+  // onProgress(読込済, 総数) を随時呼び、全部揃うか TIMEOUT を過ぎたら
+  // done() を呼ぶ(音が無くても遊べるように)。
   // BGM(tracks)は待たない: 数MB の曲を全部ダウンロードし終えるまでタイトルを
   // 出さないのは起動が遅すぎる(特に携帯回線)。preload="auto" のままなので
   // ブラウザは裏で取得を続け、再生できる分から鳴り始める。最悪でも「開始直後の
   // 数秒だけ BGM が遅れる」だけで、効果音と危機警報は最初から保証される
   function preload(onProgress, done) {
     var TIMEOUT = 15000;
+    var finished = false;
+    function finish() {
+      if (finished) return;
+      finished = true;
+      done();
+    }
+    setTimeout(finish, TIMEOUT);
+    decideSeMode(function () {
+      if (seMode === "buffer") preloadBuffers(onProgress, finish);
+      else preloadHtml(onProgress, finish);
+    });
+  }
+
+  // "buffer" モード: SE 33ファイル(計約2.6MB)+危機警報をデコードする。
+  // 展開後の PCM は数十MB になるが、HTMLAudio 実体 75個+常時配線を
+  // 持ち続けるより遥かに安い(メモリは食うが CPU は一切食わない)
+  function preloadBuffers(onProgress, finish) {
+    var ctx = ensureCtx();
+    if (!ctx) { seMode = "html"; preloadHtml(onProgress, finish); return; }
+    // デコード対象: 登録された全SE + 危機警報。同じファイルを使い回す SE が
+    // あるので src で重複を除く(デコード結果は seBuffers を全員で共有する)
+    var srcs = [CRISIS_SRC];
+    for (var i = 0; i < sfxAll.length; i++) {
+      if (srcs.indexOf(sfxAll[i].src) < 0) srcs.push(sfxAll[i].src);
+    }
+    var total = srcs.length;
+    var loaded = 0;
+    function one() {
+      loaded++;
+      if (onProgress) onProgress(loaded, total);
+      if (loaded >= total) finish();
+    }
+    srcs.forEach(function (src) {
+      fetch(src).then(function (res) {
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        return res.arrayBuffer();
+      }).then(function (ab) {
+        // コールバック形式で呼ぶ: 旧 iOS Safari は Promise 形式に未対応
+        ctx.decodeAudioData(ab, function (buf) {
+          seBuffers[src] = buf;
+          one();
+        }, function () { one(); /* 壊れたファイルはその音だけ無音で続行 */ });
+      }).catch(function () { one(); /* 読めなくても起動は止めない */ });
+    });
+  }
+
+  // "html" モード(従来): ここで初めて HTMLAudio の実体を作る。
+  // "buffer" モードでは1個も作らないため、生成をこのタイミングまで遅らせている
+  function preloadHtml(onProgress, finish) {
+    for (var i = 0; i < sfxAll.length; i++) sfxAll[i].initHtml();
+    initLoopCrisis();
     var seOnly = [];
     for (var si = 0; si < sources.length; si++) {
       if (tracks.indexOf(sources[si]) < 0) seOnly.push(sources[si]);
     }
     var total = seOnly.length;
     var loaded = 0;
-    var finished = false;
-
-    function finish() {
-      if (finished) return;
-      finished = true;
-      done();
-    }
     function one() {
       loaded++;
       if (onProgress) onProgress(loaded, total);
@@ -501,17 +737,27 @@
       try { a.load(); } catch (e) { hit(); }
     });
     if (total === 0) finish();
-    setTimeout(finish, TIMEOUT);
   }
 
   // 最初のユーザー操作で呼ぶ。ブラウザの自動再生制限を解除するだけで、
   // ここでは BGM を鳴らさない(タイトル画面でのクリック/キー入力だけで
   // 曲が鳴り出さないように)。実際の再生はゲーム開始時の gameStart() が行う。
-  var primeIdx = 0;   // 携帯対応: 何番目の効果音まで解錠したか
+  var primeIdx = 0;   // 携帯対応: 何番目の効果音まで解錠したか("html" モード)
   function unlock() {
     if (!unlocked) {
       unlocked = true;
       ensureCtx();     // WebAudio(効果音)の解錠。BGM はここでは鳴らさない
+      // 旧 iOS 向けのおまじない: ユーザー操作の中で「無音の1サンプル」を
+      // 実際に再生し、WebAudio の出力経路を確実に開通させる。resume() だけでは
+      // 一度も再生していない AudioContext が無音のままになる端末があった
+      try {
+        if (audioCtx) {
+          var z = audioCtx.createBufferSource();
+          z.buffer = audioCtx.createBuffer(1, 1, audioCtx.sampleRate);
+          z.connect(audioCtx.destination);
+          z.start(0);
+        }
+      } catch (e) { /* 無視 */ }
       // 携帯対応 その1: volume の変更が効く端末か調べる(iOS は無視される)
       try {
         var probe = new Audio();
@@ -520,16 +766,19 @@
       } catch (e) { /* 判定できなければ従来どおり */ }
       // 携帯対応 その2: 最初のタップのうちに BGM と危機警報を消音で解錠する。
       // これをしないと iOS では、tick から切り替わる危機BGM・ゲームオーバー
-      // BGM が鳴らない。PC はページ単位の許可なので不要(=従来と同じ動作)
+      // BGM が鳴らない。PC はページ単位の許可なので不要(=従来と同じ動作)。
+      // 警報ループは "html" モードのときだけ実体がある(buffer は解錠不要)
       if (PP.TOUCH) {
         tracks.forEach(bless);
-        bless(loopCrisis);
+        if (loopCrisis) bless(loopCrisis);
       }
     }
-    // 携帯対応 その3: 効果音のクローンは「タップのたびに少しずつ」解錠する。
-    // 1回に全部やると BGM の出だしと読み込みを取り合って曲が遅れて聴こえる。
-    // unlock() は操作のたびに呼ばれるので、数タップで全部解錠し終わる
-    if (PP.TOUCH) {
+    // 携帯対応 その3("html" モードのみ): 効果音のクローンは「タップのたびに
+    // 少しずつ」解錠する。1回に全部やると BGM の出だしと読み込みを取り合って
+    // 曲が遅れて聴こえる。unlock() は操作のたびに呼ばれるので数タップで終わる。
+    // "buffer" モードでは不要 — AudioContext さえ開通すれば BufferSource は
+    // tick やタイマーからでも自由に鳴らせる(prime も no-op になっている)
+    if (PP.TOUCH && seMode === "html") {
       for (var n = 0; n < 2 && primeIdx < sfxAll.length; n++) {
         sfxAll[primeIdx++].prime();
       }
