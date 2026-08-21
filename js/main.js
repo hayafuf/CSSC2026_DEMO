@@ -766,10 +766,12 @@
     if (ovr && ovr !== "auto") { PP.quality = ovr === "low" ? 0 : 1; return; }
     if (!PP.PERF.AUTO || rawDt <= 0) return;
     var P = PP.PERF;
-    if (PP.quality === 1 && fpsAvg < P.LOW_ENTER) {
+    // しきい値は目標FPSに対する割合(config.js の解説参照)。タッチ端末は
+    // 40fps 上限なので、絶対値のままだと正常でも常に低品質になってしまう
+    if (PP.quality === 1 && fpsAvg < P.LOW_ENTER_RATIO * P.targetFps) {
       qualHold += rawDt;
       if (qualHold >= P.HOLD) { PP.quality = 0; qualHold = 0; }
-    } else if (PP.quality === 0 && fpsAvg > P.LOW_EXIT) {
+    } else if (PP.quality === 0 && fpsAvg > P.LOW_EXIT_RATIO * P.targetFps) {
       qualHold += rawDt;
       if (qualHold >= P.HOLD) { PP.quality = 1; qualHold = 0; }
     } else {
@@ -820,6 +822,21 @@
 
   // ---------- メインループ ----------
   var pauseDrawn = false;   // ポーズ画面を描き終えたか(tick 冒頭参照)
+  // タッチ端末のメニュー系画面(タイトル/ゲームオーバー/全クリア)は
+  // 海背景が揺れているだけなので、描画を1フレームおきに間引く(40fps 上限
+  // と合わせて実効 20fps)。ロジックと Tween は dt 駆動で進み続けるので
+  // 演出の速度は変わらず、見た目の滑らかさだけを電池と発熱に換える。
+  // ボタン操作は DOM とステージのイベントが担い、Ticker には依存しない
+  var menuDrawToggle = false;
+  function menuSkipDraw(state) {
+    if (!PP.TOUCH ||
+        (state !== "title" && state !== "over" && state !== "gameclear")) {
+      menuDrawToggle = false;
+      return false;
+    }
+    menuDrawToggle = !menuDrawToggle;
+    return menuDrawToggle;
+  }
   function tick(e) {
     // FPS の平均と計測表示はポーズ中も更新する(ポーズ画面の描画負荷も見たい)
     var rawDt = e.delta / 1000;
@@ -964,6 +981,7 @@
 
     renderChains();
 
+    if (menuSkipDraw(g.state)) return;   // メニュー系画面の間引き(上の解説参照)
     stage.update(e);
   }
 
@@ -1239,14 +1257,28 @@
     // RAF_SYNCHED は rAF の拍に同期したまま目標 FPS へ間引くモードで、
     // 60Hz 画面では実質無変化。dt 駆動なのでゲームの進行速度も変わらない。
     // 万一ジャダーが出た端末の切り分け用に ?hz=raf で従来挙動へ戻せる。
-    if (new URLSearchParams(location.search).get("hz") === "raf") {
+    //
+    // タッチ端末はさらに 40fps へ間引く(発熱対策の本丸のひとつ)。
+    // 描画も計算も毎秒 60→40 回で 1/3 減り、GPU/CPU が休める時間が生まれる。
+    // dt 駆動なのでゲームの速さは変わらず、犠牲は「見た目の滑らかさ」のみ。
+    // なお 60Hz パネルで 40fps を刻むと、フレーム間隔は 16ms と 33ms の交互
+    // (rAF の拍にしか描けないため)になる。微妙な揺らぎが気になる端末の
+    // 切り分け用に ?cap=60 のように上限を上書きできる。
+    var q = new URLSearchParams(location.search);
+    if (q.get("hz") === "raf") {
       createjs.Ticker.timingMode = createjs.Ticker.RAF;
     } else {
       createjs.Ticker.timingMode = createjs.Ticker.RAF_SYNCHED;
-      createjs.Ticker.framerate = 60;
+      var cap = parseInt(q.get("cap"), 10);
+      if (!(cap > 0)) cap = PP.TOUCH ? 40 : 60;
+      PP.PERF.targetFps = cap;   // 品質自動調整のしきい値もこの値基準になる
+      createjs.Ticker.framerate = cap;
     }
+    // FPS 移動平均の初期値も目標に合わせる。60 のままだと 40fps 端末で
+    // 起動直後の HOLD 秒間だけ「低下した」と誤認しかねない
+    fpsAvg = PP.PERF.targetFps;
     // デバッグ: index.html?fps=1 で左下に FPS / 品質 / 玉数の計測表示を出す
-    if (new URLSearchParams(location.search).get("fps")) buildFpsMeter();
+    if (q.get("fps")) buildFpsMeter();
     createjs.Ticker.on("tick", tick);
     // headless smoke test でも確認できる、全同期初期化の完了マーカー。
     // audio preload の完了前でも stage・各モジュール・入力配線は利用可能になっている。
