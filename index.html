@@ -437,6 +437,10 @@
         'Check your internet connection and reload the page.</p>';
     }
   </script>
+  <!-- StageGL(WebGL 描画)へ加算合成 "lighter" を教えるパッチ。
+       CreateJS の読み込み確定後・ゲームコードより前に当てる。
+       Canvas 2D で動くとき(フォールバック時)は何もしない(gl-patch.js 冒頭参照) -->
+  <script src="js/gl-patch.js"></script>
   <!-- 依存順に読み込む(i18n が文言辞書を用意し、config がデータ定義でそれを引き、
        main が起動する。i18n は必ず config より前) -->
   <script src="js/i18n.js"></script>

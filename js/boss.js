@@ -1077,7 +1077,11 @@
     PP.fx.shake(direct ? 10 : 4, direct ? 0.3 : 0.15);   // 墨のベチャッという着弾を体でも感じる
     PP.audio.inkSplat();
     if (direct) PP.audio.beep(55, 0.4, "sawtooth", 0.16);   // 直撃は腹に来る重さを足す
-    if (!inkCont.cacheCanvas) inkCont.cache(0, 0, PP.W, PP.H);
+    // WebGL 時は全画面 cache を使わない: 12Hz の updateCache は 1300×700 の
+    // テクスチャ再アップロード(約44MB/s)になってしまう。GPU なら十数枚の
+    // 共有 canvas ブロブを直接描くほうが遥かに安い。Canvas 2D は従来どおり
+    // 「1枚に焼いて全画面ブリット」がフィルレート的に得
+    if (!PP.glActive && !inkCont.cacheCanvas) inkCont.cache(0, 0, PP.W, PP.H);
     inkAcc = 1;   // 次の updateInk で即再合成(フェードイン開始を1フレームで反映)
   }
 

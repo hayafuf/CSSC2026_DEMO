@@ -87,7 +87,9 @@
     // 全画面を計算する最重量級。モバイルと低画質設定では既存のフォールバック
     // (暗幕 0.4)で近似する。desat は毎フレーム描かれるのでここが効く
     desat = new createjs.Shape();
-    if (canBlend("saturation") && !PP.TOUCH && PP.PERF.userQuality !== "low") {
+    // !PP.glActive: StageGL は分離不能ブレンド(saturation)を描けない。
+    // 灰色矩形が普通合成でそのまま出る事故になるため、GL 時は暗幕近似へ倒す
+    if (canBlend("saturation") && !PP.TOUCH && !PP.glActive && PP.PERF.userQuality !== "low") {
       desat.graphics.beginFill("#707070").drawRect(0, 0, PP.W, PP.H);
       desat.compositeOperation = "saturation";
       desatMax = 0.95;

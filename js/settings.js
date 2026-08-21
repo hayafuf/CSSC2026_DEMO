@@ -84,6 +84,16 @@
       { v: "low", label: t("set.qLow"), on: q === "low" }
     ]);
 
+    // 描画モード(auto=タッチのみ WebGL / on=常に WebGL / off=Canvas 2D)。
+    // stage は起動時に1回だけ作るので、反映は再読み込み後(注記で伝える)
+    var r = PP.store ? PP.store.get("renderer", "auto") : "auto";
+    h += segRow(t("set.renderer"), "setRendererSeg", [
+      { v: "auto", label: t("set.rAuto"), on: r === "auto" },
+      { v: "on", label: t("set.rOn"), on: r === "on" },
+      { v: "off", label: t("set.rOff"), on: r === "off" }
+    ]);
+    h += '<div class="set-note">' + esc(t("set.rNote")) + "</div>";
+
     h += segRow(t("set.lang"), "setLangSeg", [
       { v: "ja", label: "日本語", on: PP.i18n.lang === "ja", dis: !canLang },
       { v: "en", label: "English", on: PP.i18n.lang === "en", dis: !canLang }
@@ -147,6 +157,10 @@
       if (v === "high") PP.quality = 1;
       else if (v === "low") PP.quality = 0;
       // "auto" は実測 FPS に任せる(main.js updateQuality が引き継ぐ)
+    });
+    bindSeg("setRendererSeg", function (v) {
+      if (PP.store) PP.store.set("renderer", v);
+      // 反映は再読み込み後(buildSettings の注記参照)。ここでは保存だけ
     });
     bindSeg("setLangSeg", function (v) {
       PP.i18n.set(v);

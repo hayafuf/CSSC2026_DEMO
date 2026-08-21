@@ -760,7 +760,8 @@
     fpsMeterAcc = 0;
     fpsBallCount = 0;
     PP.game.eachLane(countLaneBalls);
-    var s = "FPS " + fpsAvg.toFixed(1) + " | Q" + PP.quality + " | balls " + fpsBallCount;
+    var s = "FPS " + fpsAvg.toFixed(1) + (PP.glActive ? " | GL" : " | 2D") +
+            " | Q" + PP.quality + " | balls " + fpsBallCount;
     // ボス戦中は妖弾数も添える(弾数上限 bulletMax・プールの調整用)
     if (PP.boss && PP.boss.isActive()) s += " | orbs " + PP.boss.getBulletCount();
     if (s !== fpsMeterStr) { fpsMeterStr = s; fpsText.text = s; fpsText.updateCache(); }
@@ -1112,12 +1113,56 @@
     showTitle();
   };
 
+  // ---------- 描画器の選択(WebGL / Canvas 2D) ----------
+  // Stage 3D: タッチ端末は既定で StageGL(WebGL)にする。全描画が cache 済み
+  // ビットマップになった今、玉300〜480枚/フレームの blit は GPU のバッチ描画が
+  // 圧倒的に安く、CPU ラスタライズの発熱源が丸ごと消える。加算合成(lighter)は
+  // js/gl-patch.js が面倒を見る。
+  // 優先順: URL ?gl=1/0 → 保存設定(store "renderer": auto/on/off) → 既定 auto。
+  // auto はタッチのみ GL(PC は Canvas 2D で十分速く、実績のある経路を維持)
+  function wantWebGL() {
+    var q = null;
+    try { q = new URLSearchParams(location.search).get("gl"); } catch (e) {}
+    if (q === "1") return true;
+    if (q === "0") return false;
+    var saved = PP.store ? PP.store.get("renderer", "auto") : "auto";
+    if (saved === "on") return true;
+    if (saved === "off") return false;
+    return PP.TOUCH;
+  }
+  function createGameStage() {
+    PP.glActive = false;
+    if (wantWebGL() && createjs.StageGL) {
+      // 本番 canvas でいきなり試さない: 一度 "webgl" コンテキストを取った canvas は
+      // 二度と "2d" に戻れないため、失敗時のフォールバックが効かなくなる。
+      // 使い捨ての probe canvas で WebGL の可否を先に確かめる
+      var probe = document.createElement("canvas");
+      var ok = false;
+      try { ok = !!(probe.getContext("webgl") || probe.getContext("experimental-webgl")); }
+      catch (e) { ok = false; }
+      if (ok) {
+        try {
+          var s = new createjs.StageGL("gameCanvas",
+            { premultiply: false, transparent: false, antialias: false, autoPurge: 1200 });
+          if (s._webGLContext) {
+            // 背景は background.js が全画面を描くので、クリア色は何でも見えない
+            s.setClearColor("#000000");
+            PP.glActive = true;
+            return s;
+          }
+        } catch (e2) { /* 下の Canvas 2D へフォールバック */ }
+      }
+    }
+    return new createjs.Stage("gameCanvas");
+  }
+
   // ---------- 初期化 ----------
   function init() {
-    stage = PP.stage = new createjs.Stage("gameCanvas");
+    stage = PP.stage = createGameStage();
     // スマホ/タブレット対応: タッチを CreateJS のマウスイベントに変換する。
     // これでタップが stagemousedown、指のドラッグが stagemousemove として
     // input.js に届く。入力側はタッチとマウスの操作体系を分けて扱う。
+    // (StageGL は Stage のサブクラスなので Touch/ヒットテストはそのまま動く)
     if (createjs.Touch.isSupported()) createjs.Touch.enable(stage);  // シングルタッチで十分
 
     // 玉は立体交差・トンネルのために層を分ける:
@@ -1242,7 +1287,10 @@
     createjs.Ticker.on("tick", tick);
     // headless smoke test でも確認できる、全同期初期化の完了マーカー。
     // audio preload の完了前でも stage・各モジュール・入力配線は利用可能になっている。
+    // data-pp-renderer は「実際にどちらの描画器で起動したか」の記録
+    // (--dump-dom でも WebGL 経路の起動成功を確認できる)
     document.documentElement.setAttribute("data-pp-ready", "true");
+    document.documentElement.setAttribute("data-pp-renderer", PP.glActive ? "gl" : "2d");
   }
 
   if (typeof createjs !== "undefined") init();
