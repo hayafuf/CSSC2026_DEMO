@@ -439,6 +439,17 @@
     }
   }
   function updateSkullBalls(dt) {
+    // 骸骨玉が1体もいなければ何もすることがない。eachLaneBall の2周
+    // (150玉×2=毎フレーム300回のコールバック呼び出し)を素の二重ループ
+    // 1周の走査だけで打ち切る。骸骨がいるときだけ従来の処理に入る
+    var lanes = PP.game.lanes, any = false;
+    for (var li = 0; li < lanes.length && !any; li++) {
+      var balls = lanes[li].balls;
+      for (var bi = 0; bi < balls.length; bi++) {
+        if (balls[bi].skull) { any = true; break; }
+      }
+    }
+    if (!any) { stepAttacking = 0; return; }
     // 危機(赤い帳)の最中は全骸骨が沈黙する: チェーンが樽に迫っている間は
     // 「列との勝負」に集中させ、弾幕とのリスク二重取りを起こさない(樽際の
     // 発射禁止帯と同じ思想の全体版)。クールダウンも凍結するので、危機が

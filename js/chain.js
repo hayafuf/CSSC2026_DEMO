@@ -121,6 +121,7 @@
   // 補給口から玉を追加。波の補給が終わったら末尾に宝玉を付ける
   function spawnBalls(lane) {
     var balls = lane.balls;
+    var spawned = false;
     while (lane.pending > 0 &&
            (balls.length === 0 || lane.waveFresh || balls[balls.length - 1].d >= D)) {
       var color = PP.ball.spawnColor(lane);
@@ -157,9 +158,11 @@
       }
       // ballsDirty は立てない: 末尾への追加は既存の並びを乱さず、描画側の
       // 差分更新が正しい位置へ挿し込む(全積み直しを誘発しない)
-      PP.game.colorsDirty = true;  // 盤面の色構成が変わった → 装填色の見張りを回す
+      spawned = true;
       lane.pending--;
     }
+    // 盤面の色構成が変わった → 装填色の見張りを回す(何個湧いてもフレーム1回)
+    if (spawned) PP.game.colorsDirty = true;
 
     // 波の補給完了 → 末尾に宝玉(こちらも balls の一員)
     if (lane.pending === 0 && lane.needTreasure) {
@@ -212,7 +215,15 @@
   // 渡すのはレーンとグループの先頭の d(列全体がその速度で動く)
   // 速度の一式(sp)はコースごとの設計。t はレール全長に対する割合なので、
   // 短いコースで同じ px/s を使うと一瞬で樽に届く。コース側で緩めてある。
-  function speedAt(lane, d) {
+  //
+  // 呼び出しは「レーン数 × グループ数 × 毎フレーム」なのに、位置 d に依存する
+  // のは最後の補間だけで、残りの材料(難易度・レベル補正・ステージ上書き・
+  // 加護・なだれ込み・強化圧・スロー)は全レーン・全グループで同一の
+  // フレーム不変量。update() の先頭で refreshSpeedFrame が1回だけ解決して
+  // おき、ここでは補間しか計算しない(PP.stageSpeed のキー文字列連結も
+  // フレーム1回になる)
+  var _spEntry = 0, _spHole = 0, _spCurve = 1, _spMul = 1;
+  function refreshSpeedFrame() {
     var g = PP.game;
     var sp = g.speed;
     // 難易度(【課題1】config.js)は速度プロファイルそのものに効かせる:
@@ -226,22 +237,23 @@
     // 指定のある項目は「その数値をそのまま」使い、難易度倍率もレベル補正も
     // 掛けない。null(表に無い/省略)の項目は従来どおりの自動計算
     var ov = PP.stageSpeed();
-    var entry = ov.entry !== null ? ov.entry : sp.entry * df.entryMult * lvlMul;
-    var hole = ov.hole !== null ? ov.hole : sp.hole * df.holeMult * lvlMul;
-    var curve = ov.curve !== null ? ov.curve : sp.curve * df.curveMult;
+    _spEntry = ov.entry !== null ? ov.entry : sp.entry * df.entryMult * lvlMul;
+    _spHole = ov.hole !== null ? ov.hole : sp.hole * df.holeMult * lvlMul;
+    _spCurve = ov.curve !== null ? ov.curve : sp.curve * df.curveMult;
     // 海神の加護: 危機中はカーブを少し立てて(easy の curveMult と同じ向き)、
     // 樽際の減速が早めに効くようにする=立て直しの時間をわずかに足す
     if (PP.upgrades && PP.upgrades.rescueActive && PP.upgrades.rescueActive()) {
-      curve *= PP.RESCUE.curveMult;
+      _spCurve *= PP.RESCUE.curveMult;
     }
-    var t = Math.max(0, Math.min(1, d / lane.rail.holeD));
-    var v = hole + (entry - hole) * Math.pow(1 - t, curve);
-    v *= 1 + sp.rollout * g.rolloutBoost;      // 開始直後のなだれ込み
+    _spMul = 1 + sp.rollout * g.rolloutBoost;      // 開始直後のなだれ込み
     // 強化圧: 強化を取るほど巡航速度が少し上がる(PP.UPGRADE_PRESSURE)。
     // ロード順の保険で upgrades の存在を見る(倍率は upgrades.js が事前計算)
-    if (PP.upgrades && PP.upgrades.speedPressure) v *= PP.upgrades.speedPressure();
-    if (g.effects.slow > 0) v *= 0.5;
-    return v;
+    if (PP.upgrades && PP.upgrades.speedPressure) _spMul *= PP.upgrades.speedPressure();
+    if (g.effects.slow > 0) _spMul *= 0.5;
+  }
+  function speedAt(lane, d) {
+    var t = Math.max(0, Math.min(1, d / lane.rail.holeD));
+    return (_spHole + (_spEntry - _spHole) * Math.pow(1 - t, _spCurve)) * _spMul;
   }
 
   // 重なり解消: 後ろ→前へ押し出しを伝播。
@@ -256,10 +268,13 @@
     }
   }
 
-  // 表示用アニメーション(割り込みの滑り込み・押し広げの戻り)を進める
+  // 表示用アニメーション(割り込みの滑り込み・押し広げの戻り)を進める。
+  // 減衰係数は dt にしか依存しないので update() がフレーム1回だけ計算して
+  // 全レーンで共有する(coast の減衰も同じ扱い。applyMagnet 参照)
+  var _slideDecay = 1, _coastDecay = 1;
   function updateAnims(lane, dt) {
     var balls = lane.balls;
-    var decay = Math.exp(-dt / PP.SLIDE_DECAY);
+    var decay = _slideDecay;
     for (var i = 0; i < balls.length; i++) {
       var b = balls[i];
       if (b.slide) {
@@ -330,6 +345,12 @@
     }
     reverseWasActive = eff.reverse > 0;
 
+    // フレーム不変量の一括解決(レーン/グループのループへ持ち込まない)。
+    // rolloutBoost の減衰より後に呼ぶ(speedAt の倍率が今フレームの値になる)
+    refreshSpeedFrame();
+    _slideDecay = Math.exp(-dt / PP.SLIDE_DECAY);
+    _coastDecay = Math.exp(-dt / PP.COAST_DECAY);
+
     reverseFrameRet = 0;
     for (var li = 0; li < g.lanes.length; li++) {
       updateLane(g.lanes[li], dt);
@@ -372,8 +393,12 @@
       var jTail = balls[starts[ji + 1] - 1];
       var jHead = balls[starts[ji + 1]];
       if (jTail.d - jHead.d - D > 0) {
-        var jt = _jointPool[n] || (_jointPool[n] = { tail: null, head: null });
+        var jt = _jointPool[n] || (_jointPool[n] = { tail: null, head: null, headIdx: 0 });
         jt.tail = jTail; jt.head = jHead;
+        // head の添字も控える(resolveJoints が indexOf せずに済む)。
+        // 同フレームのマッチで配列がずれることはあるので、使う側は
+        // 「まだそこに居るか」を1比較で確かめてから使う(recoilIndex と同じ手)
+        jt.headIdx = starts[ji + 1];
         _joints[n] = jt;
         n++;
       }
@@ -497,7 +522,7 @@
           for (i = gStart; i <= tail; i++) balls[i].pull = 0;
           continue;
         }
-        coast *= Math.exp(-dt / PP.COAST_DECAY);
+        coast *= _coastDecay;   // Math.exp(-dt/COAST_DECAY)。update() で共有計算
         if (coast < PP.COAST_MIN) coast = 0;
         var coastMove = Math.min(coast * dt, gap);
         for (i = gStart; i <= tail; i++) {
@@ -545,7 +570,10 @@
       var jt = joints[mi];
       if (jt.tail.d - jt.head.d > D + 0.5) continue;
       if (jt.tail.color !== jt.head.color) continue;
-      var hi = balls.indexOf(jt.head);
+      // 控えた添字がまだ正しければそのまま使い、同フレームのマッチ(splice)で
+      // ずれていたときだけ indexOf で引き直す(隙間が多いフレームの O(隙間×玉数)
+      // を通常時 O(隙間) に落とす)
+      var hi = balls[jt.headIdx] === jt.head ? jt.headIdx : balls.indexOf(jt.head);
       if (hi >= 0) resolveMatchAt(lane, hi, true);   // 磁石/合流での連鎖クリア=コンボを積む
     }
   }
@@ -639,12 +667,17 @@
       PP.fx.burst(p.x, p.y, "#ff9f4a", 10);
       PP.fx.floatText(PP.i18n.t("chain.bigRecoil", { n: mult.toFixed(1) }), p.x, p.y - 30, "#ff9f4a", 19);
     }
-    [balls[headIndex - 1], anchor].forEach(function (b) {
-      if (!b) return;
-      createjs.Tween.get(b.view, { override: true })
-        .to({ scaleX: 1.18, scaleY: 0.86 }, 50)
-        .to({ scaleX: 1, scaleY: 1 }, 160, createjs.Ease.backOut);
-    });
+    // 衝突は4レーンでは頻発するので、配列+クロージャを作らず素直に2回呼ぶ
+    squashBall(balls[headIndex - 1]);
+    squashBall(anchor);
+  }
+
+  // 衝突の「潰れ」演出(impact 専用の小分け。クロージャ確保を避けるため関数化)
+  function squashBall(b) {
+    if (!b) return;
+    createjs.Tween.get(b.view, { override: true })
+      .to({ scaleX: 1.18, scaleY: 0.86 }, 50)
+      .to({ scaleX: 1, scaleY: 1 }, 160, createjs.Ease.backOut);
   }
 
   // 反動の適用: ぶつけられた「そのグループ」だけを洞窟方向へ押し戻す。
