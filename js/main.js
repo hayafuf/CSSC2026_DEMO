@@ -596,11 +596,15 @@
     c.mouseEnabled = false;
     var veil = new createjs.Shape();
     // 中央がわずかに明るい放射グラデーション(平坦な黒塗りより舞台の暗幕らしくなる)。
-    // 画面が揺れている最中でも端がのぞかないように、一回り大きく塗る
+    // 画面が揺れている最中でも端がのぞかないように、一回り大きく塗る。
+    // 【StageGL】非cacheのShape/TextはWebGL描画では描かれないので、この暗幕も
+    // 宝玉の力の選択画面(upgrades.js)と同じく縮小解像度で一度だけ焼く
+    // (モバイルではリトライの暗転と「残りライフ」が透明になっていた)
     veil.graphics.beginRadialGradientFill(
       ["rgba(16,10,12,1)", "rgba(4,2,3,1)"], [0, 1],
       PP.W / 2, PP.H / 2, 120, PP.W / 2, PP.H / 2, PP.W * 0.72)
       .drawRect(-140, -140, PP.W + 280, PP.H + 280);
+    veil.cache(-140, -140, PP.W + 280, PP.H + 280, PP.PERF.VEIL_CACHE_SCALE);
     veil.alpha = 0;
     c.addChild(veil);
     var texts = [];
@@ -610,6 +614,11 @@
       t.textAlign = "center"; t.textBaseline = "middle";
       t.x = PP.W / 2; t.y = PP.H / 2 + dy;
       t.shadow = new createjs.Shadow("rgba(0,0,0,0.9)", 0, 3, 8);
+      // Shadow付きTextの焼き込み(余白はぼかし8+落ち3ぶん)。GL対応と、
+      // 暗幕ポップ中の毎フレーム再ラスタライズ抑止を兼ねる
+      var b = t.getBounds();
+      t.cache(b.x - 14, b.y - 14, b.width + 28, b.height + 31);
+      PP.regFontCache(t);
       t.alpha = 0;
       c.addChild(t);
       texts.push(t);
@@ -621,6 +630,7 @@
     var div = new createjs.Shape();
     div.graphics.beginStroke("rgba(202,169,106,0.7)").setStrokeStyle(1.2)
       .moveTo(-90, 0).lineTo(90, 0);
+    div.cache(-92, -3, 184, 6);   // 細線ShapeもGLで描けるよう焼く
     div.x = PP.W / 2; div.y = PP.H / 2 + 4;   // 拡大ポップしても中央からずれないよう原点基準で描く
     div.alpha = 0;
     c.addChild(div);

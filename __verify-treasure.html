@@ -1,0 +1,129 @@
+<!DOCTYPE html>
+<!-- 宝玉→パワーアップ表示の診断ページ(検証後に削除)。
+     ?gl=1(StageGL)でコースを起動し、dropTreasure→落下→キャッチ→
+     宝玉の力の選択画面、の各段階で表示物の状態を記録する。 -->
+<html lang="ja">
+<head><meta charset="UTF-8"><title>verify-treasure</title></head>
+<body>
+<iframe id="f" src="index.html?level=5&gl=1" width="1320" height="720"></iframe>
+<pre id="out">PENDING</pre>
+<script>
+"use strict";
+var out = document.getElementById("out");
+var fr = document.getElementById("f");
+var started = false;
+var report = { pageErrors: [], steps: [] };
+
+function log(s) { report.steps.push(s); }
+
+function describeView(W, v, depth) {
+  // GL で描画されない条件(非cacheのShape/Text)を含めて表示物を点検する
+  var kind = v instanceof W.createjs.Text ? "Text" :
+             v instanceof W.createjs.Shape ? "Shape" :
+             v instanceof W.createjs.Bitmap ? "Bitmap" :
+             v instanceof W.createjs.Container ? "Container" : "Other";
+  var s = kind + "(vis=" + v.visible + ",a=" + Number(v.alpha).toFixed(2) +
+          ",cache=" + !!v.cacheCanvas + ")";
+  if (v.children && depth < 2) {
+    s += "[" + v.children.map(function (c) { return describeView(W, c, depth + 1); }).join(",") + "]";
+  }
+  return s;
+}
+
+function finish() {
+  var W = fr.contentWindow;
+  try {
+    report.finalState = W.PP.game.state;
+    report.glActive = W.PP.glActive;
+    report.quality = W.PP.quality;
+  } catch (e) { report.pageErrors.push(String(e)); }
+  out.textContent = "VERIFY-RESULT:" + JSON.stringify(report);
+}
+
+function clickCanvas(W, x, y) {
+  var canvas = fr.contentDocument.getElementById("gameCanvas");
+  var r = canvas.getBoundingClientRect();
+  ["mousedown", "mouseup"].forEach(function (type) {
+    canvas.dispatchEvent(new W.MouseEvent(type, {
+      bubbles: true, cancelable: true,
+      clientX: r.left + (x / 1300) * r.width, clientY: r.top + (y / 700) * r.height, button: 0
+    }));
+  });
+}
+
+var poll = setInterval(function () {
+  var W = fr.contentWindow;
+  if (started) return;
+  if (!W || !W.PP || !W.PP.game || !W.PP.stage ||
+      !fr.contentDocument.documentElement.getAttribute("data-pp-ready")) return;
+  if (W.PP.game.state !== "title") return;
+  started = true;
+  clearInterval(poll);
+  W.addEventListener("error", function (e) { report.pageErrors.push(String(e.message)); });
+  W.createjs.Ticker.timingMode = W.createjs.Ticker.TIMEOUT;
+  W.createjs.Ticker.framerate = 60;
+  clickCanvas(W, 650, 400);
+
+  var PP = W.PP;
+  // 1) プレイ状態になったら宝玉とパワーアップを砲台の真上へ直接落とす
+  var phase = 0;
+  var timer = setInterval(function () {
+    var g = PP.game;
+    if (phase === 0) {
+      if (g.state !== "playing") return;
+      log("playing reached; cannon=(" + Math.round(PP.cannon.x) + "," + Math.round(PP.cannon.y) + ")");
+      PP.powerups.dropTreasure(PP.cannon.x, PP.cannon.y - 300);
+      PP.powerups.dropPower(PP.cannon.x, PP.cannon.y - 350);
+      phase = 1;
+      return;
+    }
+    if (phase === 1) {
+      // 落下中のアイテム表示物を点検
+      var itemLayer = PP.layers.item;
+      log("items on layer=" + itemLayer.numChildren +
+          " views=" + itemLayer.children.map(function (c) { return describeView(W, c, 0); }).join(" | "));
+      log("item layer visible=" + itemLayer.visible + " alpha=" + itemLayer.alpha +
+          " parentOk=" + (itemLayer.parent === PP.stage));
+      phase = 2;
+      return;
+    }
+    if (phase === 2) {
+      // キャッチされて choosing(宝玉の力の3択)が開くのを待つ
+      if (g.state === "choosing") {
+        log("choosing opened");
+        // 選択画面はstage直下に載る(upgrades.js buildChoiceUI)。stage全体を走査し、
+        // cacheされていない可視のShape/Text(GLで描かれない)を列挙する
+        var bad = [];
+        function scan(cont, path, depth) {
+          if (depth > 6) return;
+          for (var i = 0; i < cont.children.length; i++) {
+            var c = cont.children[i];
+            if (!c.visible || c.alpha <= 0) continue;
+            var isShape = c instanceof W.createjs.Shape, isText = c instanceof W.createjs.Text;
+            if ((isShape || isText) && !c.cacheCanvas) {
+              bad.push(path + "/" + (isShape ? "Shape" : "Text:" + (c.text || "").slice(0, 12)));
+            }
+            if (c.children) scan(c, path + "/" + i, depth + 1);
+          }
+        }
+        scan(PP.stage, "stage", 0);
+        log("uncached visible Shape/Text on stage: " + (bad.length ? bad.slice(0, 15).join(", ") : "none"));
+        // 選択画面のカードが実体(cache済みビットマップ)を持つかも確認
+        var stageTop = PP.stage.children[PP.stage.children.length - 1];
+        log("topmost cont children=" + (stageTop.children ? stageTop.children.length : "n/a") +
+            " cachedChildren=" + (stageTop.children ? stageTop.children.filter(function (c) {
+              return !!c.cacheCanvas; }).length : 0));
+        phase = 3;
+        setTimeout(finish, 2000);
+        return;
+      }
+      if (g.state !== "playing") { log("state left playing: " + g.state); }
+      return;
+    }
+  }, 700);
+  setTimeout(function () { if (phase < 3) { log("timeout at phase " + phase + " state=" + PP.game.state); finish(); } }, 55000);
+}, 100);
+setTimeout(function () { if (!started) { log("never became ready/title"); finish(); } }, 100000);
+</script>
+</body>
+</html>

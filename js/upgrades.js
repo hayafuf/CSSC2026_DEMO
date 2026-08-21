@@ -331,12 +331,17 @@
     var cont = new createjs.Container();
     cont.mouseEnabled = false;   // クリックは main.js の onStageDown が矩形判定で拾う
 
-    // 暗幕(中央がわずかに明るい放射グラデ。揺れ中でも端が出ないよう一回り大きく)
+    // 暗幕(中央がわずかに明るい放射グラデ。揺れ中でも端が出ないよう一回り大きく)。
+    // 【StageGL】非cacheのShape/TextはWebGL描画では描かれない(gl-patch.js 導入時の
+    // 規約)。この画面はstage直下に置くためcache一掃(Stage 3C)から漏れており、
+    // モバイル(既定GL)では選択画面が丸ごと透明=💎を取ると盤面が凍って見える
+    // 事故になっていた。全画面グラデは危機の帳と同じ縮小解像度で一度だけ焼く
     var veil = new createjs.Shape();
     veil.graphics.beginRadialGradientFill(
       ["rgba(10,14,24,0.72)", "rgba(3,4,8,0.84)"], [0, 1],
       PP.W / 2, PP.H / 2, 140, PP.W / 2, PP.H / 2, PP.W * 0.72)
       .drawRect(-140, -140, PP.W + 280, PP.H + 280);
+    veil.cache(-140, -140, PP.W + 280, PP.H + 280, PP.PERF.VEIL_CACHE_SCALE);
     cont.addChild(veil);
 
     var title = new createjs.Text(PP.i18n.t("ug.ui.pick"),
@@ -344,6 +349,10 @@
     title.textAlign = "center"; title.textBaseline = "middle";
     title.x = PP.W / 2; title.y = 104;
     title.shadow = new createjs.Shadow("rgba(0,0,0,0.9)", 0, 3, 8);
+    // Shadow付きTextはGL対応と再ラスタライズ抑止を兼ねて焼く(余白はぼかし8+落ち3ぶん)
+    var tb = title.getBounds();
+    title.cache(tb.x - 14, tb.y - 14, tb.width + 28, tb.height + 31);
+    PP.regFontCache(title);   // Webフォントが後着なら焼き直す(config.js の規約)
     cont.addChild(title);
 
     // 2個目以降の 💎 が待っているときだけ残数を出す
@@ -352,6 +361,8 @@
     var sub = new createjs.Text(subText, '14px "Hiragino Kaku Gothic ProN","Meiryo",sans-serif', "#caa96a");
     sub.textAlign = "center"; sub.textBaseline = "middle";
     sub.x = PP.W / 2; sub.y = 138;
+    var sb = sub.getBounds();
+    sub.cache(sb.x - 4, sb.y - 4, sb.width + 8, sb.height + 8);
     cont.addChild(sub);
 
     var n = cards.length;
@@ -414,6 +425,12 @@
     c.addChild(desc);
     // 下部のキー刻印(タッチ端末ではキーが無いので出さない)
     if (!PP.TOUCH) line(String(i + 1), hh - 34, '700 22px "Cinzel",serif', "#caa96a");
+    // 【StageGL】カードの中身(グラデShape+Shadow付きText群)は生成後に変わらない
+    // ので、カードごと一枚に焼く。GLで描けるようになるだけでなく、ポップ演出の
+    // scale/alpha Tweenも焼いたビットマップに掛かるだけになる(veil と同じ理屈)。
+    // 余白はカード枠のストローク+文字影のぼかしぶん
+    c.cache(-hw - 8, -hh - 8, w + 16, h + 16);
+    PP.regFontCache(c);   // Cinzel が後着したらカードごと焼き直す
     return c;
   }
 
