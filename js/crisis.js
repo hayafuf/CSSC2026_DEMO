@@ -46,9 +46,16 @@
     for (var li = 0; li < lanes.length; li++) {
       var lane = lanes[li];
       var mouth = lane.rail.posAt(lane.rail.holeD);
-      // レールを樽から遡る「這い寄る赤い光」の経路
+      // レールを樽から遡る「這い寄る赤い光」の経路。
+      // CRISIS.creep は絶対px なので、コース5のような短いレーン(1500px台)では
+      // レーンほぼ全体を覆い、キャッシュの bbox が巨大になる。タッチ端末では
+      // レーン長の半分でキャップして焼く面積そのものを抑える(bbox はここで
+      // 確定するため、ランタイムに切り替わる PP.quality ではなく起動時固定の
+      // PP.TOUCH で分岐する)。PC の見た目は完全に不変
+      var creepLen = PP.TOUCH ?
+        Math.min(PP.CRISIS.creep, lane.rail.holeD * 0.5) : PP.CRISIS.creep;
       var creepPts = [];
-      for (var d = lane.rail.holeD; d > lane.rail.holeD - PP.CRISIS.creep; d -= 26) {
+      for (var d = lane.rail.holeD; d > lane.rail.holeD - creepLen; d -= 26) {
         creepPts.push(lane.rail.posAt(Math.max(0, d)));
       }
       var creep = new createjs.Shape();
@@ -67,8 +74,11 @@
         if (cp.y > by1) by1 = cp.y;
       }
       var pad = PP.R + 6;
+      // ぼんやりした太ストローク2本なので半分解像度で焼いても判別できない。
+      // updateCache のたびに GPU へ送り直すビットマップの面積が 1/4 になる
       creep.cache(Math.floor(bx0 - pad), Math.floor(by0 - pad),
-        Math.ceil(bx1 - bx0 + pad * 2), Math.ceil(by1 - by0 + pad * 2));
+        Math.ceil(bx1 - bx0 + pad * 2), Math.ceil(by1 - by0 + pad * 2),
+        PP.PERF.CREEP_CACHE_SCALE);
       W.addChild(creep);
 
       var maw = new createjs.Shape();
@@ -87,7 +97,12 @@
 
       parts.push({
         lane: lane, mouth: mouth, maw: maw, creep: creep,
-        creepPts: creepPts, creepDrawn: -1, want: 0, announced: false, deep: 0
+        creepPts: creepPts, creepDrawn: -1, want: 0, announced: false, deep: 0,
+        // 焼き直しの間引き幅。複数レーンでは危機が交代で発火して updateCache が
+        // レーン数ぶん重なるので、刻みをレーン数倍に広げてフレームあたりの
+        // 総転送量を1レーン時と同等に保つ(先端の伸びが粗くなるだけで、
+        // alpha の脈動は毎フレーム掛かるため気づかれない — drawCreep 参照)
+        creepStep: PP.PERF.CREEP_STEP * lanes.length
       });
     }
   }
@@ -174,7 +189,7 @@
     // 毎フレーム走ってしまう。CREEP_STEP 刻み未満の変化は見送る(alpha の脈動は
     // 毎フレーム掛かるので、先端が数十px 刻みで伸びても気づかれない)。
     // ただし 0 への遷移(危機の終わり)だけは必ず描き直して消し残りを防ぐ
-    if (Math.abs(count - part.creepDrawn) < PP.PERF.CREEP_STEP &&
+    if (Math.abs(count - part.creepDrawn) < part.creepStep &&
         !(count < 2 && part.creepDrawn >= 2)) return;
     part.creepDrawn = count;
     var g = part.creep.graphics;
@@ -366,8 +381,12 @@
           st.drip += dr * 2.5;
           while (st.drip >= 1) { st.drip -= 1; drip(); }
         }
-        // 心拍の頭: 画面の縁がカッと赤く光る(下の減衰でスッと引く)
-        edgePulse.alpha = Math.min(0.85, 0.7 * n);
+        // 心拍の頭: 画面の縁がカッと赤く光る(下の減衰でスッと引く)。
+        // 低負荷モードでは点灯させない(全画面 lighter 合成1枚の節約。
+        // 減衰側はそのまま通すので、切り替わりの瞬間に消え残りは出ない)
+        if (PP.quality !== 0 || PP.PERF.LOW.edgePulse) {
+          edgePulse.alpha = Math.min(0.85, 0.7 * n);
+        }
         // 深い危機では映像が乱れる(赤い走査ノイズ)。低負荷モードでは省く
         if (n > C.glitchAt && (PP.quality !== 0 || PP.PERF.LOW.glitch)) {
           var lines = 1 + Math.floor(Math.random() * 3);
@@ -383,6 +402,12 @@
     var h = st.level > 0 ? heart(st.phase % 1) : 0;
 
     vignette.alpha = C.vignette * n * (0.5 + 0.5 * h);
+    // 低負荷モードでは帳を薄める+見えない濃さは 0 に切り落とす。
+    // 「常にどこかのレーンが危機域」になる複数レーンのコースでは、浅い危機の
+    // 全画面ブレンドが毎フレーム乗り続けるので、描画そのものをスキップさせる
+    // (edgePulse の 0 クランプと同じ理由。alpha<=0 は描画されない)
+    if (PP.quality === 0) vignette.alpha *= PP.PERF.LOW.veilMul;
+    if (vignette.alpha < 0.02) vignette.alpha = 0;
     vignette.scaleX = vignette.scaleY = 1 - C.tunnel * n;   // 視野が狭まる
     edgePulse.alpha *= Math.exp(-dt * 6);                   // 縁の光は鋭く減衰
     // 指数減衰は漸近するだけで厳密には 0 にならない。alpha が僅かでも残っていると
@@ -393,6 +418,7 @@
     // 凶兆: 深い危機でだけ、視界に「☠ GAME OVER ☠」が一瞬浮かんでは消える。
     // 確率的に数フレームだけ現れ、位置も僅かにズレる(グリッチ風のちらつき)
     if (st.level > 0 && n > C.omenAt &&
+        (PP.quality !== 0 || PP.PERF.LOW.omen) &&
         Math.random() < 0.10 + 0.18 * (n - C.omenAt) / (1 - C.omenAt)) {
       omen.alpha = 0.08 + 0.24 * Math.random();
       omen.x = PP.W / 2 + (Math.random() - 0.5) * 16;
