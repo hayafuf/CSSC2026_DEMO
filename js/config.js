@@ -1313,7 +1313,10 @@
     // pull は磁力の巻き戻り速度、spdD/spdHold は前進速度の基準位置(chain.js 参照)。
     lanes: [],
     hasOverpass: false,   // どこかのレーンに立体交差があるか(buildCourse でメモ)
-    ballsDirty: true,     // 玉の増減があった=描画側が重なり順を積み直す(main.js renderChains)
+    ballsDirty: true,     // 玉レイヤーの並びが正準でなくなった=描画側が全積み直しで
+                          // 作り直す(main.js renderChains)。通常の増減は差分更新で
+                          // 済むので立てない — view の差し替えや宝玉の追加など、
+                          // 並びの前提が崩れるまれなイベントだけが立てる
     colorsDirty: true,    // 盤面の色 or 手札が変わった=装填色の見張りを回す(cannon.js syncColors)
     shots: [],            // 飛行中の玉 {x, y, vx, vy, color, roll, view}(全レーン共通)
     finishing: false,     // 掃討フェーズ(ゲージが空。補給は止まり、全レーン消し切ればクリア)

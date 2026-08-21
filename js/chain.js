@@ -133,7 +133,9 @@
         d = balls[balls.length - 1].d - D;
       }
       view.visible = false;
-      PP.layers.ballUnder.addChild(view);   // 既定は下層。交差では描画側が上層へ移す
+      // レイヤーへはここでは入れない。同フレームの描画側(main.js renderChains)が
+      // 正しい層・正しい重なり位置へ挿し込む(tick は chain.update → renderChains
+      // → stage.update の順なので、親なしのまま画面に出ることはない)
       balls.push({ d: d, color: color, wave: lane.wave, view: view, pull: 0, slide: 0 });
       // 骸骨玉: 一定確率で「普通の色玉」に骸骨マークを重ねる(色はそのままなので
       // マッチも磁石も通常どおり効く。弾幕の管理は skull.js)。ボス戦には出さない。
@@ -153,7 +155,8 @@
         nb.skullFx = PP.ball.makeSkullOverlay();
         view.addChild(nb.skullFx);
       }
-      PP.game.ballsDirty = true;   // 玉の増減 → 描画側が重なり順を積み直す
+      // ballsDirty は立てない: 末尾への追加は既存の並びを乱さず、描画側の
+      // 差分更新が正しい位置へ挿し込む(全積み直しを誘発しない)
       PP.game.colorsDirty = true;  // 盤面の色構成が変わった → 装填色の見張りを回す
       lane.pending--;
     }
@@ -800,7 +803,8 @@
   function destroyRange(lane, i, j) {
     var balls = lane.balls;
     var removed = balls.splice(i, j - i + 1);
-    PP.game.ballsDirty = true;
+    // ballsDirty は立てない: 玉が減っても残りの並びは正準のまま。消えた玉の
+    // view は消滅 Tween の間レイヤーに残る(描画側の差分更新はそれを許容する)
     PP.game.colorsDirty = true;   // 色が盤面から消えたかもしれない → 見張りを回す
     // マッチで生まれた隙間は「衝突で開いた隙間」ではないので、不応期(hitCd)を
     // 引き継がない。これを消さないと、切断面の玉に残った hitCd が磁力を止めて
@@ -1039,7 +1043,7 @@
     // レール接線との内積で、樽側(前)か補給側(後)かを決定
     var dot = (sh.x - p.x) * p.tx + (sh.y - p.y) * p.ty;
     var view = PP.ball.acquireView(sh.color);   // プールの器を使い回す(ball.js)
-    PP.layers.ballUnder.addChild(view);   // 既定は下層。交差では描画側が上層へ移す
+    // レイヤーへは入れない(spawnBalls と同じ理由。描画側が正位置へ挿し込む)
     var newBall = {
       color: sh.color, wave: hit.wave, view: view, pull: 0, slide: 0,
       ins: { x: sh.x, y: sh.y, t: PP.INSERT_TIME }
@@ -1053,7 +1057,7 @@
       at = hitIndex + 1;
     }
     balls.splice(at, 0, newBall);
-    PP.game.ballsDirty = true;
+    // ballsDirty は立てない(描画側の差分更新が正位置へ挿し込む)
     PP.game.colorsDirty = true;   // 玉が増えた → 装填色の見張りを回す
     PP.audio.hit();
     // 重なりを前方へ押し出して解消(表示は slide で滑らかに開く)
