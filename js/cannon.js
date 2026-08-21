@@ -1000,8 +1000,9 @@
           var dx = sh.x - c.bx[i];
           var dist = dx * dx + dy * dy;
           if (dist >= SKIP_R2) continue;      // 実距離でも候補外(遮蔽判定より先に安く弾く)
-          // 下の帯の玉が橋の桁の下に隠れているなら撃てない(見えている上の帯を撃つ)
-          if (!c.bover[i] && occludedByDeck(c.bx[i], c.by[i])) continue;
+          // 下の帯の玉が橋の桁の下に隠れているなら撃てない(見えている上の帯を撃つ)。
+          // _overN=0(橋の玉が1個も無い=立体交差の無いコース)なら関数呼び出しごと省く
+          if (_overN && !c.bover[i] && occludedByDeck(c.bx[i], c.by[i])) continue;
           var score = dist;
           if (c.bover[i]) score -= OVER_BIAS;
           if (score < bestScore) { bestScore = score; bestDist = dist; bestI = i; bestLane = li; }

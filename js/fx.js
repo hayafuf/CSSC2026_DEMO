@@ -21,6 +21,7 @@
   var dotCanvas = {};          // CSS色文字列 → 焼き込み済み canvas
   var dotCanvasN = 0;          // 色マップの肥大ガード用
   var pActive = [], pFree = [];
+  var recFree = [];            // 使い終わったパーティクルレコードの返却先(spawnDot 参照)
   var pcont = null;            // プール専用 Container(fx レイヤーに一度だけ載せる)
 
   function bakeDot(color) {
@@ -66,13 +67,24 @@
     b.x = x0; b.y = y0; b.scaleX = s0x; b.scaleY = s0y;
     b.rotation = (opts && opts.rot0) || 0;
     // レコードの形はいつも同じにする(JS エンジンが同じ「形」のオブジェクトを
-    // 高速に扱えるため、使わない拡張フィールドも 0/false で必ず埋める)
-    pActive.push({ bmp: b, age: 0, dur: durMs / 1000, delay: delay,
-                   x0: x0, y0: y0, tx: tx, ty: ty,
-                   s0x: s0x, s0y: s0y, s1x: s1x, s1y: s1y,
-                   rot0: (opts && opts.rot0) || 0,
-                   rotSpin: (opts && opts.rotSpin) || 0,
-                   easeIn: !!(opts && opts.easeIn), a0: a0 });
+    // 高速に扱えるため、使わない拡張フィールドも 0/false で必ず埋める)。
+    // レコード自体も Bitmap と同様にプールで使い回す: 連鎖中は毎フレーム
+    // 十数個スポーンするので、作り捨てだと GC のゴミが出続ける
+    // (GC の一時停止は FPS の谷になり、音の途切れの引き金にもなる)
+    var p = recFree.pop();
+    if (!p) {
+      p = { bmp: null, age: 0, dur: 0, delay: 0, x0: 0, y0: 0, tx: 0, ty: 0,
+            s0x: 0, s0y: 0, s1x: 0, s1y: 0, rot0: 0, rotSpin: 0,
+            easeIn: false, a0: 1 };
+    }
+    p.bmp = b; p.age = 0; p.dur = durMs / 1000; p.delay = delay;
+    p.x0 = x0; p.y0 = y0; p.tx = tx; p.ty = ty;
+    p.s0x = s0x; p.s0y = s0y; p.s1x = s1x; p.s1y = s1y;
+    p.rot0 = (opts && opts.rot0) || 0;
+    p.rotSpin = (opts && opts.rotSpin) || 0;
+    p.easeIn = !!(opts && opts.easeIn);
+    p.a0 = a0;
+    pActive.push(p);
   }
 
   function updateParticles(dt) {
@@ -85,6 +97,8 @@
       if (k >= 1) {
         p.bmp.visible = false;
         pFree.push(p.bmp);
+        p.bmp = null;          // Bitmap への参照を切ってからレコードも返却する
+        recFree.push(p);
         pActive[i] = pActive[pActive.length - 1];
         pActive.pop();
         continue;

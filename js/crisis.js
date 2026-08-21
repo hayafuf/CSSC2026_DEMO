@@ -199,6 +199,7 @@
   //  ので fx のプールは使わない — 帳や砲台との重なり順を変えないため)
   var dripFree = [], dripActive = [];      // {s, age, dur, y0, fall}
   var glitchFree = [], glitchActive = [];  // {s, age, dur}
+  var crisisAudioOn = false;   // 警報ループを前フレームで更新したか(update 参照)
 
   // 滴りと走査ノイズの絵は「大きさが違うだけ」なので、一度焼いた canvas を
   // 全部で共有し、個体差は scale で付ける(course-view の光ドットと同じ手)。
@@ -342,7 +343,14 @@
       st.dangerHold += dt;
       if (st.dangerHold >= C.bgmRelease) { st.danger = false; PP.audio.setDanger(false); }
     }
-    PP.audio.crisis(n);
+    // 警報ループの更新は「鳴っている(可能性のある)間」だけ呼ぶ。
+    // 深さ 0 のまま毎フレーム呼んでも audio 側は早期 return するが、
+    // 危機でもないのに毎フレーム関数を1本呼び続ける必要はない。
+    // 0 へ落ちた最初の1回だけは必ず呼んで、鳴り残しを止める
+    if (n > 0 || crisisAudioOn) {
+      PP.audio.crisis(n);
+      crisisAudioOn = n > 0;
+    }
 
     if (st.level > 0) {
       var beat = C.beatSlow + (C.beatFast - C.beatSlow) * n;

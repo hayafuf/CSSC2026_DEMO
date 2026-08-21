@@ -360,23 +360,27 @@
     var up = (intro.idx & 1) === 1;   // チクタクの音程もライザーと同じ向きに
     pt.d += pt.speed * dt;
     var end = pt.lane.rail.holeD;
-    var hp = pt.lane.rail.posAt(Math.min(pt.d, end));
+    // イントロ中は毎フレーム通る道なので、posAt(毎回オブジェクト確保)ではなく
+    // スクラッチ _pos を使う。_pos は下の while でも使い回すため、頭の座標は
+    // 数値でローカルに控えてから先へ進む
+    var hp = pt.lane.rail.posAtInto(Math.min(pt.d, end), _pos);
+    var hx = hp.x, hy = hp.y;
 
     // 尾の粒をレール弧長 INTRO_TAIL_STEP ごとに灯す(曲線でも滑らかな尾になる)
     var headD = Math.min(pt.d, end);
     while (pt.lastTailD + INTRO_TAIL_STEP <= headD) {
       pt.lastTailD += INTRO_TAIL_STEP;
-      var tp = pt.lane.rail.posAt(pt.lastTailD);
+      var tp = pt.lane.rail.posAtInto(pt.lastTailD, _pos);
       spawnIntroTailGlow(tp.x, tp.y);
     }
 
-    pt.comet.x = hp.x; pt.comet.y = hp.y;
+    pt.comet.x = hx; pt.comet.y = hy;
     pt.comet.scaleX = pt.comet.scaleY = 1.2 + 0.35 * Math.sin(intro.t * 22);
     // 火の粉: 頭の位置から白金の粒がこぼれ落ちる
-    PP.fx.burst(hp.x, hp.y, (pt.n & 1) ? "#ffd24a" : "#fff3c0", 2, 0.8);
+    PP.fx.burst(hx, hy, (pt.n & 1) ? "#ffd24a" : "#fff3c0", 2, 0.8);
     // D×sparkEvery ごとの火花 + チクタク(処理落ちでも while で追いつく)
     while (pt.nextSpark <= pt.d && pt.nextSpark < end) {
-      var sp = pt.lane.rail.posAt(pt.nextSpark);
+      var sp = pt.lane.rail.posAtInto(pt.nextSpark, _pos);
       PP.fx.burst(sp.x, sp.y, (pt.n & 1) ? "#fff3c0" : "#ffd24a", 5, 1.2);
       PP.audio.introTick(pt.n, up);
       pt.n++;
@@ -384,20 +388,20 @@
     }
     // 8個ごとの節目は金の波紋リングを刻む
     while (pt.nextRing <= pt.d && pt.nextRing < end) {
-      var rp = pt.lane.rail.posAt(pt.nextRing);
+      var rp = pt.lane.rail.posAtInto(pt.nextRing, _pos);
       PP.fx.ring(rp.x, rp.y, "#ffd24a", 4, 64, 320);
       pt.nextRing += PP.D * 8;
     }
 
     if (pt.d >= end) {
       // 樽(ゴール)へ到達: 大花火で「ここに入れたら負け」を目立たせて次のレーンへ。
-      // 尾は上の「なぞり終えたレーン」ループが末端から消してくれる
+      // 尾は各粒が寿命で消えていく
       if (pt.comet.parent) pt.comet.parent.removeChild(pt.comet);
-      PP.fx.flash(hp.x, hp.y, "#fff6d0", 90);
-      PP.fx.ring(hp.x, hp.y, "#ffd24a", 10, 150, 500);
-      PP.fx.ring(hp.x, hp.y, "#fff3c0", 5, 90, 380);
-      PP.fx.burst(hp.x, hp.y, "#ffd24a", 26, 2.4);
-      PP.fx.burst(hp.x, hp.y, "#ff5d5d", 12, 1.6);
+      PP.fx.flash(hx, hy, "#fff6d0", 90);
+      PP.fx.ring(hx, hy, "#ffd24a", 10, 150, 500);
+      PP.fx.ring(hx, hy, "#fff3c0", 5, 90, 380);
+      PP.fx.burst(hx, hy, "#ffd24a", 26, 2.4);
+      PP.fx.burst(hx, hy, "#ff5d5d", 12, 1.6);
       PP.fx.shake(18, 0.35);
       PP.audio.sweepFinish();
       intro.idx++;
@@ -463,13 +467,14 @@
       if (pt.done) continue;
       allDone = false;
       pt.d -= cs.speed * dt;
-      // 彗星の頭を先頭に追従させる(加算合成の光が脈打ちながら駆け抜ける)
-      var hp = pt.lane.rail.posAt(Math.max(pt.d, pt.to));
+      // 彗星の頭を先頭に追従させる(加算合成の光が脈打ちながら駆け抜ける)。
+      // 毎フレームの経路なので posAtInto+スクラッチで確保ゼロにする(intro と同じ)
+      var hp = pt.lane.rail.posAtInto(Math.max(pt.d, pt.to), _pos);
       pt.comet.x = hp.x; pt.comet.y = hp.y;
       pt.comet.scaleX = pt.comet.scaleY = 1 + 0.3 * Math.sin(sweep.t * 22 + i * 2);
       // D ごとに爆発と加点(処理落ちフレームでは複数段まとめて進む)
       while (pt.nextBurst >= pt.d && pt.nextBurst >= pt.to) {
-        var p = pt.lane.rail.posAt(pt.nextBurst);
+        var p = pt.lane.rail.posAtInto(pt.nextBurst, _pos);
         // 金と白金を交互に散らす火花のシャワー(パーティクルはプール制なので
         // 飽和しても超過分が捨てられるだけ=重くならない)
         PP.fx.burst(p.x, p.y, (pt.n & 1) ? "#fff3c0" : "#ffd24a", 7, 1.4);
@@ -517,7 +522,7 @@
       // 終点あたりから、まばらな金のきらめきが立ちのぼり続ける
       if (Math.random() < dt * 10) {
         var ap = sweep.parts[Math.floor(Math.random() * sweep.parts.length)];
-        var pp = ap.lane.rail.posAt(Math.max(ap.to, PP.R));
+        var pp = ap.lane.rail.posAtInto(Math.max(ap.to, PP.R), _pos);
         PP.fx.burst(pp.x + (Math.random() - 0.5) * 120, pp.y - Math.random() * 60,
                     Math.random() < 0.5 ? "#ffd24a" : "#fff3c0", 3, 1.2);
       }

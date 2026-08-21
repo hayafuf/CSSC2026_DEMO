@@ -819,7 +819,7 @@
       if (!lane.recoil.anchor) lane.recoil = null;
     }
     removed.forEach(function (b, k) {
-      var p = lane.rail.posAt(b.d + (b.slide || 0));
+      var p = lane.rail.posAtInto(b.d + (b.slide || 0), _pos);   // x/y は直後に消費
       b.view.x = p.x; b.view.y = p.y;
       // 骸骨玉の撃破報酬: ボーナススコア(確実)+高確率のパワーアップドロップ。
       // destroyRange は全撃破経路(マッチ・爆弾・ミサイル・カラーボム)の
@@ -909,7 +909,9 @@
       for (var i = 0; i < balls.length; i++) {
         var b = balls[i];
         if (b.treasure) continue;
-        var p = lane.rail.posAt(b.d);
+        // 全玉を舐めるループなので、posAt(毎回オブジェクトを新規確保)ではなく
+        // モジュールのスクラッチ _pos へ書き込む posAtInto を使う(rail.js 参照)
+        var p = lane.rail.posAtInto(b.d, _pos);
         var dx = p.x - x, dy = p.y - y;
         if (dx * dx + dy * dy > R2) continue;
         var lastRun = runs[runs.length - 1];
