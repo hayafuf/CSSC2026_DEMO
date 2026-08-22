@@ -620,6 +620,14 @@
     var B = PP.BOSS.ink;   // 墨の半径レンジはボスの定義を借りる
     if (!inkCanvas) inkCanvas = bakeInk();
     for (var i = 0; i < count; i++) {
+      // WebGL 時はボスの墨と同じ同時数上限(config の glMax、古い墨から晴らす)
+      if (PP.glActive && B.glMax > 0) {
+        while (inkBlobs.length >= B.glMax) {
+          var old = inkBlobs.shift();
+          createjs.Tween.removeTweens(old.sh);
+          if (old.sh.parent) old.sh.parent.removeChild(old.sh);
+        }
+      }
       var r = (B.rMin + Math.random() * (B.rMax - B.rMin)) * 1.25;
       var bx = 120 + Math.random() * (PP.W - 240);
       var by = 140 + Math.random() * (PP.H - 260);

@@ -18,6 +18,9 @@
  *         Container 側に lighter が付いているため、継承しないと効かない)
  *     ★2 実効モードが現在の GL ブレンド状態と違ったら flush して切り替える
  *     ★3 フレームの頭で必ず通常合成に戻す(前フレームの状態を持ち越さない)
+ *   Stage 5(携帯の GPU 送出量の根治)で 2 箇所追加:
+ *     ★4 _drawBuffers の転送を使った分だけに(1 flush 1.44MB → 数 KB)
+ *     ★5 alpha<=0 の表示物を積まない(Canvas 2D と同じ可視判定)
  *
  * 安全装置:
  *   ・CreateJS の min ビルドはメソッド/プロパティ名を短縮しない(ローカル変数
@@ -56,11 +59,65 @@
     stage._ppLighter = lighter;
   }
 
-  // ★3 フレームの頭で必ず通常合成から始める
+  // ★3 フレームの頭で必ず通常合成から始める。
+  // ついでに flush 回数を数える(_ppFlushLast は ?fps=1 の計測表示が読む)
   var origBatchDraw = proto._batchDraw;
   proto._batchDraw = function (sceneGraph, gl, ignoreCache) {
     if (this._ppLighter) applyBlend(this, gl, false);
+    this._ppFlushCount = 0;
     origBatchDraw.call(this, sceneGraph, gl, ignoreCache);
+    this._ppFlushLast = this._ppFlushCount;
+  };
+
+  // ★4 flush(_drawBuffers)の GPU 転送を「積んだカードの分だけ」にする。
+  //
+  // なぜ必要か:
+  //   同梱ビルドの _drawBuffers は batchCardCount に関係なく、頂点/UV/テクスチャ
+  //   番号/alpha の 4 配列を丸ごと bufferSubData する。配列はバッチ上限
+  //   (DEFAULT_MAX_BATCH_SIZE=1万カード)で確保されているので、1 回の flush で
+  //   480KB+480KB+240KB+240KB = 約 1.44MB を CPU→GPU へ送る。純正は 1 フレーム
+  //   1 flush だから目立たないが、★2 の加算合成は lighter⇔通常 の境界ごとに
+  //   flush するため、背景の光層・レールの光・粒子・危機の帳で 1 フレームに
+  //   15〜100 回=20〜140MB/フレーム の転送になっていた(携帯の描画が崩れる主因)。
+  //
+  // どう直すか:
+  //   subarray(0, 使った長さ) のビュー(コピーなし)を渡す。100 カードなら
+  //   約 7KB。描画結果は完全に同一(drawArrays も使った分しか読まない)。
+  //   それ以外は min.js の実装をそのまま復元している。
+  var _CARD_I = StageGL.INDICIES_PER_CARD;     // 6 頂点/カード
+  proto._drawBuffers = function (gl) {
+    var n = this.batchCardCount;
+    if (n <= 0) return;
+    this._ppFlushCount = (this._ppFlushCount || 0) + 1;
+    if (this.vocalDebug) {
+      console.log("Draw[" + this._drawID + ":" + this._batchID + "] : " + this.batchReason);
+    }
+    var shader = this._activeShader;
+    var vBuf = this._vertexPositionBuffer, iBuf = this._textureIndexBuffer;
+    var uBuf = this._uvPositionBuffer, aBuf = this._alphaBuffer;
+    var nI = n * _CARD_I, nV = nI * 2;
+    gl.useProgram(shader);
+    gl.bindBuffer(gl.ARRAY_BUFFER, vBuf);
+    gl.vertexAttribPointer(shader.vertexPositionAttribute, vBuf.itemSize, gl.FLOAT, false, 0, 0);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, this._vertices.subarray(0, nV));
+    gl.bindBuffer(gl.ARRAY_BUFFER, iBuf);
+    gl.vertexAttribPointer(shader.textureIndexAttribute, iBuf.itemSize, gl.FLOAT, false, 0, 0);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, this._indices.subarray(0, nI));
+    gl.bindBuffer(gl.ARRAY_BUFFER, uBuf);
+    gl.vertexAttribPointer(shader.uvPositionAttribute, uBuf.itemSize, gl.FLOAT, false, 0, 0);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, this._uvs.subarray(0, nV));
+    gl.bindBuffer(gl.ARRAY_BUFFER, aBuf);
+    gl.vertexAttribPointer(shader.alphaAttribute, aBuf.itemSize, gl.FLOAT, false, 0, 0);
+    gl.bufferSubData(gl.ARRAY_BUFFER, 0, this._alphas.subarray(0, nI));
+    gl.uniformMatrix4fv(shader.pMatrixUniform, gl.FALSE, this._projectionMatrix);
+    for (var h = 0; h < this._batchTextureCount; h++) {
+      var tex = this._batchTextures[h];
+      gl.activeTexture(gl.TEXTURE0 + h);
+      gl.bindTexture(gl.TEXTURE_2D, tex);
+      this.setTextureParams(gl, tex.isPOT);
+    }
+    gl.drawArrays(gl.TRIANGLES, 0, nI);
+    this._batchID++;
   };
 
   // 同梱ビルドの _appendToBatchGroup の忠実な復元 + ★1/★2。
@@ -82,7 +139,12 @@
     var count = container.children.length;
     for (var i = 0; i < count; i++) {
       var item = container.children[i];
-      if (!(item.visible && concatAlpha)) continue;
+      // ★5 alpha<=0 の子は積まない。Canvas 2D の isVisible() は alpha>0 を見るが
+      //    純正 StageGL は親の累積 alpha しか見ず、透明な全画面 Shape(危機の帳・
+      //    ゲームオーバーの暗幕・稲光など、休眠中は alpha=0 で置いてある物)を
+      //    毎フレーム画面 7 枚分ほど無駄に合成していた。本リポジトリの
+      //    「減衰 alpha は 0 にクランプして描画スキップ」規約が GL でも効くようになる
+      if (!(item.visible && concatAlpha) || !(item.alpha > 0)) continue;
 
       // ★1 実効の合成モード: 自分に指定が無ければ親のものを継承する
       var op = item.compositeOperation || parentOp;

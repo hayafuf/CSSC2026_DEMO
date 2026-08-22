@@ -57,6 +57,25 @@
   var bullets = [];       // {type, x, y, vx, vy, grav, r, view, t}
   var hpCont = null;      // HUD レイヤー内の HP バー(枠・バー・ラベル・状態チップ)
   var hpBarSh = null, hpLabel = null, fxChips = null;
+
+  // ---- Shadow 付き Text / Shape の cache 化(hud.js cacheHudText と同じ規約)----
+  // 【なぜ必須か】StageGL(携帯)は cache されていない Shape/Text を描けない
+  // (gl-patch.js 参照)。このファイルの HP バー・技名バナー・各ヒント文は長らく
+  // 非 cache だったため、タッチ端末ではそもそも表示されていなかった。
+  // Canvas 2D でも Shadow 付き Text は毎フレーム shadowBlur 付きラスタライズが
+  // 走るので、固定領域で一度だけ焼いて text 変更時だけ updateCache する
+  function cacheText(t, maxW, maxH, pad) {
+    pad = pad || 10;
+    var x0 = t.textAlign === "center" ? -maxW / 2 : t.textAlign === "right" ? -maxW : 0;
+    var y0 = t.textBaseline === "middle" ? -maxH / 2 : 0;
+    t.cache(x0 - pad, y0 - pad, maxW + pad * 2, maxH + pad * 2);
+    if (PP.regFontCache) PP.regFontCache(t);
+  }
+  // 一度きりの注記文(作って 12 秒ほどで捨てる)は実寸で焼く
+  function cacheTextFit(t, size) {
+    var w = t.getMeasuredWidth() + 8;
+    cacheText(t, w, size * 1.4, 10);
+  }
   var lastHpDrawn = -1, lastChipText = null;
   var eyeGlows = [];      // 目の奥の赤いグロー(明滅)
   var biolumA = null, biolumB = null;   // 生体発光(A=青緑/通常、B=血赤/怒り)
@@ -307,14 +326,16 @@
     return body;
   }
 
-  // 触手の再描画は 30Hz に間引き、結果は cache して blit する。
-  // 太い round ストローク×8本の再ラスタライズは canvas で最も高い部類の
-  // コストで、揺れは sin(t*2) 程度なので 20Hz サンプルでも見分けが付かない。
+  // 触手の再描画は PERF.TENT_HZ(PC 20Hz / タッチ 12Hz)に間引き、結果は cache して
+  // blit する。太い round ストローク×8本の再ラスタライズは canvas で最も高い
+  // 部類のコストで、揺れは sin(t*2) 程度なので 12〜20Hz サンプルでも見分けが
+  // 付かない。WebGL では updateCache のたびに 390×245(約 380KB)のテクスチャを
+  // GPU へ送り直すので、タッチ端末はさらに間引く。
   // 境界は式の最悪値(ex±sway, ey=34+148+46)+ストローク半幅から算出
   var tentAcc = 1;   // 初回は必ず描く
   function drawTentaclesThrottled(droop, dt) {
     tentAcc += dt;
-    if (tentAcc < 1 / 20) return;
+    if (tentAcc < 1 / (PP.PERF.TENT_HZ || 20)) return;
     tentAcc = 0;
     drawTentacles(droop);
     if (tentShape.cacheCanvas) tentShape.updateCache();
@@ -402,6 +423,7 @@
     bannerText.textAlign = "center"; bannerText.textBaseline = "middle";
     bannerText.x = PP.W / 2;
     bannerText.shadow = new createjs.Shadow("rgba(0,0,0,0.9)", 0, 2, 6);
+    cacheText(bannerText, 700, 40, 12);   // 英語の技名(30px)まで収まる幅
     banner.addChild(bband, bannerText);
     banner.y = 160;
     banner.visible = false;
@@ -431,11 +453,13 @@
     hpLabel.textAlign = "right"; hpLabel.textBaseline = "middle";
     hpLabel.x = 430; hpLabel.y = 80;
     hpLabel.shadow = new createjs.Shadow("rgba(0,0,0,0.8)", 0, 2, 4);
+    cacheText(hpLabel, 160, 22, 8);
     hpBarSh = new createjs.Shape();
     fxChips = new createjs.Text("", '600 14px "Hiragino Kaku Gothic ProN","Meiryo",sans-serif', "#ffd8a8");
     fxChips.textAlign = "left"; fxChips.textBaseline = "middle";
     fxChips.x = 880; fxChips.y = 80;
     fxChips.shadow = new createjs.Shadow("rgba(0,0,0,0.8)", 0, 2, 4);
+    cacheText(fxChips, 400, 22, 8);
     hpCont.addChild(hpBarSh, hpLabel, fxChips);
     PP.layers.hud.addChild(hpCont);
   }
@@ -462,6 +486,9 @@
         .drawRoundRect(HP_X + 2.5, HP_Y + 2.5, Math.max(4, (HP_W - 5) * ratio), 3, 2);
     }
     g.setStrokeStyle(1.5).beginStroke("#c9a86a").drawRoundRect(HP_X, HP_Y, HP_W, HP_H, 8);
+    // HP が変わったときだけ焼き直す(Shape は cache が無いと GL で描かれない)
+    if (hpBarSh.cacheCanvas) hpBarSh.updateCache();
+    else hpBarSh.cache(HP_X - 2, HP_Y - 2, HP_W + 4, HP_H + 4);
   }
 
   // 状態異常チップ(アイコン+残り秒)。文字列が変わったときだけ差し替える。
@@ -480,7 +507,7 @@
     if (rndSpinT > 0) parts.push("🎲");
     if (guardT > 0) parts.push("🛡" + Math.ceil(guardT));   // ボスのシールド残り秒
     var s = parts.join(" ");
-    if (s !== lastChipText) { lastChipText = s; fxChips.text = s; }
+    if (s !== lastChipText) { lastChipText = s; fxChips.text = s; fxChips.updateCache(); }
   }
 
   // ---------- 妖弾(ボスの弾幕) ----------
@@ -1064,6 +1091,14 @@
       }
       // 中心は濃い墨だがわずかに透ける(完全な闇だと理不尽なので、
       // 目を凝らせば玉列がかろうじて読める程度に留める)
+      // WebGL 時は同時数に上限(config の glMax)。超えたら一番古い墨を晴らす
+      if (PP.glActive && B.glMax > 0) {
+        while (inkBlobs.length >= B.glMax) {
+          var old = inkBlobs.shift();
+          createjs.Tween.removeTweens(old.sh);
+          if (old.sh.parent) old.sh.parent.removeChild(old.sh);
+        }
+      }
       var sh = new createjs.Bitmap(inkCanvas);
       sh.regX = sh.regY = INK_UR;
       sh.scaleX = sh.scaleY = r / INK_UR;
@@ -1158,6 +1193,7 @@
     if (bannerTween) bannerTween.setPaused(true);
     bannerText.text = name;
     bannerText.color = color;
+    bannerText.updateCache();
     banner.visible = true;
     banner.alpha = 0;
     bannerText.x = PP.W / 2 - 60;
@@ -1196,6 +1232,7 @@
     noParryTxt.x = PP.W / 2;
     noParryTxt.y = 200;
     noParryTxt.shadow = new createjs.Shadow("rgba(0,0,0,0.9)", 0, 2, 6);
+    cacheTextFit(noParryTxt, 15);
     PP.layers.hud.addChild(noParryTxt);
     createjs.Tween.get(noParryTxt)
       .wait(Math.max(200, dur * 1000 - 300))
@@ -1348,6 +1385,9 @@
         var lnSh = new createjs.Shape();
         lnSh.graphics.setStrokeStyle(3).beginStroke("rgba(159,216,255,0.55)")
           .moveTo(e.x, e.y).lineTo(e.tx, iy0);
+        // 線の外接矩形で cache(非 cache の Shape は GL で描かれない。明滅は alpha)
+        var lx0 = Math.min(e.x, e.tx) - 3, ly0 = Math.min(e.y, iy0) - 3;
+        lnSh.cache(lx0, ly0, Math.abs(e.x - e.tx) + 6, Math.abs(e.y - iy0) + 6);
         warnCont.addChild(lnSh);
         crossTele.push(lnSh);
       }
@@ -1938,7 +1978,9 @@
     chargeAcc = 0;
     drawCharge();
     if (charge.cacheCanvas) charge.updateCache();
-    else charge.cache(-178, -178, 356, 356);
+    // タッチ端末は半分の解像度で焼く(356²=約 500KB → 178²=約 127KB の
+    // テクスチャ再送に)。発光するアークと粒なので拡大のにじみは目立たない
+    else charge.cache(-178, -178, 356, 356, PP.TOUCH ? 0.5 : 1);
   }
 
   function drawCharge() {
@@ -2111,7 +2153,7 @@
     hideBanner();
     if (charge) charge.graphics.clear();
     lastChipText = null;
-    if (fxChips) fxChips.text = "";
+    if (fxChips && fxChips.text !== "") { fxChips.text = ""; fxChips.updateCache(); }
   }
 
   // ---------- 毎フレーム(main.js の tick、playing 中のみ) ----------
@@ -2351,6 +2393,7 @@
     hintTxt.x = PP.W / 2;
     hintTxt.y = 168;                      // HP バーの下・最上段レーンより上
     hintTxt.shadow = new createjs.Shadow("rgba(0,0,0,0.9)", 0, 2, 6);
+    cacheTextFit(hintTxt, 15);
     PP.layers.hud.addChild(hintTxt);
     createjs.Tween.get(hintTxt)
       .wait(12000)
@@ -2378,6 +2421,7 @@
     parryHintTxt.x = PP.W / 2;
     parryHintTxt.y = 190;
     parryHintTxt.shadow = new createjs.Shadow("rgba(0,0,0,0.9)", 0, 2, 6);
+    cacheTextFit(parryHintTxt, 15);
     PP.layers.hud.addChild(parryHintTxt);
     createjs.Tween.get(parryHintTxt)
       .wait(12000)

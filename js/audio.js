@@ -743,6 +743,7 @@
   // ここでは BGM を鳴らさない(タイトル画面でのクリック/キー入力だけで
   // 曲が鳴り出さないように)。実際の再生はゲーム開始時の gameStart() が行う。
   var primeIdx = 0;   // 携帯対応: 何番目の効果音まで解錠したか("html" モード)
+  var blessed = [];   // 携帯対応: tracks[i] を解錠済みか(タップごとに 1 本ずつ)
   function unlock() {
     if (!unlocked) {
       unlocked = true;
@@ -768,9 +769,23 @@
       // これをしないと iOS では、tick から切り替わる危機BGM・ゲームオーバー
       // BGM が鳴らない。PC はページ単位の許可なので不要(=従来と同じ動作)。
       // 警報ループは "html" モードのときだけ実体がある(buffer は解錠不要)
+      // 【Stage 5】以前は全 BGM(4 曲・計 23MB)を一度に bless していた。
+      // preload="none" の要素に play() するとロードが始まるので、ゲーム開始の
+      // 最初のタップで 4 本同時のダウンロード+デマルチプレクスが走り、
+      // レベル開始の重い瞬間と真正面からぶつかっていた。いま鳴らす通常曲と
+      // 警報ループだけここで解錠し、残り(危機・ボス・ゲームオーバー)は
+      // 下の「タップごとに 1 本」で順に解錠する(unlock は操作のたびに呼ばれる)
       if (PP.TOUCH) {
-        tracks.forEach(bless);
+        bless(bgmNormal); blessed[0] = true;
         if (loopCrisis) bless(loopCrisis);
+      }
+    }
+    if (PP.TOUCH) {
+      for (var bi = 0; bi < tracks.length; bi++) {
+        if (blessed[bi]) continue;
+        blessed[bi] = true;
+        bless(tracks[bi]);
+        break;   // 1 タップにつき 1 本
       }
     }
     // 携帯対応 その3("html" モードのみ): 効果音のクローンは「タップのたびに

@@ -67,6 +67,23 @@
   window.addEventListener("blur", function () {
     ctl.pause("auto");
   });
+  // タッチ端末の縦持ち: index.html の #rotateHint が画面全体を覆うが、その裏で
+  // ゲームは全力で描画・進行し続けていた(見えないのに発熱し、回転したら手遅れ
+  // という状態にもなる)。縦になったら自動ポーズ、横に戻したら再開する。
+  // 手動ポーズの拒否条件(タイトル等)は pause 側の判定にそのまま任せる
+  if (PP.TOUCH && window.matchMedia) {
+    var portrait = window.matchMedia("(orientation: portrait)");
+    var onOrient = function (ev) {
+      if (ev.matches) {
+        if (PP.fx && PP.fx.resetShake) PP.fx.resetShake();
+        ctl.pause("auto");
+      } else if (ctl.active && ctl.reason === "auto") {
+        ctl.resume();
+      }
+    };
+    if (portrait.addEventListener) portrait.addEventListener("change", onOrient);
+    else if (portrait.addListener) portrait.addListener(onOrient);
+  }
 
   PP.pauseCtl = ctl;
 })();

@@ -240,17 +240,25 @@
   }
 
   // アイテムの落下・キャッチ判定と、時間制エフェクトのタイマー更新
+  var effectKeys = null, bossFxKeys = null;
   function update(dt) {
     var g = PP.game;
     if (downCd > 0) downCd -= dt;
-    for (var k in g.effects) {
+    // キー集合は固定(config.js の PP.game.effects / bossFx の初期形)なので、
+    // 毎フレームの for..in(プロトタイプ走査+列挙キャッシュ)ではなく
+    // 一度だけ取ったキー配列を回す
+    var ek = effectKeys || (effectKeys = Object.keys(g.effects));
+    for (var ei = 0; ei < ek.length; ei++) {
+      var k = ek[ei];
       if (g.effects[k] > 0) g.effects[k] = Math.max(0, g.effects[k] - dt);
     }
     // 状態異常(bossFx)タイマーの減算はここ1か所だけ。
     // ボスの妖弾・骸骨玉の弾幕・パワーダウンアイテムの全員がここへ相乗りする
     // (powerups.update は全コースで毎フレーム呼ばれるので、通常コースでも減る)
     var bfx = g.bossFx;
-    for (var bk in bfx) {
+    var bkeys = bossFxKeys || (bossFxKeys = Object.keys(bfx));
+    for (var bi = 0; bi < bkeys.length; bi++) {
+      var bk = bkeys[bi];
       if (bfx[bk] > 0) bfx[bk] = Math.max(0, bfx[bk] - dt);
     }
     for (var i = items.length - 1; i >= 0; i--) {
@@ -358,6 +366,7 @@
     var g = PP.game;
     if (def.dur > 0) {
       g.effects[def.id] = def.dur; // 取り直しで延長(リフレッシュ)
+      effectKeys = null;           // 新しいキーが増えた可能性(学生追加の効果)→ 取り直す
       if (def.id === "stop") PP.audio.chainStop();       // ⚓ 錨: チェーン停止の音
       else if (def.id === "slow") PP.audio.slow();       // 🐌 囚人の歩み: 発動音
       else if (def.id === "reverse") PP.audio.wind();    // 🌬️ 逆風: 発動音

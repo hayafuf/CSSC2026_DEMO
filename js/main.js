@@ -738,21 +738,39 @@
     if (rawDt <= 0) return;
     fpsAvg += (1 / rawDt - fpsAvg) * Math.min(1, rawDt / PP.PERF.FPS_WINDOW);
   }
+  // ---- 上限FPS(Ticker.framerate)の切替 ----
+  // 品質と上限FPSは対で動く: 通常品質=targetFps(タッチは TOUCH_CAP)、
+  // 低負荷=LOW_CAP。?cap=NN で固定されたときは品質が変わっても上限を動かさない
+  // (端末の切り分け用)。PP.PERF.curFps は「いまの上限」で、計測表示と
+  // 復帰しきい値が参照する
+  var capFixed = false;
+  function applyCap(fps) {
+    if (createjs.Ticker.timingMode === createjs.Ticker.RAF) return;
+    PP.PERF.curFps = fps;
+    if (createjs.Ticker.framerate !== fps) createjs.Ticker.framerate = fps;
+  }
+  function setQuality(q) {
+    if (PP.quality === q) return;
+    PP.quality = q;
+    if (!capFixed) applyCap(q === 0 ? PP.PERF.LOW_CAP : PP.PERF.targetFps);
+  }
+  PP.setQuality = setQuality;   // settings.js の画質セグメントもここを通す
   function updateQuality(rawDt) {
     // ユーザーが画質を固定している(設定パネルで 高/低 を選択)なら自動調整は休む。
     // 毎フレームの代入で、設定変更が次のフレームから確実に効く
     var ovr = PP.PERF.userQuality;
-    if (ovr && ovr !== "auto") { PP.quality = ovr === "low" ? 0 : 1; return; }
+    if (ovr && ovr !== "auto") { setQuality(ovr === "low" ? 0 : 1); return; }
     if (!PP.PERF.AUTO || rawDt <= 0) return;
     var P = PP.PERF;
-    // しきい値は目標FPSに対する割合(config.js の解説参照)。タッチ端末は
-    // 40fps 上限なので、絶対値のままだと正常でも常に低品質になってしまう
-    if (PP.quality === 1 && fpsAvg < P.LOW_ENTER_RATIO * P.targetFps) {
+    // しきい値は「いまの上限FPS」に対する割合(config.js の解説参照)。
+    // 転落は通常上限(60)基準、復帰は低負荷上限(30)基準で見る。低負荷中は
+    // 30 までしか刻めないので、60 基準のままだと復帰条件が永遠に満たせない
+    if (PP.quality === 1 && fpsAvg < P.LOW_ENTER_RATIO * P.curFps) {
       qualHold += rawDt;
-      if (qualHold >= P.HOLD) { PP.quality = 0; qualHold = 0; }
-    } else if (PP.quality === 0 && fpsAvg > P.LOW_EXIT_RATIO * P.targetFps) {
+      if (qualHold >= P.HOLD) { setQuality(0); qualHold = 0; }
+    } else if (PP.quality === 0 && fpsAvg > P.LOW_EXIT_RATIO * P.curFps) {
       qualHold += rawDt;
-      if (qualHold >= P.HOLD) { PP.quality = 1; qualHold = 0; }
+      if (qualHold >= P.HOLD * (P.EXIT_HOLD_MUL || 1)) { setQuality(1); qualHold = 0; }
     } else {
       qualHold = 0;   // しきい値の内側に戻ったら数え直し
     }
@@ -782,7 +800,11 @@
     fpsMeterAcc = 0;
     fpsBallCount = 0;
     PP.game.eachLane(countLaneBalls);
-    var s = "FPS " + fpsAvg.toFixed(1) + (PP.glActive ? " | GL" : " | 2D") +
+    // cap=いまの上限FPS、fl=直近フレームの GPU flush(draw call)回数(gl-patch.js が
+    // 数える。lighter⇔通常 の境界ごとに 1 回増えるので、背景/粒子の合成順の
+    // まとまり具合を実機で確かめる指標)
+    var s = "FPS " + fpsAvg.toFixed(1) + "/" + (PP.PERF.curFps || "-") +
+            (PP.glActive ? " | GL fl" + (stage._ppFlushLast || 0) : " | 2D") +
             " | Q" + PP.quality + " | balls " + fpsBallCount;
     // ボス戦中は妖弾数も添える(弾数上限 bulletMax・プールの調整用)
     if (PP.boss && PP.boss.isActive()) s += " | orbs " + PP.boss.getBulletCount();
@@ -806,8 +828,8 @@
   // ---------- メインループ ----------
   var pauseDrawn = false;   // ポーズ画面を描き終えたか(tick 冒頭参照)
   // タッチ端末のメニュー系画面(タイトル/ゲームオーバー/全クリア)は
-  // 海背景が揺れているだけなので、描画を1フレームおきに間引く(40fps 上限
-  // と合わせて実効 20fps)。ロジックと Tween は dt 駆動で進み続けるので
+  // 海背景が揺れているだけなので、描画を1フレームおきに間引く(60fps 上限
+  // と合わせて実効 30fps)。ロジックと Tween は dt 駆動で進み続けるので
   // 演出の速度は変わらず、見た目の滑らかさだけを電池と発熱に換える。
   // ボタン操作は DOM とステージのイベントが担い、Ticker には依存しない
   var menuDrawToggle = false;
@@ -828,11 +850,13 @@
     // ポーズ(停泊)中はゲームの一切を進めない。盤面は完全に静止しているので
     // 最初の1フレーム(オーバーレイの表示)だけ描いたら以後の再描画をやめる。
     // 60fps で全画面を描き直し続けるとポーズ中でも端末が発熱するため。
-    // ?fps=1 のときだけは計測表示を動かし続ける(ポーズ画面の負荷も見たい)。
+    // ?fps=1 のときも描き直さない(以前は毎フレーム描いていたが、それでは
+    // 計測表示がポーズ画面の負荷を「作って」しまい測定にならない。計測文字の
+    // 更新は 0.25 秒ごとに 1 回だけ描く)。
     // pause() は showPause() → Ticker.paused の順なので、ここに来る最初の
     // フレームでオーバーレイは配置済み=1回の update で正しく写る(pause.js)
     if (PP.pauseCtl && PP.pauseCtl.active) {
-      if (!pauseDrawn || fpsText) {
+      if (!pauseDrawn || (fpsText && fpsMeterAcc === 0)) {
         stage.update(e);
         pauseDrawn = true;
       }
@@ -1208,7 +1232,31 @@
     // これでタップが stagemousedown、指のドラッグが stagemousemove として
     // input.js に届く。入力側はタッチとマウスの操作体系を分けて扱う。
     // (StageGL は Stage のサブクラスなので Touch/ヒットテストはそのまま動く)
-    if (createjs.Touch.isSupported()) createjs.Touch.enable(stage);  // シングルタッチで十分
+    // 第2引数 singleTouch=true: 省略すると multitouch=true になり、指ごとに
+    // ポインタ記録と座標計算が走る(以前は省略していた)。第3引数 allowDefault は
+    // false のまま(canvas は CSS の touch-action:none で既にスクロール不可)
+    if (createjs.Touch.isSupported()) createjs.Touch.enable(stage, true, false);
+    // タッチの「指の移動」は stage 座標へ変換しない。EaselJS は touchmove の
+    // たびに _updatePointerPosition → getBoundingClientRect + getComputedStyle
+    // (強制レイアウト)を走らせるが、タッチ操作の照準は DOM ボタン駆動で、
+    // input.js は stagemousemove のタッチ分を捨てている(=完全に無駄な仕事)。
+    // タッチのサンプリングは 90〜240Hz なので、指を置いている間じゅう毎フレーム
+    // 数回のレイアウト計算が消えていた。down/up は従来どおり変換する
+    var origPointerMove = stage._handlePointerMove;
+    if (typeof origPointerMove === "function") {
+      stage._handlePointerMove = function (id, e, pageX, pageY, owner) {
+        // touch* のみ捨てる。コースエディタはハンドルの pressmove(指の移動)を
+        // 使うので、エディタ表示中は従来どおり通す
+        if (e && e.type && e.type.charAt(0) === "t" &&
+            !(PP.editor && PP.editor.active)) return;
+        return origPointerMove.call(this, id, e, pageX, pageY, owner);
+      };
+    }
+    // 毎フレームの stage.update() が表示ツリー全体へ "tick" イベントを配る
+    // 既定動作を止める。このゲームで "tick" を聞く表示物は無く(Tween は
+    // Ticker 直結)、玉+粒子+光点で 1500〜2500 個の再帰呼び出しと Event
+    // オブジェクト生成が毎フレーム無駄になっていた
+    stage.tickOnUpdate = false;
 
     // 玉は立体交差・トンネルのために層を分ける:
     //   bridgeUnder(橋の落ち影・アーチ・橋脚)→ ballUnder(橋の下/道の玉)
@@ -1308,25 +1356,26 @@
     // 60Hz 画面では実質無変化。dt 駆動なのでゲームの進行速度も変わらない。
     // 万一ジャダーが出た端末の切り分け用に ?hz=raf で従来挙動へ戻せる。
     //
-    // タッチ端末はさらに 40fps へ間引く(発熱対策の本丸のひとつ)。
-    // 描画も計算も毎秒 60→40 回で 1/3 減り、GPU/CPU が休める時間が生まれる。
-    // dt 駆動なのでゲームの速さは変わらず、犠牲は「見た目の滑らかさ」のみ。
-    // なお 60Hz パネルで 40fps を刻むと、フレーム間隔は 16ms と 33ms の交互
-    // (rAF の拍にしか描けないため)になる。微妙な揺らぎが気になる端末の
-    // 切り分け用に ?cap=60 のように上限を上書きできる。
+    // タッチ端末の上限は PP.PERF.TOUCH_CAP(=60)。以前の 40 は RAF_SYNCHED の
+    // 採用閾値の都合で 60Hz/90Hz パネルでは実測 30fps に化けていた
+    // (config.js TOUCH_CAP の解説)。発熱対策は「低負荷モードに落ちたら
+    // LOW_CAP(30)へ下げる」方式に改め、上限の切替は setQuality が行う。
+    // 切り分け用に ?cap=NN で上限を固定できる(固定中は品質が変わっても動かさない)
     var q = new URLSearchParams(location.search);
     if (q.get("hz") === "raf") {
       createjs.Ticker.timingMode = createjs.Ticker.RAF;
+      PP.PERF.curFps = PP.PERF.targetFps = 60;
     } else {
       createjs.Ticker.timingMode = createjs.Ticker.RAF_SYNCHED;
       var cap = parseInt(q.get("cap"), 10);
-      if (!(cap > 0)) cap = PP.TOUCH ? 40 : 60;
-      PP.PERF.targetFps = cap;   // 品質自動調整のしきい値もこの値基準になる
-      createjs.Ticker.framerate = cap;
+      if (cap > 0) capFixed = true;
+      else cap = PP.TOUCH ? PP.PERF.TOUCH_CAP : 60;
+      PP.PERF.targetFps = cap;   // 品質自動調整の転落しきい値はこの値基準
+      applyCap((PP.quality === 0 && !capFixed) ? PP.PERF.LOW_CAP : cap);
     }
-    // FPS 移動平均の初期値も目標に合わせる。60 のままだと 40fps 端末で
-    // 起動直後の HOLD 秒間だけ「低下した」と誤認しかねない
-    fpsAvg = PP.PERF.targetFps;
+    // FPS 移動平均の初期値も上限に合わせる。高いままだと起動直後の
+    // HOLD 秒間だけ「低下した」と誤認しかねない
+    fpsAvg = PP.PERF.curFps;
     // デバッグ: index.html?fps=1 で左下に FPS / 品質 / 玉数の計測表示を出す
     if (q.get("fps")) buildFpsMeter();
     createjs.Ticker.on("tick", tick);

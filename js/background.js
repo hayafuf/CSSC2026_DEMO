@@ -110,10 +110,22 @@
     base.cache(0, 0, W, H);   // sea 自身の cache は不要(この1枚に含まれる)
     bg.addChild(base);
 
+    // ---- 合成モードごとの層分け(Stage 5) ----
+    // StageGL(携帯)は lighter⇔通常 の境界ごとに flush(draw call)するので、
+    // 以前の「光条(lighter)→波(通常)→コースティクス(lighter)→霧(通常)→
+    // 塵(lighter)→月光(通常)→月+稲光(lighter)」という交互配置は背景だけで
+    // 7 回の flush を生んでいた。通常合成の物(波・霧・月光の周辺減光)を先に
+    // 全部積み、発光物(光条・コースティクス・塵・月・稲光)は 1 つの lighter
+    // Container にまとめて最後に積むと境界は 1 回になる。
+    // 見た目の差は「発光物が周辺減光(light)の上に来る」ことだけで、発光物は
+    // どれも月の周りと海面の淡い光なので暗がりに沈まなくなる程度の変化
+    var glow = new createjs.Container();
+    glow.mouseEnabled = glow.mouseChildren = false;
+    glow.compositeOperation = "lighter";
+
     // ---- god ray(月から差し込む光条。ゆっくり揺れて明滅する) ----
     rays = new createjs.Container();
     rays.mouseEnabled = false;
-    rays.compositeOperation = "lighter";
     rays.x = MOON_X; rays.y = MOON_Y;
     var RAYN = 6;
     for (var i = 0; i < RAYN; i++) {
@@ -131,7 +143,7 @@
       rays.addChild(s);
       rayList.push({ s: s, baseA: 0.5 + Math.random() * 0.5, phase: Math.random() * 6.28, amp: 0.3 + Math.random() * 0.25, baseRot: s.rotation });
     }
-    bg.addChild(rays);
+    glow.addChild(rays);
 
     // ---- パララックス波頭(横に流れる。手前ほど速く大きい) ----
     // wl は W を割り切る値にして、-W ずれたら +W で継ぎ目なくループさせる
@@ -159,7 +171,6 @@
     // ---- 水面コースティクス(月光柱の上で瞬く粒。加算合成できらめく) ----
     var caustics = new createjs.Container();
     caustics.mouseEnabled = false;
-    caustics.compositeOperation = "lighter";
     for (var ci = 0; ci < 20; ci++) {
       var m = new createjs.Shape();
       var w = 2 + Math.random() * 7, h = 0.7 + Math.random() * 1.3;
@@ -173,7 +184,7 @@
       resetGlint(m);
       twinkleGlint(m);
     }
-    bg.addChild(caustics);
+    glow.addChild(caustics);
 
     // ---- 漂う霧/靄(手前を横切ってゆっくり流れる) ----
     var fogDefs = [
@@ -201,7 +212,6 @@
     // ---- 立ち上る光の塵(海面から昇ってゆっくり消える) ----
     moteLayer = new createjs.Container();
     moteLayer.mouseEnabled = false;
-    moteLayer.compositeOperation = "lighter";
     for (var mi = 0; mi < 16; mi++) {
       var mo = new createjs.Shape();
       var mr = 1 + Math.random() * 1.8;
@@ -212,7 +222,7 @@
       moteLayer.addChild(mo);
       motes.push(resetMote({ s: mo }, true));
     }
-    bg.addChild(moteLayer);
+    glow.addChild(moteLayer);
 
     // ---- 月光と周辺減光(奥・上方の月から差し、周辺を沈めて舞台を締める) ----
     var light = new createjs.Shape();
@@ -234,9 +244,8 @@
         [0, 0.4, 1], MOON_X, 46, 6, MOON_X, 46, 120).drawCircle(MOON_X, 46, 120)
       .beginRadialGradientFill(["#f4f7ff", "#cdd9ef", "#8ea6c8"], [0, 0.7, 1],
         MOON_X - 8, 40, 4, MOON_X, 46, 34).drawCircle(MOON_X, 46, 32);
-    moon.compositeOperation = "lighter";
     moon.cache(MOON_X - 124, -80, 248, 248);
-    bg.addChild(moon);
+    glow.addChild(moon);
 
     // ---- 遠雷フラッシュ(稀。画面全体=コース全域を一瞬だけ冷色で照らす) ----
     // 上ほど強く、手前(下)まで届かせて盤面全体が瞬く。加算合成で稲光らしく。
@@ -244,10 +253,11 @@
     lightning.graphics.beginLinearGradientFill(
         ["rgba(210,228,255,0.85)", "rgba(160,192,236,0.42)", "rgba(120,160,210,0.2)"],
         [0, 0.5, 1], 0, 0, 0, H).drawRect(0, 0, W, H);
-    lightning.compositeOperation = "lighter";
     lightning.alpha = 0;
     lightning.cache(0, 0, W, H);
-    bg.addChild(lightning);
+    glow.addChild(lightning);
+    // 発光層は最後(通常合成の物すべての上)
+    bg.addChild(glow);
 
     // 盤面(path)より下へ。海面のすぐ上でループする
     stage.addChildAt(bg, 0);
@@ -382,12 +392,32 @@
     m.x = MOON_X + (Math.random() - 0.5) * spread * 2;
     m.alpha = 0;
   }
+  // 瞬きは Tween ではなく update 内の位相駆動にする。以前は「2 つの Tween+
+  // コールバック」を瞬きのたびに作り直していて(20 粒×約 2.5 秒周期)、
+  // 永久に毎秒十数個の Tween オブジェクトがゴミになっていた
+  var glints = [];
   function twinkleGlint(m) {
-    var dur = 900 + Math.random() * 1600;
-    createjs.Tween.get(m)
-      .to({ alpha: 0.4 + Math.random() * 0.5, x: m.x + (Math.random() - 0.5) * 10 }, dur, createjs.Ease.quadInOut)
-      .to({ alpha: 0, x: m.x + (Math.random() - 0.5) * 10 }, dur, createjs.Ease.quadInOut)
-      .call(function () { resetGlint(m); twinkleGlint(m); });
+    glints.push({ m: m, t: 0, dur: 0.9 + Math.random() * 1.6,
+                  peak: 0.4 + Math.random() * 0.5, x0: m.x,
+                  dx: (Math.random() - 0.5) * 10 });
+  }
+  function updateGlints(dt) {
+    for (var i = 0; i < glints.length; i++) {
+      var gl = glints[i];
+      gl.t += dt;
+      var k = gl.t / gl.dur;           // 0→1 で上り、1→2 で下る(計 2×dur)
+      if (k >= 2) {
+        resetGlint(gl.m);
+        gl.t = 0; gl.dur = 0.9 + Math.random() * 1.6;
+        gl.peak = 0.4 + Math.random() * 0.5; gl.x0 = gl.m.x;
+        gl.dx = (Math.random() - 0.5) * 10;
+        continue;
+      }
+      var u = k < 1 ? k : 2 - k;       // 三角波
+      var e = u < 0.5 ? 2 * u * u : 1 - 2 * (1 - u) * (1 - u);   // quadInOut
+      gl.m.alpha = gl.peak * e;
+      gl.m.x = gl.x0 + gl.dx * (k < 1 ? e : 1);
+    }
   }
 
   // --- 光の塵 ---
@@ -405,6 +435,7 @@
   function update(dt) {
     if (dt > 0.1) dt = 0.1;
     T += dt;
+    updateGlints(dt);   // コースティクスの瞬き(Tween を使わない位相駆動)
 
     // パララックス波頭: 左へ流し、-W 越えたら +W で継ぎ目なく戻す
     for (var i = 0; i < waves.length; i++) {

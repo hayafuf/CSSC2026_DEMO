@@ -109,7 +109,7 @@
        (CreateJS はマウス座標を CSS 表示サイズから換算するので狙いはズレない)。
        幅・高さの両方でビューポートに収め、スクロールバーを出さない。
        calc は 縦(100vh − タイトル/説明のぶん190px)を横比13:7に換算した上限。 */
-    width: min(1500px, 98vw, calc((100dvh - 190px) * 13 / 7));
+    width: min(1500px, 98vw, calc((100svh - 190px) * 13 / 7));
     height: auto;
     animation: frameGlow 8s ease-in-out infinite;
   }
@@ -150,8 +150,26 @@
        休みなく発熱する。静止画にして filter も外す(ぼかし前提の淡い
        ラジアルなので opacity を少し下げれば見分けがつかない)。 */
     body::before { animation: none; filter: none; opacity: .7; }
-    /* 枠の光アニメも停止(横持ち media は高さ条件付きなのでここでも指定) */
-    #gameCanvas { animation: none; }
+    /* 枠の光アニメも停止(横持ち media は高さ条件付きなのでここでも指定)。
+       角丸+5 層の box-shadow も外す: 角丸のキャンバスはコンポジタがマスク付きの
+       別レイヤーとして毎フレーム再合成するため、タブレットや縦持ち(高さ 560px 超で
+       下の横持ち media に入らない端末)でも GPU を食い続けていた。
+       will-change/contain で独立したコンポジット層に固定し、上に重なる
+       #touchUI のボタン(押下アニメ・救済の脈動)がキャンバスの再描画を
+       巻き込まないようにする */
+    #gameCanvas {
+      animation: none;
+      border: none; border-radius: 0; box-shadow: none;
+      will-change: transform;
+      contain: strict;
+    }
+    #touchUI { contain: layout paint; }
+    /* タイトルの照り(background-clip:text + drop-shadow 2 枚を毎フレーム再描画)と
+       浮遊アニメも止める。横持ちスマホでは h1 ごと非表示だが、タブレット/縦持ちでは
+       見えたまま動き続けていた */
+    h1 { animation: none; }
+    h1 .title-text { animation: none; filter: drop-shadow(0 2px 0 rgba(0,0,0,.55)); }
+    h1 .flag { filter: none; }
     /* backdrop-filter は背後のレイヤーを毎フレーム読み戻してぼかすため
        モバイルでは非常に高価。暗幕は濃くして視認性を補償する。 */
     .fs-btn, #setBack, p.hint { -webkit-backdrop-filter: none; backdrop-filter: none; }
@@ -288,14 +306,16 @@
      CSS の表示サイズだけを 13:7 の比率を保って画面にフィットさせる。 */
   @media (pointer: coarse) and (max-height: 560px) {
     h1, p.hint { display: none; }
-    body { min-height: 100dvh; }
+    body { min-height: 100svh; }
     .stage-wrap {
       padding: env(safe-area-inset-top) env(safe-area-inset-right)
                env(safe-area-inset-bottom) env(safe-area-inset-left);
     }
     #gameCanvas {
-      width: min(100vw, calc(100dvh * 13 / 7));
-      max-height: 100dvh;
+      /* svh(アドレスバーが出た状態の高さ)で固定: dvh はアドレスバーの出入りの
+         間じゅう値が動き、1300×700 のキャンバスをコンポジタが再スケールし続ける */
+      width: min(100vw, calc(100svh * 13 / 7));
+      max-height: 100svh;
       border: none; border-radius: 0;   /* 枠ぶんの数pxでも画面からはみ出さない */
       box-shadow: none;
       animation: none;   /* 枠の光アニメはスマホでは負荷を減らすため止める */

@@ -50,6 +50,67 @@
     return b;
   }
 
+  // ---- 付属物(骸骨リング・万能玉のグロー・爆弾の導火線と火花)の共有 canvas ----
+  // 【なぜ】これらは以前、玉ごとに非 cache の Shape(放射グラデ)を持っていた。
+  // Canvas 2D では玉の数ぶん毎フレームのグラデ再ラスタライズになり、
+  // StageGL(携帯)では非 cache の Shape は描かれない=そもそも見えていなかった。
+  // 見た目は全玉で同じなので、一度だけ焼いた canvas を全インスタンスで共有する
+  // (テクスチャは 1 枚。ball の base/shade と同じ発想)。
+  // draw(g) にパスを描かせ、half=正方形の半幅で焼く。Bitmap は中心基準
+  var partCanvas = {};
+  function bakePart(key, half, draw) {
+    var c = partCanvas[key];
+    if (!c) {
+      var sh = new createjs.Shape();
+      draw(sh.graphics);
+      sh.cache(-half, -half, half * 2, half * 2);
+      c = partCanvas[key] = sh.cacheCanvas;
+      c._half = half;
+    }
+    return c;
+  }
+  function partSprite(key, half, draw) {
+    var c = bakePart(key, half, draw);
+    var b = new createjs.Bitmap(c);
+    b.regX = b.regY = c._half;
+    return b;
+  }
+  function drawSkullRing(g) {
+    g.beginRadialGradientFill(["rgba(20,8,16,0)", "rgba(120,20,40,0.55)"], [0.55, 1],
+        0, 0, 0, 0, 0, R + 6)
+      .drawCircle(0, 0, R + 6);
+  }
+  function drawWildGlow(g) {
+    g.beginRadialGradientFill(["rgba(142,240,208,0.5)", "rgba(142,240,208,0)"], [0.4, 1],
+        0, 0, 4, 0, 0, R + 12)
+      .drawCircle(0, 0, R + 12);
+  }
+  function drawBombFuse(g) {
+    g.setStrokeStyle(2.4, "round").beginStroke("#c9a86a")
+      .moveTo(R * 0.3, -R * 0.85)
+      .quadraticCurveTo(R * 0.95, -R * 1.25, R * 0.55, -R * 1.7)
+      .endStroke();
+  }
+  function drawBombSpark(g) {
+    g.beginRadialGradientFill(["#fff4c0", "#ff8a2a", "rgba(255,120,20,0)"], [0, 0.45, 1],
+        0, 0, 1, 0, 0, R * 0.5)
+      .drawCircle(0, 0, R * 0.5);
+  }
+  function drawMissileFlame(g) {
+    g.beginRadialGradientFill(["#fff4c0", "#ff8a2a", "rgba(255,120,20,0)"], [0, 0.45, 1],
+        0, 0, 1, 0, 0, R * 0.6)
+      .drawCircle(0, 0, R * 0.6);
+  }
+  function drawTreasureGlow(g) {
+    g.beginRadialGradientFill(["rgba(255,220,110,0.6)", "rgba(255,220,110,0)"], [0, 1],
+        0, 0, 2, 0, 0, R + 11)
+      .drawCircle(0, 0, R + 11);
+  }
+  function drawShine(g) {
+    g.beginFill("rgba(255,255,255,0.75)")
+      .drawEllipse(-R * 0.6, -R * 0.66, R * 0.3, R * 0.2);
+  }
+
   // 色ごとに base(下地+リム+フレネルを焼き込み)と shade を一度だけ焼く
   function bakeColor(colorIndex) {
     var p = PP.PALETTE[colorIndex];
@@ -215,28 +276,18 @@
     spin.cache(-R - 2, -R - 2, (R + 2) * 2, (R + 2) * 2);
     cont.addChild(spin);
 
-    // 導火線と火花(脈打たせる)
-    var fuse = new createjs.Shape();
-    fuse.graphics.setStrokeStyle(2.4, "round").beginStroke("#c9a86a")
-      .moveTo(R * 0.3, -R * 0.85)
-      .quadraticCurveTo(R * 0.95, -R * 1.25, R * 0.55, -R * 1.7)
-      .endStroke();
+    // 導火線と火花(脈打たせる)。共有 canvas の Bitmap(上の bakePart 参照)
+    var fuse = partSprite("fuse", Math.ceil(R * 1.8) + 2, drawBombFuse);
     cont.addChild(fuse);
-    var spark = new createjs.Shape();
-    spark.graphics
-      .beginRadialGradientFill(["#fff4c0", "#ff8a2a", "rgba(255,120,20,0)"], [0, 0.45, 1],
-        0, 0, 1, 0, 0, R * 0.5)
-      .drawCircle(0, 0, R * 0.5);
+    var spark = partSprite("spark", Math.ceil(R * 0.5) + 2, drawBombSpark);
     spark.x = R * 0.55; spark.y = -R * 1.7;
     cont.addChild(spark);
     createjs.Tween.get(spark, { loop: true })
       .to({ scaleX: 0.6, scaleY: 0.6, alpha: 0.6 }, 160)
       .to({ scaleX: 1.15, scaleY: 1.15, alpha: 1 }, 160);
 
-    // 固定のハイライト(球感)
-    var shine = new createjs.Shape();
-    shine.graphics.beginFill("rgba(255,255,255,0.7)")
-      .drawEllipse(-R * 0.6, -R * 0.66, R * 0.3, R * 0.2);
+    // 固定のハイライト(球感)。共有 canvas の Bitmap
+    var shine = partSprite("shine", R + 2, drawShine);
     cont.addChild(shine);
 
     cont.spin = spin;
@@ -282,11 +333,7 @@
 
     // 尾の炎(脈打たせる)。爆弾の spark と同じ扱いにして、
     // cannon.js 側の既存のトゥイーン後始末(cont.spark)をそのまま効かせる
-    var flame = new createjs.Shape();
-    flame.graphics
-      .beginRadialGradientFill(["#fff4c0", "#ff8a2a", "rgba(255,120,20,0)"], [0, 0.45, 1],
-        0, 0, 1, 0, 0, R * 0.6)
-      .drawCircle(0, 0, R * 0.6);
+    var flame = partSprite("flame", Math.ceil(R * 0.6) + 2, drawMissileFlame);
     flame.x = 0; flame.y = R * 0.95;
     flame.scaleY = 1.4;
     cont.addChildAt(flame, 0);
@@ -304,11 +351,7 @@
   // 波の最後尾に付く宝玉(黄金のオーブ+宝石、光が脈打つ)
   function makeTreasureView() {
     var cont = new createjs.Container();
-    var glow = new createjs.Shape();
-    glow.graphics
-      .beginRadialGradientFill(["rgba(255,220,110,0.6)", "rgba(255,220,110,0)"], [0, 1],
-        0, 0, 2, 0, 0, R + 11)
-      .drawCircle(0, 0, R + 11);
+    var glow = partSprite("treasureGlow", R + 13, drawTreasureGlow);
     cont.addChild(glow);
 
     var orb = new createjs.Shape();
@@ -341,12 +384,9 @@
   function makeSkullOverlay() {
     var cont = new createjs.Container();
 
-    // 暗い脈動リング(通常時はうっすら、予兆中は skull.js が赤く強める)
-    var ring = new createjs.Shape();
-    ring.graphics
-      .beginRadialGradientFill(["rgba(20,8,16,0)", "rgba(120,20,40,0.55)"], [0.55, 1],
-        0, 0, 0, 0, 0, R + 6)
-      .drawCircle(0, 0, R + 6);
+    // 暗い脈動リング(通常時はうっすら、予兆中は skull.js が alpha で強める)。
+    // 共有 canvas の Bitmap(上の bakePart 参照)
+    var ring = partSprite("skullRing", R + 8, drawSkullRing);
     ring.alpha = 0.4;
     cont.addChild(ring);
 
@@ -370,12 +410,8 @@
   function makeWildView() {
     var cont = new createjs.Container();
 
-    // 外周のグロー(teal。救済の合図と同じ色言語)
-    var glow = new createjs.Shape();
-    glow.graphics
-      .beginRadialGradientFill(["rgba(142,240,208,0.5)", "rgba(142,240,208,0)"], [0.4, 1],
-        0, 0, 4, 0, 0, R + 12)
-      .drawCircle(0, 0, R + 12);
+    // 外周のグロー(teal。救済の合図と同じ色言語)。共有 canvas の Bitmap
+    var glow = partSprite("wildGlow", R + 14, drawWildGlow);
     cont.addChild(glow);
 
     // 本体(骨白の球)
@@ -398,10 +434,8 @@
     ring.cache(-R - 2, -R - 2, (R + 2) * 2, (R + 2) * 2);
     cont.addChild(ring);
 
-    // ハイライト(球感)
-    var shine = new createjs.Shape();
-    shine.graphics.beginFill("rgba(255,255,255,0.75)")
-      .drawEllipse(-R * 0.6, -R * 0.66, R * 0.3, R * 0.2);
+    // ハイライト(球感)。共有 canvas の Bitmap
+    var shine = partSprite("shine", R + 2, drawShine);
     cont.addChild(shine);
 
     // ✨ の明滅(glow ごと脈動させる)

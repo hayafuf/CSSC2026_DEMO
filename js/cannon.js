@@ -850,6 +850,51 @@
     _posDirty = true;   // チェーンはフレーム間でしか進まないので、引き直しはフレームに1回
     for (var i = 0; i < steps; i++) stepShots(h);
   }
+  // 玉の画面座標(と立体交差の上下・トンネルの内外)は d から一意に決まる。
+  // 弾ごとに全玉ぶん引き直すと「弾数 × 玉数」になるので、盤面が変わらない限り
+  // 玉あたり 1 回に集約する。割り込み/爆発で列が変わったら posDirty で作り直す。
+  // (キャッシュ自体はサブステップをまたいで有効。updateShots がフレーム頭で dirty にする)
+  // stepShots の中で定義していた頃は、呼ばれるたび(1 フレーム 1〜4 回)に
+  // クロージャを 2 つ確保していたので、モジュールスコープへ巻き上げてある
+  function refreshBallPos(lanes) {
+    _overN = 0;   // 橋(上の帯)に乗っている玉の画面座標。下の玉の遮蔽判定に使う
+    for (var li = 0; li < lanes.length; li++) {
+      var lane = lanes[li];
+      var balls = lane.balls;
+      var c = _cache[li] ||
+        (_cache[li] = { lane: null, balls: null, n: 0, bx: [], by: [], bover: [], btun: [] });
+      c.lane = lane; c.balls = balls; c.n = balls.length;
+      for (var k = 0; k < balls.length; k++) {
+        var p = lane.rail.posAtInto(balls[k].d, _pos);
+        c.bx[k] = p.x; c.by[k] = p.y;
+        c.bover[k] = lane.rail.heightAt(balls[k].d) > 0;
+        c.btun[k] = lane.rail.tunnelAt(balls[k].d);
+        if (c.bover[k] && !c.btun[k] && balls[k].d >= PP.R) {
+          _overPts[_overN++] = p.x; _overPts[_overN++] = p.y;
+        }
+      }
+    }
+    _cacheN = lanes.length;
+    _posDirty = false;
+  }
+
+  // 下の帯の玉(ground)が、橋の桁の下に隠れているか。橋に乗っている玉の画面座標が
+  // 近く(桁幅ぶん)にあれば、その地上玉は桁に覆われて見えない=撃てない。
+  // 立体交差の無いコースでは overPts が空なので常に false。
+  //
+  // 半径は course-view.js の DECK_HALF(桁の視覚幅 = 片側 40px)と対にする。
+  // ずれると「桁に隠れて見えないのに撃てる玉」が生まれ、見えている先の玉を
+  // 狙った弾がその手前で止まる。桁の幅を変えるときは必ずここも動かすこと。
+  var _OCCLUDE_R2 = 0;
+  function occludedByDeck(x, y) {
+    if (!_OCCLUDE_R2) _OCCLUDE_R2 = (PP.D * 0.85) * (PP.D * 0.85);
+    for (var o = 0; o < _overN; o += 2) {
+      var dx = x - _overPts[o], dy = y - _overPts[o + 1];
+      if (dx * dx + dy * dy < _OCCLUDE_R2) return true;
+    }
+    return false;
+  }
+
   function stepShots(dt) {
     var g = PP.game;
     var shots = g.shots;
@@ -859,48 +904,6 @@
     if (g.bossFx.shotSlow > 0) dt *= PP.BOSS.shotSlow.factor;
     var lanes = g.lanes;
     var R = PP.R, D = PP.D;
-
-    // 玉の画面座標(と立体交差の上下・トンネルの内外)は d から一意に決まる。
-    // 弾ごとに全玉ぶん引き直すと「弾数 × 玉数」になるので、盤面が変わらない限り
-    // 玉あたり 1 回に集約する。割り込み/爆発で列が変わったら posDirty で作り直す。
-    // (キャッシュ自体はサブステップをまたいで有効。updateShots がフレーム頭で dirty にする)
-    function refreshBallPos() {
-      _overN = 0;   // 橋(上の帯)に乗っている玉の画面座標。下の玉の遮蔽判定に使う
-      for (var li = 0; li < lanes.length; li++) {
-        var lane = lanes[li];
-        var balls = lane.balls;
-        var c = _cache[li] ||
-          (_cache[li] = { lane: null, balls: null, n: 0, bx: [], by: [], bover: [], btun: [] });
-        c.lane = lane; c.balls = balls; c.n = balls.length;
-        for (var k = 0; k < balls.length; k++) {
-          var p = lane.rail.posAtInto(balls[k].d, _pos);
-          c.bx[k] = p.x; c.by[k] = p.y;
-          c.bover[k] = lane.rail.heightAt(balls[k].d) > 0;
-          c.btun[k] = lane.rail.tunnelAt(balls[k].d);
-          if (c.bover[k] && !c.btun[k] && balls[k].d >= PP.R) {
-            _overPts[_overN++] = p.x; _overPts[_overN++] = p.y;
-          }
-        }
-      }
-      _cacheN = lanes.length;
-      _posDirty = false;
-    }
-
-    // 下の帯の玉(ground)が、橋の桁の下に隠れているか。橋に乗っている玉の画面座標が
-    // 近く(桁幅ぶん)にあれば、その地上玉は桁に覆われて見えない=撃てない。
-    // 立体交差の無いコースでは overPts が空なので常に false。
-    //
-    // 半径は course-view.js の DECK_HALF(桁の視覚幅 = 片側 40px)と対にする。
-    // ずれると「桁に隠れて見えないのに撃てる玉」が生まれ、見えている先の玉を
-    // 狙った弾がその手前で止まる。桁の幅を変えるときは必ずここも動かすこと。
-    var OCCLUDE_R2 = (D * 0.85) * (D * 0.85);
-    function occludedByDeck(x, y) {
-      for (var o = 0; o < _overN; o += 2) {
-        var dx = x - _overPts[o], dy = y - _overPts[o + 1];
-        if (dx * dx + dy * dy < OCCLUDE_R2) return true;
-      }
-      return false;
-    }
 
     for (var s = shots.length - 1; s >= 0; s--) {
       var sh = shots[s];
@@ -979,7 +982,7 @@
       // 上下の帯のうち「見えている上の帯」を優先する(スコアを少し下げて同点付近
       // で勝たせる)。トンネル内の玉(隠れている)は当たり判定から外す=撃てない。
       // 命中の可否判定そのものは実距離で行う。
-      if (_posDirty) refreshBallPos();
+      if (_posDirty) refreshBallPos(lanes);
       var bestLane = -1, bestI = -1, bestScore = Infinity, bestDist = Infinity;
       var OVER_BIAS = (D * 0.6) * (D * 0.6);
       // 命中に必要な距離²(下の判定と同じ値)。score は最悪でも dist - OVER_BIAS

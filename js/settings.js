@@ -154,8 +154,10 @@
     bindSeg("setQualitySeg", function (v) {
       PP.PERF.userQuality = v;
       PP.store.set("quality", v);
-      if (v === "high") PP.quality = 1;
-      else if (v === "low") PP.quality = 0;
+      // 品質と上限FPSは対で動く(main.js setQuality)。PP.quality を直接書くと
+      // 上限FPSの切替が飛ばされるので必ずこの口から
+      if (v === "high") PP.setQuality(1);
+      else if (v === "low") PP.setQuality(0);
       // "auto" は実測 FPS に任せる(main.js updateQuality が引き継ぐ)
     });
     bindSeg("setRendererSeg", function (v) {

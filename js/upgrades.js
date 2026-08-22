@@ -185,6 +185,11 @@
       .setStrokeStyle(2.5).beginStroke("rgba(190,255,230,0.85)")
       .drawEllipse(-PARRY_RX, -PARRY_RY, PARRY_RX * 2, PARRY_RY * 2);
     parryShield.compositeOperation = "lighter";
+    // cache は必須: 非 cache の Shape は StageGL(携帯)で描かれない(以前は
+    // 「lighter なので cache しない」としていたが、cache 後も compositeOperation は
+    // 画面へ blit するときに効く — crisis.js の creep と同じ)。Canvas 2D でも
+    // 構え中の毎フレーム放射グラデ再ラスタライズが消える
+    parryShield.cache(-PARRY_RX - 3, -PARRY_RY - 3, PARRY_RX * 2 + 6, PARRY_RY * 2 + 6);
     parryShield.visible = false;
     PP.layers.fx.addChild(parryShield);
   }

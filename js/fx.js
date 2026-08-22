@@ -20,9 +20,19 @@
   var DOT_R = 4.5;             // 焼き込み円の半径(呼び出し側の最大値)
   var dotCanvas = {};          // CSS色文字列 → 焼き込み済み canvas
   var dotCanvasN = 0;          // 色マップの肥大ガード用
-  var pActive = [], pFree = [];
+  var pActive = [];
+  // 空き Bitmap は合成モードごとに別のプール/別の Container に分ける。
+  // 【なぜ分けるか】StageGL(携帯)の加算合成は gl-patch.js が「lighter⇔通常 の
+  // 境界ごとに flush」で実現している。1 つの Container に通常(破片・しぶき)と
+  // lighter(リング・閃光・火花)の Bitmap が混ざると、子の並び順は最初に確保
+  // された順で固定され、どの枠がどちらのモードかは事実上ランダムになる。
+  // 生存 150 個で約 60 回の flush(=60 draw call)が連鎖のたびに走っていた。
+  // 通常用 pcontN → lighter 用 pcontL の 2 層に分ければ境界は常に 1 回で済む。
+  // 合成モードは Container 側に付け、Bitmap 個別には付けない(gl-patch ★1 の
+  // 親継承と Canvas 2D の Container 合成の両方で効く)
+  var pFreeN = [], pFreeL = [];
   var recFree = [];            // 使い終わったパーティクルレコードの返却先(spawnDot 参照)
-  var pcont = null;            // プール専用 Container(fx レイヤーに一度だけ載せる)
+  var pcontN = null, pcontL = null;   // プール専用 Container(fx レイヤーに一度だけ載せる)
 
   function bakeDot(color) {
     var s = new createjs.Shape();
@@ -35,13 +45,18 @@
     return s.cacheCanvas;
   }
 
-  function ensureCont() {
-    if (!pcont) {
-      pcont = new createjs.Container();
-      pcont.mouseEnabled = pcont.mouseChildren = false;
-      PP.layers.fx.addChild(pcont);
+  function ensureCont(lighter) {
+    if (!pcontN) {
+      pcontN = new createjs.Container();
+      pcontN.mouseEnabled = pcontN.mouseChildren = false;
+      pcontL = new createjs.Container();
+      pcontL.mouseEnabled = pcontL.mouseChildren = false;
+      pcontL.compositeOperation = "lighter";
+      // 通常→発光の順(発光が手前)。同時に出る破片とリングは元々ほぼ同じ
+      // 場所に重なるので、重ね順の入れ替わりは見分けがつかない
+      PP.layers.fx.addChild(pcontN, pcontL);
     }
-    return pcont;
+    return lighter ? pcontL : pcontN;
   }
 
   // 汎用スポーン: (x0,y0)→(tx,ty) へ quadOut で移動、scale も s0→s1 へ補間、
@@ -55,16 +70,18 @@
     // 低負荷モードは天井を下げる(PERF.LOW.maxP)。生成の唯一の入口なので
     // ここ1か所のゲートで全種(リング/フラッシュ/シャード/火花)に効く
     if (pActive.length >= (PP.quality === 0 ? PP.PERF.LOW.maxP : MAX_P)) return;
-    var b = pFree.pop();
+    // comp は "lighter" か null の 2 値(他の合成モードは GL で表現できない)
+    var lighter = comp === "lighter";
+    var b = (lighter ? pFreeL : pFreeN).pop();
     if (!b) {
       b = new createjs.Bitmap(null);
-      ensureCont().addChild(b);
+      b._ppLighter = lighter;   // 返却時にどちらのプールへ戻すか
+      ensureCont(lighter).addChild(b);
     }
     var delay = (opts && opts.delay) ? opts.delay / 1000 : 0;
     var a0 = (opts && opts.a0 !== undefined) ? opts.a0 : 1;
     b.image = img;
     b.regX = img._rx; b.regY = img._ry;
-    b.compositeOperation = comp;
     b.visible = delay <= 0; b.alpha = a0;
     b.x = x0; b.y = y0; b.scaleX = s0x; b.scaleY = s0y;
     b.rotation = (opts && opts.rot0) || 0;
@@ -98,7 +115,7 @@
       var k = t / p.dur;
       if (k >= 1) {
         p.bmp.visible = false;
-        pFree.push(p.bmp);
+        (p.bmp._ppLighter ? pFreeL : pFreeN).push(p.bmp);
         p.bmp = null;          // Bitmap への参照を切ってからレコードも返却する
         recFree.push(p);
         pActive[i] = pActive[pActive.length - 1];
@@ -349,13 +366,26 @@
       t = new createjs.Text("", "", "#fff");
       t.textAlign = "center"; t.textBaseline = "middle";
       t.shadow = new createjs.Shadow("rgba(0,0,0,0.85)", 0, 2, 4);
-      // 最長文言(40px の見出し・英語ヒント文)+影がゆったり収まる固定領域
-      t.cache(-240, -36, 480, 84, 1.25);
+      t._ppCW = 0; t._ppCH = 0;   // いま確保している cache 領域(下の段階サイズ)
     }
     t.text = str;
     t.color = color;
     t.font = "700 " + (size || 18) + 'px "Cinzel","Hiragino Kaku Gothic ProN","Meiryo",serif';
-    t.updateCache();
+    // cache 領域は文言の実寸に合わせる(64px 刻みの段階サイズ)。以前は最長文言
+    // 用の 480×84(解像度 1.25 で 600×105=約 250KB)を固定で使っていたが、
+    // 大半は "+120" 程度の短い数字で、WebGL では updateCache のたびにその全面積を
+    // テクスチャとして送り直す。10 連鎖で同じフレームに 10〜20 回呼ばれるので
+    // 1 フレーム 2.5〜5MB の転送=連鎖の瞬間に必ずカクつく原因だった。
+    // 同じ段階サイズなら updateCache(再確保なし)、違うときだけ cache し直す
+    var mw = t.getMeasuredWidth() + 28, mh = (size || 18) * 1.5 + 14;
+    var cw = Math.min(480, Math.ceil(mw / 64) * 64);
+    var ch = Math.min(84, Math.ceil(mh / 16) * 16);
+    if (cw !== t._ppCW || ch !== t._ppCH || !t.cacheCanvas) {
+      t._ppCW = cw; t._ppCH = ch;
+      t.cache(-cw / 2, -ch / 2, cw, ch, 1.25);
+    } else {
+      t.updateCache();
+    }
     t.x = x; t.y = y;
     t.alpha = 1;
     t.scaleX = t.scaleY = 0.4;
