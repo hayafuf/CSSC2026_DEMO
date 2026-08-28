@@ -264,10 +264,10 @@
      決め、中の寸法は em で追従する */
   #tutBanner, #tutToast {
     position: absolute; z-index: 30;
-    left: 0; top: 0; width: 0; height: 0;
+    left: 0; top: 0; width: 0; height: auto;   /* 高さは内容に合わせる(携帯で見切れない) */
     pointer-events: none;
     display: flex; flex-direction: column; justify-content: center; gap: .3em;
-    box-sizing: border-box; padding: .45em .9em .5em;
+    box-sizing: border-box; padding: .55em .9em .6em;
     border-radius: .5em;
     border: 1px solid rgba(240,192,64,.7);
     /* 地は説明カード・設定パネル・タイトルパネルと同じ革の色に統一 */
@@ -306,10 +306,7 @@
     color: #caa96a; white-space: nowrap;
   }
   .tut-step.done { color: #8ef0d0; }
-  .tut-order {
-    font-size: 1em; font-weight: 700; min-width: 0;
-    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
-  }
+  .tut-order { font-size: 1em; font-weight: 700; min-width: 0; line-height: 1.35; text-wrap: pretty; }
   .tut-em { color: #ffd86a; font-weight: 700; }
   .tut-skip {
     pointer-events: auto;

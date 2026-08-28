@@ -93,7 +93,15 @@
     if (v === null || v === undefined) return seenVer() < TUT_VER;
     return !!v;
   }
-  function setEnabled(f) { if (PP.store) PP.store.set("tutorialOn", !!f); }
+  function setEnabled(f) {
+    if (PP.store) PP.store.set("tutorialOn", !!f);
+    // ON に戻す=「もう一度教えて」なので、初登場ヒントの既読も一緒に忘れる
+    // (ヒントは端末に永続保存される1回限りの表示。これを消す口が他に無い)
+    if (f) {
+      hintsSeen = {};
+      if (PP.store) PP.store.set("hintsSeen", {});
+    }
+  }
 
   // key(): PP.TOUCH で「〜」「〜pc」を選ぶ(起動時に確定する定数なので安全)
   function dev(base) { return function () { return PP.TOUCH ? base : base + "pc"; }; }
@@ -451,9 +459,11 @@
   // キャンバスの実寸からステージ座標を画面座標へ写す(resize / fullscreenchange で再計算)
   var DOCK_W = 380, DOCK_H = 66, DOCK_X = 56, DOCK_MID_Y = (PP.H - DOCK_H) / 2;
   // dock: 換算係数と札の「目標位置」「現在位置」(ステージ座標)。移動は JS で補間して
-  // transform に書く=毎フレーム DOM を読まない(getBoundingClientRect は強制レイアウト)
+  // transform に書く=毎フレーム DOM を読まない(getBoundingClientRect は強制レイアウト)。
+  // w / h は札の実寸(ステージ換算)。幅は端末の実サイズで下限を持たせ、高さは
+  // 内容に合わせて自動(携帯で札が小さすぎて本文が見切れないように)
   var dock = { s: 1, ox: 0, oy: 0, x: DOCK_X, y: DOCK_MID_Y, cx: DOCK_X, cy: DOCK_MID_Y,
-               wildX: 0, wildY: 0, pinSide: "top" };
+               w: DOCK_W, h: DOCK_H, wildX: 0, wildY: 0, pinSide: "top" };
   var tmpP = {};   // rail.posAtInto 用の使い回し(毎フレームのアロケーションを避ける)
   function layoutDom() {
     var cv = document.getElementById("gameCanvas");
@@ -465,12 +475,17 @@
     dock.s = s;
     dock.ox = cr.left - wr.left;   // wrap 内でのキャンバス原点(全画面のレターボックス対応)
     dock.oy = cr.top - wr.top;
+    // 幅: ステージ基準 380px だが、小さな端末では CSS 260px を下回らない
+    // (キャンバス幅の半分まで)。文字も 12.5px を下回らない。高さは内容任せ
+    var cssW = Math.min(cr.width * 0.5, Math.max(260, DOCK_W * s));
+    dock.w = cssW / s;
     [banner, toastEl].forEach(function (el) {
       el.style.left = "0px"; el.style.top = "0px";
-      el.style.width = (DOCK_W * s) + "px";
-      el.style.height = (DOCK_H * s) + "px";
-      el.style.fontSize = Math.max(10, Math.min(17, 13 * s)) + "px";
+      el.style.width = cssW + "px";
+      el.style.height = "auto";
+      el.style.fontSize = Math.max(12.5, Math.min(17, 13 * s)) + "px";
     });
+    measureCallout();
     // 本文がパネルの sub(17px 相当)と同じ大きさに見えるよう、基準を 17 に
     card.style.fontSize = Math.max(12, Math.min(21, 17 * s)) + "px";
     // 携帯の 🌈 ボタンの中心(糸の先)はここで一度だけ測る
@@ -485,6 +500,15 @@
   }
   window.addEventListener("resize", layoutDom);
   document.addEventListener("fullscreenchange", layoutDom);
+
+  // 表示中の札の高さをステージ換算で控える(文言を差し替えた直後に1回だけ読む。
+  // 毎フレームは読まない)。糸のピンと置き場所の計算がこれを使う
+  function measureCallout() {
+    var el = !banner.hidden ? banner : (!toastEl.hidden ? toastEl : null);
+    if (!el) return;
+    var h = el.offsetHeight;
+    if (h > 0) dock.h = h / dock.s;
+  }
 
   // 盤面にある玉のうち一番下の y(見えている玉だけ。無ければ 0)。
   // 全玉走査なので毎フレームは呼ばず、placeCallout が 0.15 秒ごとに間引いて使う
@@ -506,16 +530,16 @@
     // 少し下へ(大砲の上には必ず収める)。チュートリアル外のヒント(通常プレイ中)は
     // 玉が盤面全体にあるので「玉の下」を追うと最下部へ押し出され、携帯では ◀▶ や
     // 大砲と重なってしまう。ヒントは札と同じ左・上下中央に固定する
-    var y = DOCK_MID_Y;
+    var y = (PP.H - dock.h) / 2;
     if (running) {
-      y = Math.max(DOCK_MID_Y, lowestBallY() + 64);
-      y = Math.min(y, PP.CANNON_Y - 84 - DOCK_H);
+      y = Math.max(y, lowestBallY() + 64);
+      y = Math.min(y, PP.CANNON_Y - 84 - dock.h);
     }
     // 横: 左。落下実演の間だけ、落下線(大砲の x の周辺)に重なるなら右へ逃がす
     var x = DOCK_X;
     if (st && (st.id === "itemGood" || st.id === "itemBad")) {
       var cx = PP.cannon.x;
-      if (cx < x + DOCK_W + 200) x = Math.min(PP.W - DOCK_W - 20, cx + 220);
+      if (cx < x + dock.w + 200) x = Math.min(PP.W - dock.w - 20, cx + 220);
     }
     if (!force && Math.abs(y - dock.y) < 24 && Math.abs(x - dock.x) < 24) return;
     dock.x = x; dock.y = y;
@@ -541,9 +565,9 @@
       dock.pinSide = side;
       banner.classList.toggle("pin-bottom", side === "bottom");
     }
-    return { x: dock.cx + DOCK_W / 2, y: side === "bottom" ? dock.cy + DOCK_H : dock.cy };
+    return { x: dock.cx + dock.w / 2, y: side === "bottom" ? dock.cy + dock.h : dock.cy };
   }
-  function calloutCenterY() { return dock.cy + DOCK_H / 2; }
+  function calloutCenterY() { return dock.cy + dock.h / 2; }
 
   function showBanner(key, done) {
     var t = PP.i18n.t;
@@ -555,8 +579,8 @@
       "</div>" +
       '<div class="tut-order">' + rich(t(key)) + "</div>";
     banner.innerHTML = h;
-    layoutDom();
     banner.hidden = false;
+    layoutDom();   // 文言を入れてから実寸(高さ)を測る
     banner.classList.remove("out");
     banner.style.visibility = shelved ? "hidden" : "";
     bannerHideT = 0;
@@ -1093,8 +1117,8 @@
     var keyFn = toastQueue.shift();
     toastEl.innerHTML = '<div class="tut-eyebrow"><span class="tut-step done">HINT</span></div>' +
       '<div class="tut-order">' + rich(PP.i18n.t(keyFn())) + "</div>";
-    layoutDom();
     toastEl.hidden = false;
+    layoutDom();   // 文言を入れてから実寸(高さ)を測る
     toastEl.classList.remove("out");
     toastEl.style.visibility = shelved ? "hidden" : "";
     toastT = TOAST_SEC;
