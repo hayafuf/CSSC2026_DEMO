@@ -156,7 +156,8 @@
     layer.mouseChildren = false;
 
     // 暗転の帳: 中央がわずかに明るい放射グラデ(upgrades.js の暗幕と同じ焼き方)。
-    // 濃さは shape.alpha で操る(説明中 1.0 / 実践中 0.5 / 平常 0)
+    // タイトル・設定の暗幕はこの濃さに合わせてある(hud.js SKINS / index.html #setBack)。
+    // 濃さは shape.alpha で操る(説明中 1.0 / それ以外 0)
     veil = new createjs.Shape();
     veil.graphics.beginRadialGradientFill(
       ["rgba(8,12,20,0.60)", "rgba(2,4,8,0.76)"], [0, 1],
@@ -415,22 +416,19 @@
 
   function showCard(st) {
     var t = PP.i18n.t;
-    // 見出しは「絵文字 + 半角スペース + 題名」で書いてある。絵文字を丸いバッジに分離する
-    var title = t(st.et);
-    var m = /^(\S+)\s+(.+)$/.exec(title);
-    var icon = m ? m[1] : "📜";
-    var ttl = m ? m[2] : title;
+    // タイトルパネルと同じ組み: キャプション(STEP)→ 見出し(絵文字込み)→ 装飾線 →
+    // 本文(中央揃え)→ 続行ボタン → 補助文とスキップ。四隅に真鍮の鋲
     card.innerHTML =
-      '<div class="tut-card-head">' +
-        '<span class="tut-card-icon"><span>' + esc(icon) + "</span></span>" +
-        '<span class="tut-card-title">' + esc(ttl) + "</span>" +
-        '<span class="tut-card-step">STEP ' + (stepIdx + 1) + " / " + STEPS.length + "</span>" +
-      "</div>" +
+      '<span class="tut-rivet tl"></span><span class="tut-rivet tr"></span>' +
+      '<span class="tut-rivet bl"></span><span class="tut-rivet br"></span>' +
+      '<div class="tut-card-step">STEP ' + (stepIdx + 1) + " / " + STEPS.length + "</div>" +
+      '<div class="tut-card-title">' + esc(t(st.et)) + "</div>" +
+      '<div class="tut-card-orn">◆</div>' +
       '<div class="tut-card-body">' + rich(t(st.eb())) + "</div>" +
       '<div class="tut-card-foot">' +
+        '<span class="tut-cont-hint">' + esc(t("tut.contHint", { tap: PP.TAP })) + "</span>" +
         '<button type="button" class="tut-card-skip" id="tutCardSkip">' +
           esc(t("tut.skip")) + (PP.TOUCH ? "" : " (Esc)") + "</button>" +
-        '<span class="tut-cont-hint">' + esc(t("tut.contHint", { tap: PP.TAP })) + "</span>" +
         '<span class="tut-cont">' + esc(t("tut.cont")) + "</span>" +
       "</div>";
     layoutDom();   // 文字サイズをキャンバスの実寸に合わせる(位置は CSS で中央)
@@ -473,7 +471,8 @@
       el.style.height = (DOCK_H * s) + "px";
       el.style.fontSize = Math.max(10, Math.min(17, 13 * s)) + "px";
     });
-    card.style.fontSize = Math.max(11, Math.min(19, 15 * s)) + "px";
+    // 本文がパネルの sub(17px 相当)と同じ大きさに見えるよう、基準を 17 に
+    card.style.fontSize = Math.max(12, Math.min(21, 17 * s)) + "px";
     // 携帯の 🌈 ボタンの中心(糸の先)はここで一度だけ測る
     var b = PP.TOUCH ? document.getElementById("tWild") : null;
     if (b && b.offsetParent) {

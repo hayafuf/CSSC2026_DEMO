@@ -270,7 +270,8 @@
     box-sizing: border-box; padding: .45em .9em .5em;
     border-radius: .5em;
     border: 1px solid rgba(240,192,64,.7);
-    background: linear-gradient(180deg, #2a1d0d 0%, #1a1108 100%);
+    /* 地は説明カード・設定パネル・タイトルパネルと同じ革の色に統一 */
+    background: linear-gradient(180deg, #2a1f10 0%, #150e06 100%);
     box-shadow: 0 0 0 1px rgba(8,5,2,.9), inset 0 0 0 1px rgba(255,236,190,.07),
                 0 6px 18px rgba(0,0,0,.6);
     color: #fff3d6; font-size: 13px; line-height: 1.3;
@@ -324,99 +325,111 @@
      中央に置く(文字サイズだけ tutorial.js layoutDom がキャンバスの実寸に合わせ、
      中の寸法は em で追従)。カード自体もクリック/タップで「続行」。
      z-index は設定パネル(40)より下 */
+  /* タイトルの「ARE YOU READY?」パネル(hud.js SKINS.normal)と同じ語彙で作る:
+     革の地 #2a1f10→#150e06、真鍮の縁 #f0c040 と金のグロー、四隅のリベット、
+     Cinzel の見出しと装飾線、Meiryo の本文は中央揃え。中身は em で追従する */
   #tutCard {
     position: absolute; z-index: 39;
-    left: 50%; top: 54%; transform: translate(-50%, -50%);
-    width: min(600px, 90%); font-size: 15px;
-    box-sizing: border-box; padding: 0; overflow: hidden;
-    border-radius: 18px;
-    border: 2px solid #d9a93f;
-    /* 上辺にだけ蝋燭の照り返し、下へ向かって革の色に沈む。二重の真鍮縁は影で作る */
-    background:
-      radial-gradient(120% 70% at 50% 0%, rgba(255,232,170,.12), rgba(0,0,0,0) 60%),
-      linear-gradient(180deg, #2c1f10 0%, #1a1108 55%, #120b05 100%);
-    box-shadow: 0 0 0 5px rgba(18,11,4,.92), 0 0 0 6px rgba(217,169,63,.55),
-                0 18px 60px rgba(0,0,0,.7), 0 0 36px rgba(240,192,64,.18),
-                inset 0 1px 0 rgba(255,240,200,.14);
-    color: #f7ecce; cursor: pointer; text-align: left;
+    left: 50%; top: 52%; transform: translate(-50%, -50%);
+    width: min(680px, 94%); font-size: 15px;
+    box-sizing: border-box; padding: 1.5em 2.2em 1.6em;
+    border-radius: 10px;
+    border: 2px solid #f0c040;
+    background: linear-gradient(180deg, #2a1f10 0%, #150e06 100%);
+    box-shadow: 0 0 34px rgba(240,192,64,.35), 0 18px 60px rgba(0,0,0,.7),
+                inset 0 1px 0 rgba(255,240,200,.14), inset 0 0 0 1px rgba(240,192,64,.18);
+    color: #f5e8c8; cursor: pointer; text-align: center;
     font-family: "Cinzel", "Hiragino Kaku Gothic ProN", "Meiryo", serif;
     animation: tutCardIn .32s cubic-bezier(.2, .9, .3, 1.15);
   }
+  /* 四隅のリベット(上部バー・タイトルパネルと同じ真鍮の鋲) */
+  .tut-rivet {
+    position: absolute; width: .7em; height: .7em; border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #f6e2a0, #8a6a2a 70%, #5a4416);
+    box-shadow: 0 0 0 1px rgba(0,0,0,.45), 0 1px 2px rgba(0,0,0,.6);
+  }
+  .tut-rivet.tl { left: .55em; top: .55em; }
+  .tut-rivet.tr { right: .55em; top: .55em; }
+  .tut-rivet.bl { left: .55em; bottom: .55em; }
+  .tut-rivet.br { right: .55em; bottom: .55em; }
   @keyframes tutCardIn {
     from { opacity: 0; transform: translate(-50%, -46%) scale(.96); }
     to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
   }
-  .tut-card-head {
-    display: flex; align-items: center; gap: .8em;
-    padding: .8em 1.1em .7em 1em;
-    border-bottom: 1px solid rgba(217,169,63,.35);
-    background: linear-gradient(180deg, rgba(240,192,64,.10), rgba(240,192,64,0));
-  }
-  .tut-card-icon {
-    flex: 0 0 2.9em; height: 2.9em; border-radius: 50%;
-    display: flex; align-items: center; justify-content: center;
-    font-size: 1em; line-height: 1;
-    font-family: "Segoe UI Emoji", "Apple Color Emoji", sans-serif;
-    background: radial-gradient(circle at 50% 32%, rgba(84,60,22,.95), rgba(20,13,5,.95));
-    border: 2px solid rgba(217,169,63,.7);
-    box-shadow: 0 0 14px rgba(240,192,64,.25), inset 0 1px 0 rgba(255,240,200,.15);
-  }
-  .tut-card-icon span { font-size: 1.5em; }
-  .tut-card-title {
-    flex: 1; min-width: 0;
-    /* 見出しは HUD の難易度ボタン等と同じ「Cinzel(欧文)+ Meiryo 太字(和文)」 */
-    font-family: "Cinzel", "Hiragino Kaku Gothic ProN", "Meiryo", serif;
-    font-size: 1.3em; font-weight: 800; color: #f3cf5c;
-    letter-spacing: .06em; line-height: 1.25;
-    text-shadow: 0 2px 8px rgba(0,0,0,.7);
-  }
+  /* 見出し上の小さなキャプション(難易度ボタンの「難易度をえらぶ」と同じ色・大きさ) */
   .tut-card-step {
-    flex: 0 0 auto;
-    font-family: "Cinzel", serif; font-size: .7em; font-weight: 700; letter-spacing: .15em;
-    color: #caa96a; white-space: nowrap;
-    padding: .35em .8em; border-radius: 999px;
-    border: 1px solid rgba(202,169,106,.45); background: rgba(0,0,0,.28);
+    font-family: "Cinzel", serif; font-size: .8em; font-weight: 700; letter-spacing: .2em;
+    color: #caa96a; margin-bottom: .3em;
   }
+  /* 見出し: タイトルパネルと同じ Cinzel Decorative(和文は Meiryo 太字にフォールバック) */
+  .tut-card-title {
+    font-family: "Cinzel Decorative", "Cinzel", "Hiragino Kaku Gothic ProN", "Meiryo", serif;
+    font-size: 1.75em; font-weight: 700; color: #ffdf8a;
+    letter-spacing: .04em; line-height: 1.3; text-wrap: balance;
+    text-shadow: 0 3px 8px rgba(0,0,0,.7);
+  }
+  /* 見出し下の装飾線(パネルの overlayDiv と同じ: 細い真鍮線の中央に菱形) */
+  .tut-card-orn {
+    display: flex; align-items: center; justify-content: center; gap: .6em;
+    margin: .45em auto .9em; width: 18em; color: #f0c040; font-size: .8em;
+  }
+  .tut-card-orn::before, .tut-card-orn::after {
+    content: ""; flex: 1; height: 1px;
+    background: linear-gradient(90deg, rgba(240,192,64,0), rgba(240,192,64,.8));
+  }
+  .tut-card-orn::after { background: linear-gradient(90deg, rgba(240,192,64,.8), rgba(240,192,64,0)); }
+  /* 本文の改行は辞書側で句読点の位置に明示してある(タイトルパネルと同じ流儀)。
+     自動折り返しは幅が足りない端末だけの保険で、その際も行末を整える */
   .tut-card-body {
-    padding: .8em 1.3em .3em;
-    font-size: 1em; font-weight: 400; line-height: 1.8;
-    color: #efe4c8; white-space: pre-line;
+    margin: 0 auto;
+    font-family: "Hiragino Kaku Gothic ProN", "Meiryo", sans-serif;
+    font-size: 1.1em; font-weight: 400; line-height: 1.75;
+    color: #f5e8c8; white-space: pre-line; text-wrap: pretty;
     text-shadow: 0 1px 2px rgba(0,0,0,.5);
   }
+  /* 進路ボタンの段: ゲームオーバー画面の「再挑戦 / タイトルへ」と同じ横並び2択
+     (暗い方=スキップ、金縁=続行)。補助文はその下に小さく */
   .tut-card-foot {
-    display: flex; align-items: center; gap: .6em;
-    padding: .6em 1em .9em .8em;
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: center;
+    gap: .8em 1.1em; margin-top: 1.5em;
   }
-  .tut-card-skip {
-    font-family: inherit; cursor: pointer;
-    color: #9b8a64; font-size: .82em; font-weight: 600;
-    padding: .4em .7em; border-radius: .5em;
-    background: transparent; border: 1px solid transparent;
-    -webkit-tap-highlight-color: transparent;
-  }
-  .tut-card-skip:hover { color: #caa96a; border-color: rgba(202,169,106,.4); }
-  .tut-cont-hint { margin-left: auto; font-size: .74em; color: #8a7a56; white-space: nowrap; }
-  /* 「続行 ▸」: 完了色(海緑)の真鍮ピル。押せることが一目で分かる光の脈動。
-     脈動は box-shadow を補間せず(毎フレーム再ペイントになる)、静的な影を持つ
-     ::after の opacity で明滅させる(.tbtn-wild.suggest と同じ規約。opacity は
-     コンポジタで完結する) */
+  /* 補助文はボタン段の上(「どこでも進める」と知ってからボタンを見る順) */
+  .tut-cont-hint { order: -1; flex-basis: 100%; text-align: center; font-size: .8em; color: #8a7a56; margin-bottom: -.1em; }
+  /* 「続行 ▸」: 難易度ボタンの選択中と同じ「暗い革 + 真鍮の縁 + 金文字」。
+     光の脈動は box-shadow を補間せず(毎フレーム再ペイントになる)、静的な影を持つ
+     ::after の opacity で明滅させる(.tbtn-wild.suggest と同じ規約) */
   .tut-cont {
-    position: relative;
-    font-family: inherit; font-size: .95em; font-weight: 800; color: #0f2e26;
-    padding: .6em 1.2em; border-radius: 999px; white-space: nowrap;
-    background: linear-gradient(180deg, #a8f5dc, #6fd9b8);
-    border: 1px solid rgba(255,255,255,.35);
-    box-shadow: 0 3px 12px rgba(0,0,0,.45);
+    position: relative; display: inline-block;
+    font-family: "Hiragino Kaku Gothic ProN", "Meiryo", sans-serif;
+    font-size: 1.15em; font-weight: 700; color: #ffdf8a;
+    padding: .55em 2.4em; border-radius: 12px; white-space: nowrap;
+    background: linear-gradient(180deg, #3a2c12, #241806);
+    border: 2.5px solid #f0c040;
+    box-shadow: 0 3px 10px rgba(0,0,0,.4), inset 0 1px 0 rgba(255,240,200,.1);
   }
   .tut-cont::after {
-    content: ""; position: absolute; inset: -3px; border-radius: 999px;
-    box-shadow: 0 0 22px rgba(142,240,208,.7);
-    animation: wildPulse 1.3s ease-in-out infinite;
+    content: ""; position: absolute; inset: -4px; border-radius: 14px;
+    box-shadow: 0 0 18px rgba(240,192,64,.7);
+    animation: wildPulse 1.4s ease-in-out infinite;
     pointer-events: none;
   }
-  @media (prefers-reduced-motion: reduce) { .tut-cont::after { animation: none; opacity: .6; } }
+  @media (prefers-reduced-motion: reduce) { .tut-cont::after { animation: none; opacity: .5; } }
+  /* スキップ: 進路ボタンの「非選択」側と同じ、沈んだ青灰の革に細い真鍮縁 */
+  .tut-card-skip {
+    font-family: "Hiragino Kaku Gothic ProN", "Meiryo", sans-serif; cursor: pointer;
+    color: #f7ecce; font-size: 1em; font-weight: 700;
+    padding: .55em 1.6em; border-radius: 12px; white-space: nowrap;
+    background: linear-gradient(180deg, rgba(20,28,40,.85), rgba(8,12,20,.85));
+    border: 1.2px solid rgba(202,169,106,.5);
+    box-shadow: 0 3px 10px rgba(0,0,0,.4);
+    -webkit-tap-highlight-color: transparent;
+  }
+  .tut-card-skip:hover { border-color: rgba(240,192,64,.8); color: #ffdf8a; }
   @media (pointer: coarse) and (max-height: 560px) {
-    .tut-card-body { line-height: 1.6; }
+    #tutCard { padding: 1em 1.4em 1.1em; top: 50%; }
+    .tut-card-body { line-height: 1.55; }
+    .tut-card-orn { margin: .3em auto .6em; }
+    .tut-card-foot { margin-top: .8em; gap: .35em; }
     .tut-cont-hint { display: none; }
   }
   /* スマホ横持ち: 画面が低いのでパネルを詰めてスクロール可能にする */

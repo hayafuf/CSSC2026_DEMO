@@ -850,6 +850,10 @@
     pg.beginLinearGradientFill([s.p1, s.p2], [0, 1], b.x, b.y, b.x, b.y + PANEL.h)
       .drawRoundRect(b.x, b.y, PANEL.w, PANEL.h, 18);
     pg.beginFill("rgba(255,240,200,0.05)").drawRoundRect(b.x + 3, b.y + 3, PANEL.w - 6, PANEL.h * 0.4, 14);
+    // 照りの塗りをここで終える。終えないと続く金縁・内枠の drawRoundRect にも同じ
+    // 5% の白が塗り重なり、パネル全体が指定色(p1→p2)より明るく出てしまう
+    // (チュートリアルのカード・設定パネルと色が合わなかった原因)
+    pg.endFill();
     pg.setStrokeStyle(3).beginStroke(s.edge).drawRoundRect(b.x, b.y, PANEL.w, PANEL.h, 18);
     pg.setStrokeStyle(1).beginStroke("rgba(255,246,210,0.35)").drawRoundRect(b.x + 5, b.y + 5, PANEL.w - 10, PANEL.h - 10, 14);
     // 四隅の飾り点
