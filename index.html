@@ -252,6 +252,173 @@
   }
   .howto-txt { font-size: 14.5px; line-height: 1.5; color: #e8dcc0; }
   .howto-ok { display: block; width: 100%; margin-top: 16px; padding: 12px; font-size: 16px; }
+  /* ---------- プレイ中チュートリアル(js/tutorial.js が制御) ----------
+     バナーは設定パネルと違い pointer-events: none — 下のキャンバスへの
+     クリック(=発射)を一切妨げない。押せるのはスキップボタンだけ。
+     z-index は #setBack(40)より下: 設定パネルを開けば上に被さる */
+  /* ---------- 実践中のコールアウト(海図に留めた札) ----------
+     盤面の中央寄り、玉の並んでいる段のすぐ下に置く(レールに重なるのは構わないが、
+     玉のある段には被せない)。札の縁の真鍮ピンから対象物へ「糸」(引き出し線。
+     キャンバスのガイド層が描く)が伸び、対象が動けば追う。
+     位置・大きさは tutorial.js layoutDom / placeCallout がキャンバスの実寸から
+     決め、中の寸法は em で追従する */
+  #tutBanner, #tutToast {
+    position: absolute; z-index: 30;
+    left: 0; top: 0; width: 0; height: 0;
+    pointer-events: none;
+    display: flex; flex-direction: column; justify-content: center; gap: .3em;
+    box-sizing: border-box; padding: .45em .9em .5em;
+    border-radius: .5em;
+    border: 1px solid rgba(240,192,64,.7);
+    background: linear-gradient(180deg, #2a1d0d 0%, #1a1108 100%);
+    box-shadow: 0 0 0 1px rgba(8,5,2,.9), inset 0 0 0 1px rgba(255,236,190,.07),
+                0 6px 18px rgba(0,0,0,.6);
+    color: #fff3d6; font-size: 13px; line-height: 1.3;
+    font-family: "Cinzel", "Hiragino Kaku Gothic ProN", "Meiryo", serif;
+    /* 移動は tutorial.js が transform で行う(left/top の補間はレイアウトを起こす) */
+    will-change: transform;
+    opacity: 1; transition: opacity .4s ease;
+  }
+  /* 縁の真鍮ピン(糸の起点)。対象が札より下なら下辺に付け替える(.pin-bottom) */
+  #tutBanner::before, #tutToast::before {
+    content: ""; position: absolute; left: 50%; top: -.45em;
+    width: .8em; height: .8em; margin-left: -.4em; border-radius: 50%;
+    background: radial-gradient(circle at 35% 30%, #fff1b8, #d9a93f 55%, #7a5a14);
+    box-shadow: 0 0 0 2px #120b05, 0 0 8px rgba(240,192,64,.6);
+  }
+  #tutBanner.pin-bottom::before, #tutToast.pin-bottom::before { top: auto; bottom: -.45em; }
+  #tutToast { border-color: rgba(142,240,208,.65); }
+  #tutToast::before {
+    background: radial-gradient(circle at 35% 30%, #e6fff6, #8ef0d0 55%, #2b6f5c);
+    box-shadow: 0 0 0 2px #071410, 0 0 8px rgba(142,240,208,.6);
+  }
+  #tutBanner.out { opacity: 0; }
+  /* hidden 属性を必ず勝たせる: 上の #tutBanner { display:flex } は ID セレクタで
+     UA の [hidden] { display:none } より強く、空のバナー枠がタイトル画面にも
+     出っぱなしになる。属性つきセレクタで明示的に打ち消す */
+  #tutBanner[hidden], #tutToast[hidden], #tutCard[hidden] { display: none !important; }
+  /* STEP n/N の真鍮ピル(設定パネルの seg-btn.active と同じ金) */
+  /* 札の中身: 上段 = 小さな見出し(STEP n / N)と控えめなスキップ、下段 = 命令文 */
+  .tut-eyebrow { display: flex; align-items: baseline; justify-content: space-between; gap: .8em; }
+  .tut-step {
+    font-family: "Cinzel", serif; font-size: .7em; font-weight: 700; letter-spacing: .22em;
+    color: #caa96a; white-space: nowrap;
+  }
+  .tut-step.done { color: #8ef0d0; }
+  .tut-order {
+    font-size: 1em; font-weight: 700; min-width: 0;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .tut-em { color: #ffd86a; font-weight: 700; }
+  .tut-skip {
+    pointer-events: auto;
+    font-family: inherit; cursor: pointer;
+    color: #8a7a56; font-size: .7em; font-weight: 700; letter-spacing: .06em; white-space: nowrap;
+    padding: 0; background: none; border: 0; border-bottom: 1px solid rgba(138,122,86,.5);
+    -webkit-tap-highlight-color: transparent;
+  }
+  .tut-skip:hover { color: #caa96a; border-bottom-color: #caa96a; }
+  #tutToast .tut-order { font-weight: 700; color: #d8f4e8; }
+  #tutToast.out { opacity: 0; }
+  /* 説明カード: ステップの冒頭でゲームを止めて(暗転はキャンバス側の帳)読ませる。
+     中央に置く(文字サイズだけ tutorial.js layoutDom がキャンバスの実寸に合わせ、
+     中の寸法は em で追従)。カード自体もクリック/タップで「続行」。
+     z-index は設定パネル(40)より下 */
+  #tutCard {
+    position: absolute; z-index: 39;
+    left: 50%; top: 54%; transform: translate(-50%, -50%);
+    width: min(600px, 90%); font-size: 15px;
+    box-sizing: border-box; padding: 0; overflow: hidden;
+    border-radius: 18px;
+    border: 2px solid #d9a93f;
+    /* 上辺にだけ蝋燭の照り返し、下へ向かって革の色に沈む。二重の真鍮縁は影で作る */
+    background:
+      radial-gradient(120% 70% at 50% 0%, rgba(255,232,170,.12), rgba(0,0,0,0) 60%),
+      linear-gradient(180deg, #2c1f10 0%, #1a1108 55%, #120b05 100%);
+    box-shadow: 0 0 0 5px rgba(18,11,4,.92), 0 0 0 6px rgba(217,169,63,.55),
+                0 18px 60px rgba(0,0,0,.7), 0 0 36px rgba(240,192,64,.18),
+                inset 0 1px 0 rgba(255,240,200,.14);
+    color: #f7ecce; cursor: pointer; text-align: left;
+    font-family: "Cinzel", "Hiragino Kaku Gothic ProN", "Meiryo", serif;
+    animation: tutCardIn .32s cubic-bezier(.2, .9, .3, 1.15);
+  }
+  @keyframes tutCardIn {
+    from { opacity: 0; transform: translate(-50%, -46%) scale(.96); }
+    to   { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  }
+  .tut-card-head {
+    display: flex; align-items: center; gap: .8em;
+    padding: .8em 1.1em .7em 1em;
+    border-bottom: 1px solid rgba(217,169,63,.35);
+    background: linear-gradient(180deg, rgba(240,192,64,.10), rgba(240,192,64,0));
+  }
+  .tut-card-icon {
+    flex: 0 0 2.9em; height: 2.9em; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1em; line-height: 1;
+    font-family: "Segoe UI Emoji", "Apple Color Emoji", sans-serif;
+    background: radial-gradient(circle at 50% 32%, rgba(84,60,22,.95), rgba(20,13,5,.95));
+    border: 2px solid rgba(217,169,63,.7);
+    box-shadow: 0 0 14px rgba(240,192,64,.25), inset 0 1px 0 rgba(255,240,200,.15);
+  }
+  .tut-card-icon span { font-size: 1.5em; }
+  .tut-card-title {
+    flex: 1; min-width: 0;
+    /* 見出しは HUD の難易度ボタン等と同じ「Cinzel(欧文)+ Meiryo 太字(和文)」 */
+    font-family: "Cinzel", "Hiragino Kaku Gothic ProN", "Meiryo", serif;
+    font-size: 1.3em; font-weight: 800; color: #f3cf5c;
+    letter-spacing: .06em; line-height: 1.25;
+    text-shadow: 0 2px 8px rgba(0,0,0,.7);
+  }
+  .tut-card-step {
+    flex: 0 0 auto;
+    font-family: "Cinzel", serif; font-size: .7em; font-weight: 700; letter-spacing: .15em;
+    color: #caa96a; white-space: nowrap;
+    padding: .35em .8em; border-radius: 999px;
+    border: 1px solid rgba(202,169,106,.45); background: rgba(0,0,0,.28);
+  }
+  .tut-card-body {
+    padding: .8em 1.3em .3em;
+    font-size: 1em; font-weight: 400; line-height: 1.8;
+    color: #efe4c8; white-space: pre-line;
+    text-shadow: 0 1px 2px rgba(0,0,0,.5);
+  }
+  .tut-card-foot {
+    display: flex; align-items: center; gap: .6em;
+    padding: .6em 1em .9em .8em;
+  }
+  .tut-card-skip {
+    font-family: inherit; cursor: pointer;
+    color: #9b8a64; font-size: .82em; font-weight: 600;
+    padding: .4em .7em; border-radius: .5em;
+    background: transparent; border: 1px solid transparent;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .tut-card-skip:hover { color: #caa96a; border-color: rgba(202,169,106,.4); }
+  .tut-cont-hint { margin-left: auto; font-size: .74em; color: #8a7a56; white-space: nowrap; }
+  /* 「続行 ▸」: 完了色(海緑)の真鍮ピル。押せることが一目で分かる光の脈動。
+     脈動は box-shadow を補間せず(毎フレーム再ペイントになる)、静的な影を持つ
+     ::after の opacity で明滅させる(.tbtn-wild.suggest と同じ規約。opacity は
+     コンポジタで完結する) */
+  .tut-cont {
+    position: relative;
+    font-family: inherit; font-size: .95em; font-weight: 800; color: #0f2e26;
+    padding: .6em 1.2em; border-radius: 999px; white-space: nowrap;
+    background: linear-gradient(180deg, #a8f5dc, #6fd9b8);
+    border: 1px solid rgba(255,255,255,.35);
+    box-shadow: 0 3px 12px rgba(0,0,0,.45);
+  }
+  .tut-cont::after {
+    content: ""; position: absolute; inset: -3px; border-radius: 999px;
+    box-shadow: 0 0 22px rgba(142,240,208,.7);
+    animation: wildPulse 1.3s ease-in-out infinite;
+    pointer-events: none;
+  }
+  @media (prefers-reduced-motion: reduce) { .tut-cont::after { animation: none; opacity: .6; } }
+  @media (pointer: coarse) and (max-height: 560px) {
+    .tut-card-body { line-height: 1.6; }
+    .tut-cont-hint { display: none; }
+  }
   /* スマホ横持ち: 画面が低いのでパネルを詰めてスクロール可能にする */
   @media (pointer: coarse) and (max-height: 560px) {
     #setPanel, #howtoPanel { padding: 12px 18px 14px; }
@@ -368,10 +535,11 @@
     }
     .tbtn-parry.cd { opacity: .45; }
     .tbtn-parry.active { border-color: rgba(142,240,208,.9); color: #8ef0d0; }
-    .tbtn-wild.suggest { border-color: rgba(142,240,208,.9); }
+    .tbtn-wild.suggest, .tbtn.tut-glow { border-color: rgba(142,240,208,.9); }
     /* 点滅は box-shadow を補間せず(毎フレーム再ペイントになる)、静的な影を
-       持つ ::after の opacity で明滅させる。opacity はコンポジタで完結する */
-    .tbtn-wild.suggest::after {
+       持つ ::after の opacity で明滅させる。opacity はコンポジタで完結する
+       (.tut-glow はチュートリアルの「このボタンを押して」の誘導。同じ仕組みを共用) */
+    .tbtn-wild.suggest::after, .tbtn.tut-glow::after {
       content: ""; position: absolute; inset: -6px; border-radius: 50%;
       box-shadow: 0 0 22px rgba(142,240,208,.85);
       animation: wildPulse .8s ease-in-out infinite;
@@ -424,6 +592,11 @@
     <div id="setBack" hidden></div>
     <div id="setPanel" hidden></div>
     <div id="howtoPanel" hidden></div>
+    <!-- プレイ中チュートリアル(中身は js/tutorial.js が言語に応じて組み立てる)。
+         バナー=レベル1冒頭のステップ制、トースト=新要素の初登場時の一言ヒント -->
+    <div id="tutBanner" hidden></div>
+    <div id="tutToast" hidden></div>
+    <div id="tutCard" hidden></div>
     <!-- 携帯用の操作ボタン(タッチ端末のみ CSS で表示)。
          DOM ボタンなので「◀ を押しながら FIRE」のような複数指の同時操作が自然に効く -->
     <div id="touchUI" aria-hidden="true">
@@ -493,6 +666,9 @@
   <script src="js/pause.js"></script>
   <!-- 設定パネル・消音ボタン・操作説明(pause の後: PP.pauseCtl を使う) -->
   <script src="js/settings.js"></script>
+  <!-- プレイ中チュートリアル(settings の後: 再実行ボタンと役割分担するため)。
+       ゲーム側からは全て if (PP.tut) ガード付きで呼ばれる -->
+  <script src="js/tutorial.js"></script>
   <!-- コース自作 API とビジュアルエディタ(main の後: PP.stage / PP.playCourse を使う)。
        ゲーム本体の起動には不要な約 120KB なので defer で後回しにする
        (defer どうしは記述順に実行されるので course-api → editor → my-course の
