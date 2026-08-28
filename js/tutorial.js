@@ -503,10 +503,15 @@
   var placeT = 0;
   function placeCallout(force) {
     var st = running ? STEPS[stepIdx] : null;
-    // 縦: 盤面の上下中央。玉がそこまで下がっていれば一番下の玉の少し下へ。
-    // 大砲の上には必ず収める
-    var y = Math.max(DOCK_MID_Y, lowestBallY() + 64);
-    y = Math.min(y, PP.CANNON_Y - 84 - DOCK_H);
+    // 縦: 盤面の上下中央。チュートリアル中は玉がそこまで下がっていれば一番下の玉の
+    // 少し下へ(大砲の上には必ず収める)。チュートリアル外のヒント(通常プレイ中)は
+    // 玉が盤面全体にあるので「玉の下」を追うと最下部へ押し出され、携帯では ◀▶ や
+    // 大砲と重なってしまう。ヒントは札と同じ左・上下中央に固定する
+    var y = DOCK_MID_Y;
+    if (running) {
+      y = Math.max(DOCK_MID_Y, lowestBallY() + 64);
+      y = Math.min(y, PP.CANNON_Y - 84 - DOCK_H);
+    }
     // 横: 左。落下実演の間だけ、落下線(大砲の x の周辺)に重なるなら右へ逃がす
     var x = DOCK_X;
     if (st && (st.id === "itemGood" || st.id === "itemBad")) {
