@@ -124,6 +124,10 @@
   function spawnBalls(lane) {
     var balls = lane.balls;
     var spawned = false;
+    // チュートリアルの凍結中は補給も止める。前進だけ止めて補給を続けると、
+    // 末尾の玉を消した瞬間に「末尾の後ろへ置く」補給が同じ位置へ即座に補充し、
+    // 虹玉で 12 個消しても玉数が変わらない=消えないように見える
+    if (PP.tut && PP.tut.chainHeld()) return;
     while (lane.pending > 0 &&
            (balls.length === 0 || lane.waveFresh || balls[balls.length - 1].d >= D)) {
       var color = PP.ball.spawnColor(lane);
