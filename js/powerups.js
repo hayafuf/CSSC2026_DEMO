@@ -29,6 +29,10 @@
 
   function maybeDrop(x, y) {
     var g = PP.game;
+    // チュートリアル中はランダムドロップを丸ごと止める: 罠が練習の邪魔になる
+    // うえ、特殊弾💣を拾うと「交換」の練習が特殊弾トグルに化けて完了できなく
+    // なる。罠の実物は「障害物」ステップが dropDown を直接呼んで1つだけ落とす
+    if (PP.tut && PP.tut.suppressDrops()) return;
     // パワーダウン(取ってはいけない物)は独立の別ロール。
     // コンボや dropMult の上乗せは一切効かせない: 上手いプレイの報酬が罠では
     // 本末転倒だし、コース5の上乗せで罠だらけになるのも防ぐ。ボス戦にも出さない。
@@ -96,6 +100,21 @@
     var v = popVel();
     PP.fx.burst(x, y, "#ffe08a", 8, 1.0);   // 登場の「ポンッ」
     items.push({ x: x, y: y, vx: v.vx, vy: v.vy, kind: kind, def: def, color: color, view: view });
+    if (PP.tut) PP.tut.hint("item");   // 初アイテム: 「大砲でキャッチ」を教える
+  }
+
+  // コイン🪙を1枚だけ落とす(チュートリアルの「良いアイテム」実演用。
+  // 確率も罠も挟まない。落下・キャッチの仕組みは通常のアイテムと共通)
+  function dropCoin(x, y) {
+    var def = { icon: "🪙" };
+    var view = makeItemView(def.icon, null);
+    view.x = x; view.y = y;
+    PP.layers.item.addChild(view);
+    var v = popVel();
+    PP.fx.burst(x, y, "#ffe08a", 8, 1.0);
+    var it = { x: x, y: y, vx: v.vx, vy: v.vy, kind: "coin", def: def, color: null, view: view };
+    items.push(it);
+    return it;
   }
 
   // パワーダウンアイテムの落下: 暗い紫の見た目で「避けるべき物」と分かる。
@@ -108,7 +127,10 @@
     PP.layers.item.addChild(view);
     var v = popVel();
     PP.fx.burst(x, y, "#b040ff", 8, 1.0);   // 紫の飛沫=登場の時点で「罠」と分かる
-    items.push({ x: x, y: y, vx: v.vx, vy: v.vy, kind: "down", def: def, color: null, view: view });
+    var it = { x: x, y: y, vx: v.vx, vy: v.vy, kind: "down", def: def, color: null, view: view };
+    items.push(it);
+    if (PP.tut) PP.tut.hint("down");   // 初の罠: 「避けろ」を教える
+    return it;   // チュートリアルの実演(避ける練習)が消えたかを見張るための参照
   }
 
   // 骸骨玉の撃破報酬: 確率もコインも罠も挟まず、パワーアップを確定で1個落とす
@@ -126,6 +148,7 @@
     var v = popVel();
     PP.fx.burst(x, y, "#ffe08a", 10, 1.2);   // 確定報酬は少し豪華にはじける
     items.push({ x: x, y: y, vx: v.vx, vy: v.vy, kind: "power", def: def, color: color, view: view });
+    if (PP.tut) PP.tut.hint("item");   // これが最初のアイテムならキャッチを教える
   }
 
   // 盤面(全レーン)に今ある色から1色選ぶ。玉が無ければ使用中の色数から選ぶ
@@ -151,6 +174,7 @@
     var v = popVel();
     PP.fx.burst(x, y, "#ffe08a", 12, 1.4);
     items.push({ x: x, y: y, vx: v.vx, vy: v.vy - 40, kind: "treasure", def: def, view: view });
+    if (PP.tut) PP.tut.hint("treasure");   // 初💎: 「宝玉の力」の存在を教える
   }
 
   // 重み付き抽選: 各要素の w(相対値)に比例した確率で1つ選ぶ。
@@ -309,6 +333,7 @@
     vibrate(isBig ? [140, 60, 220] : 60);
     if (it.kind === "coin") {
       // 【課題5】コインをキャッチ。枚数を増やして、ライフ回復の判定へ
+      if (PP.tut) PP.tut.hint("coin");   // 初コイン: ライフ回復の仕組みを教える
       PP.game.coins++;
       // 必要枚数は【強化】「換金術」で減ることがあるので PP.coinsPerLife() を読む
       PP.fx.floatText("🪙 " + PP.game.coins + " / " + PP.coinsPerLife(), it.x, it.y - 22, "#ffe08a", 18);
@@ -374,6 +399,7 @@
     }
     if (def.id === "bomb") PP.cannon.loadSpecial("bomb");
     else if (def.id === "missile") PP.cannon.loadSpecial("missile");
+    if (PP.tut) PP.tut.hint("special");   // 初特殊弾: 持ち替え操作を教える
   }
 
   // 玉の参照で持った run 群を後ろから消す(指定レーン内)。
@@ -489,12 +515,16 @@
   PP.powerups = {
     maybeDrop: maybeDrop,
     dropPower: dropPower,
+    dropDown: dropDown,      // チュートリアルの「デバフアイテム」実演が1つだけ落とす
+    dropCoin: dropCoin,      // チュートリアルの「良いアイテム」実演が1枚だけ落とす
     dropTreasure: dropTreasure,
     collectTreasures: collectTreasures,
     colorBomb: colorBomb,
     update: update,
     clear: clear,
     // 空中に残っているアイテム数(クリア時、走査開始を待つ判定に使う)
-    count: function () { return items.length; }
+    count: function () { return items.length; },
+    // 指定のアイテムがまだ空中にあるか(チュートリアルが実演の消滅を見張る)
+    has: function (it) { return items.indexOf(it) >= 0; }
   };
 })();

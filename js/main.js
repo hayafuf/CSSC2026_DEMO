@@ -187,6 +187,8 @@
 
     PP.hud.update();
     if (doIntro) startIntro();
+    // イントロ無し(ライフ消費リトライ等)の開始はここが finishIntro の代役
+    else if (PP.tut) PP.tut.maybeStart();
   }
 
   // 生存ゲージが空になった瞬間。補給を打ち切り、残りの掃討に入る
@@ -438,6 +440,12 @@
     PP.audio.introGo();   // 着水のドン
     PP.audio.newWave();   // イントロ中に抑えていた出航の波音をここで1回
     PP.hud.update();
+    // 初プレイならここからチュートリアル(出すかどうかは tutorial.js が判断)。
+    // ボス海域なら倒し方の一言ヒント(初回のみ。クリア画面の前口上の補完)
+    if (PP.tut) {
+      PP.tut.maybeStart();
+      if (g.bossMode) PP.tut.hint("boss");
+    }
   }
 
   function startClearSweep() {
@@ -925,8 +933,10 @@
       }
 
       // 生存ゲージ(ロールアウト完了後から減る)。空になったら掃討フェーズへ。
-      // ボス戦にはゲージが無い(勝利条件はボスの HP)ので減らさない
-      if (g.state === "playing" && !g.bossMode && g.rolloutDone && !g.finishing) {
+      // ボス戦にはゲージが無い(勝利条件はボスの HP)ので減らさない。
+      // チュートリアル中も凍結(練習している間に本番の時間が過ぎたら理不尽)
+      if (g.state === "playing" && !g.bossMode && g.rolloutDone && !g.finishing &&
+          !(PP.tut && PP.tut.active())) {
         g.timeLeft -= dt;
         if (g.timeLeft <= 0) {
           g.timeLeft = 0;
@@ -985,6 +995,8 @@
     PP.cannon.updateHurt(dt);    // 被弾後の無敵の点滅(非プレイ時は自動で解除される)
     PP.cannon.updateAim(dt);   // dt は望遠鏡の着弾走査(firstHitY)の間引きに使う
     PP.cannon.updateGuide(dt);   // 砲の真上の現在位置ガイド(格納中のカーソル代役)
+    // チュートリアルの進行とトースト(DOM 描画なので下の間引きの影響を受けない)
+    if (PP.tut) PP.tut.update(dt);
 
     renderChains();
 

@@ -169,6 +169,7 @@
       buildSettings();   // パネル自身の文言も新しい言語で組み立て直す
     });
     document.getElementById("setHowtoBtn").addEventListener("click", openHowto);
+    // チュートリアルの ON/OFF はタイトル画面の 🎓 ボタン(hud.js / tutorial.js)
     document.getElementById("setCloseBtn").addEventListener("click", closeAll);
   }
 
@@ -241,12 +242,8 @@
     else openSettings();
   });
 
-  // ---------- 初回起動の操作説明(タッチ端末のみ) ----------
-  // 横持ちのスマホではページ下の説明文(p.hint)が CSS で隠れるため、
-  // 初回だけ操作説明を自動で出す。既読は保存し、次回からは出さない
-  if (PP.TOUCH && PP.store && !PP.store.get("tutorialSeen", false)) {
-    openHowto();
-  }
+  // 初回の操作案内はプレイ中チュートリアル(tutorial.js)が引き継いだ。
+  // この静的な一覧は ⚙ →「❔ 操作説明」からいつでも参照できるリファレンスとして残す
 
   syncMute();   // 前回保存されたミュート状態をボタンの絵に反映する
 

@@ -673,6 +673,7 @@
       g.nextColor = PP.ball.pickColor(g.currentColor);
     }
     refreshBalls();
+    if (PP.tut) PP.tut.notify("fire");   // チュートリアル「発射」の完了通知
   }
 
   // 「今の玉」と「次の玉」を交換。特殊弾を持っている間は「砲身 ⇔ 左脇スロット」の
@@ -688,6 +689,9 @@
     g.nextColor = t;
     refreshBalls();
     PP.audio.swap();
+    // チュートリアル「交換」の完了通知(特殊弾トグルの分岐は上で return 済み =
+    // 教えたいのは色玉どうしの交換なので、ここでだけ知らせる)
+    if (PP.tut) PP.tut.notify("swap");
   }
 
   // 装填色の見張り(原作 Zuma 準拠の手詰まり防止)。
@@ -817,14 +821,23 @@
   // 真上に撃ったとき最初に当たるチェーン玉の高さ(なければ HUD 下端 66)。
   // 全レーンを対象にし、トンネル内の玉(撃てない)は無視する。
   function firstHitY(x) {
-    var best = 66;
+    var hit = firstHitBall(x);
+    return hit ? hit.y : 66;
+  }
+
+  // 真上に撃ったとき最初に当たるチェーン玉そのもの { ball, lane, x, y }(なければ null)。
+  // 蛇行するレールでは「的の真下」にいても手前の段の玉に先に当たるので、
+  // チュートリアル(tutorial.js)は「いい位置」の判定にこれを使う
+  function firstHitBall(x) {
+    var best = null, bestY = 66;
     PP.game.eachLaneBall(function (b, lane) {
       if (b.treasure || b.d < PP.R) return;
       if (lane.rail.tunnelAt(b.d)) return;
       var p = lane.rail.posAtInto(b.d, _pos);
       if (Math.abs(p.x - x) <= PP.D * 0.9 &&
-          p.y < PP.cannon.y - MUZZLE_LEN && p.y > best) {
-        best = p.y;
+          p.y < PP.cannon.y - MUZZLE_LEN && p.y > bestY) {
+        bestY = p.y;
+        best = { ball: b, lane: lane, x: p.x, y: p.y };
       }
     });
     return best;
@@ -1039,6 +1052,7 @@
     refreshBalls: refreshBalls,
     syncColors: syncColors,
     updateAim: updateAim,
+    firstHitBall: firstHitBall, // 真上に撃って最初に当たる玉(tutorial.js の照準判定)
     updateGuide: updateGuide,   // 現在位置ガイド(main.js の tick が毎フレーム呼ぶ)
     updateShots: updateShots,
     setHurt: setHurt,        // 被弾側(boss.js / skull.js)が無敵秒数を渡す

@@ -247,6 +247,7 @@
     g.state = "choosing";
     buildChoiceUI(cards);
     PP.audio.treasure();
+    if (PP.tut) PP.tut.hint("choice");   // 初カード3択: 選び方を教える
   }
 
   // max 到達を除き、w の重み付き非復元抽選で3枚(候補が少なければその枚数)
@@ -286,6 +287,8 @@
       recalcWildMax();
       g.wildCharges = g.wildMax;
     }
+    // パリィの解放(hud.js が 🛡 ボタンを出す瞬間)に合わせて構え方を教える
+    if (id === "parry" && g.upgrades[id] === 1 && PP.tut) PP.tut.hint("parry");
     recalcPressure();   // 強化を取るほど海も牙を剥く(chain.js が読む倍率を更新)
     closeChoiceUI();
     g.state = "playing";
@@ -752,6 +755,8 @@
       rescue.suggest = true;
       PP.fx.floatText(PP.i18n.t(PP.TOUCH ? "ug.ui.rescueWildTouch" : "ug.ui.rescueWildKey"),
         PP.W / 2, 158, "#8ef0d0", 17);
+      // 初回はトーストでも補強(floatText は 1.5 秒で消えて読み逃しやすい)
+      if (PP.tut) PP.tut.hint("wild");
     }
     PP.audio.treasure();
   }
@@ -794,6 +799,7 @@
     PP.cannon.refreshBalls(); // 装填玉の見た目を虹へ(cannon.js が wildArmed を見る)
     PP.audio.specialLoad();
     PP.fx.floatText(PP.i18n.t("ug.ui.wildArmed"), PP.cannon.x, PP.cannon.y - 72, "#8ef0d0", 16);
+    if (PP.tut) PP.tut.notify("wild");   // チュートリアル「虹玉を装填」の完了通知
   }
 
   // 虹玉の最大ストックを組み直す。加算元が2つ(カード「七海の虹玉」の段数と、

@@ -104,7 +104,9 @@
   function updateWaveTimer(lane, dt) {
     var g = PP.game;
     if (g.state !== "playing" || g.finishing) return;
-    if (lane.waveTimer > 0) lane.waveTimer -= dt;
+    // チュートリアルの凍結中は保険タイマーも止める(1〜2分の練習で maxWait を
+    // 使い切ると、終わった瞬間に次の波が来てしまう)
+    if (lane.waveTimer > 0 && !(PP.tut && PP.tut.chainHeld())) lane.waveTimer -= dt;
     if (lane.pending > 0 || lane.needTreasure) return;
     var balls = lane.balls;
     var clear = balls.length === 0 || balls[balls.length - 1].d >= D;
@@ -145,16 +147,15 @@
         ((PP.game.builtCourse && PP.game.builtCourse.skullMult) || 1);
       // 強化圧: 強化を取るほど骸骨玉も湧きやすくなる(PP.UPGRADE_PRESSURE)
       if (PP.upgrades && PP.upgrades.skullPressure) skullChance *= PP.upgrades.skullPressure();
+      // チュートリアル中は湧かせない(「障害物」ステップが skullify で1体だけ目覚めさせる)
       if (!PP.game.bossMode && PP.skull && PP.SKULL &&
+          !(PP.tut && PP.tut.suppressSkulls()) &&
           Math.random() < skullChance &&
           PP.skull.countActive() < PP.SKULL.maxActive) {
-        var nb = balls[balls.length - 1];
-        nb.skull = true;
         // 初弾の猶予にジッターを足す: 同じ波の骸骨は数百ms差で連なって湧くので、
         // 固定値だと初弾が構造的に同期して「全員一斉発射」になる(skull.js 参照)
-        nb.skullCd = PP.SKULL.firstDelay + Math.random() * PP.SKULL.firstDelayJitter;
-        nb.skullFx = PP.ball.makeSkullOverlay();
-        view.addChild(nb.skullFx);
+        skullify(balls[balls.length - 1],
+          PP.SKULL.firstDelay + Math.random() * PP.SKULL.firstDelayJitter);
       }
       // ballsDirty は立てない: 末尾への追加は既存の並びを乱さず、描画側の
       // 差分更新が正しい位置へ挿し込む(全積み直しを誘発しない)
@@ -414,8 +415,9 @@
     var balls = lane.balls;
     var i;
 
-    if (eff.stop > 0) {
-      // 錨: 何も動かない
+    if (eff.stop > 0 || (PP.tut && PP.tut.chainHeld())) {
+      // 錨(またはチュートリアルの練習中): 何も動かない。前進だけを止めるので、
+      // 消した後の詰め・スライド・追撃マッチは通常どおり動く(⚓と同一挙動)
     } else if (eff.reverse > 0) {
       // 逆風: 「進行方向の速度」から風速 reverseV(フレーム先頭で更新済み)を
       // 引いた"正味の速度"で後退させる。正味が正=まだ流れが風に勝っている間は
@@ -807,6 +809,7 @@
     var g = PP.game;
     var balls = lane.balls;
     var n = j - i + 1;
+    if (PP.tut) PP.tut.notify("match");   // チュートリアル「3個消し」の完了通知
     g.combo = chained ? (g.comboTimer > 0 ? g.combo + 1 : 1) : 1;
     // 【強化】「コンボの余韻」で窓が延びる(未取得なら val は 1 = 従来どおり)
     g.comboTimer = PP.COMBO_WINDOW * PP.upgrades.val("combo");
@@ -1148,9 +1151,27 @@
     g.colorsDirty = true;   // 盤面の色構成が変わった → 装填色の見張りを回す
   }
 
+  // 普通の色玉に骸骨マークを重ねて骸骨玉にする(色はそのままなのでマッチも
+  // 磁石も通常どおり効く。弾幕の管理は skull.js)。cd = 初弾までの猶予(秒)
+  function skullify(b, cd) {
+    if (b.skull) return;
+    b.skull = true;
+    b.skullCd = cd;
+    b.skullFx = PP.ball.makeSkullOverlay();
+    b.view.addChild(b.skullFx);
+  }
+
+  // 全レーンの次波の保険タイマーを満タンに戻す(チュートリアル明けの猶予。
+  // 進行度トリガ(WAVE_NEXT.progress)はそのまま=盤面の押され具合には従う)
+  function resetWaveTimers() {
+    PP.game.eachLane(function (lane) { lane.waveTimer = waveInterval(); });
+  }
+
   PP.chain = {
     update: update,
     resetWind: resetWind,
+    resetWaveTimers: resetWaveTimers,   // チュートリアル終了時(tutorial.js)
+    skullify: skullify,   // チュートリアルの「障害物」実演が既存の玉を1つ骸骨化する
     startWave: startWave,
     scrambleColors: scrambleColors,
     clearTreasures: clearTreasures,

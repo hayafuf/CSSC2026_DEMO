@@ -439,6 +439,9 @@
     }
   }
   function updateSkullBalls(dt) {
+    // チュートリアル中は「障害物」ステップの実演のとき以外、骸骨は沈黙する
+    // (クールダウンも凍結。練習中に妖弾が飛んできては説明が読めない)
+    if (PP.tut && PP.tut.suppressSkulls()) { stepAttacking = 0; return; }
     // 骸骨玉が1体もいなければ何もすることがない。eachLaneBall の2周
     // (150玉×2=毎フレーム300回のコールバック呼び出し)を素の二重ループ
     // 1周の走査だけで打ち切る。骸骨がいるときだけ従来の処理に入る
@@ -701,6 +704,7 @@
     update: update,
     clear: clear,
     countActive: countActive,
+    bulletCount: function () { return bullets.length; },   // チュートリアルが実演の弾幕の終わりを見張る
     splatInk: splatInk,
     debugForceFire: debugForceFire
   };

@@ -35,6 +35,9 @@
       // 「クリックで再開」なので、カーソルが見えないと操作できない
       if (PP.input && PP.input.releaseLock) PP.input.releaseLock();
       PP.fx.resetShake();               // 揺れの途中で止まると画面がズレたままになる
+      // チュートリアルの帳・カードはポーズ画面より手前にあるので一時退避する
+      // (showPause の前に消しておけば、停止直後の1フレーム描画にも写らない)
+      if (PP.tut) PP.tut.setShelved(true);
       PP.hud.showPause(ctl.reason);
       PP.audio.pauseAll();
       createjs.Ticker.paused = true;
@@ -46,6 +49,7 @@
       ctl.active = false;
       ctl.reason = null;
       PP.hud.hidePause();
+      if (PP.tut) PP.tut.setShelved(false);   // 退避していたチュートリアル UI を戻す
       PP.audio.resumeAll();
     },
 

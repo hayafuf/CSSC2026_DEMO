@@ -129,7 +129,8 @@
   }
 
   function canPlay() {
-    return PP.game.state === "playing" && !(PP.pauseCtl && PP.pauseCtl.active);
+    return PP.game.state === "playing" && !(PP.pauseCtl && PP.pauseCtl.active) &&
+           !(PP.tut && PP.tut.modal());   // チュートリアルの説明カード中は盤面操作を止める
   }
 
   // 全ステージ制覇(とタイトルからの初回出航)はラン単位の状態を畳んで再出航する。
@@ -182,6 +183,8 @@
     // ブラウザメニューを止めるだけの役目に絞ってある
     if (event.nativeEvent && event.nativeEvent.button === 2) {
       if (PP.pauseCtl && PP.pauseCtl.active) return;   // ポーズ中は解除もせず素通り
+      // チュートリアルの説明カード中は右クリックも「続行」に読み替える
+      if (PP.tut && PP.tut.modal()) { PP.tut.tapAdvance(); return; }
       PP.cannon.swap();
       return;
     }
@@ -195,6 +198,15 @@
     // 言語ボタン(🌐)も同様に先取り(タイトル / 全制覇画面だけ当たる)
     if (PP.hud.hitLang(event.stageX, event.stageY)) {
       PP.i18n.set(PP.i18n.lang === "ja" ? "en" : "ja");
+      return;
+    }
+    // 🎓 チュートリアル ON/OFF(タイトル / 全制覇画面だけ当たる)
+    if (PP.hud.hitTut && PP.hud.hitTut(event.stageX, event.stageY)) {
+      if (PP.tut) {
+        PP.tut.setEnabled(!PP.tut.enabled());
+        PP.audio.beep(660, 0.05, "sine", 0.045);
+      }
+      PP.hud.refreshTutButton();
       return;
     }
     var difficulty = PP.hud.hitDifficulty(event.stageX, event.stageY);
@@ -223,6 +235,12 @@
     } else if (game.state === "playing") {
       if (PP.hud.hitPauseBtn(event.stageX, event.stageY)) {
         PP.pauseCtl.pause("manual");
+        return;
+      }
+      // チュートリアルの説明カード中: このクリック/タップは「続行」に使い、
+      // 盤面操作(発射・交換・虹玉など)へは渡さない(誤発射防止)
+      if (PP.tut && PP.tut.modal()) {
+        PP.tut.tapAdvance();
         return;
       }
       if (PP.hud.hitSwapBtn(event.stageX, event.stageY)) {
@@ -362,6 +380,27 @@
       if (PP.settings && PP.settings.isOpen()) {
         if (event.code === "Escape") PP.settings.closeTop();
         return;
+      }
+      // チュートリアル中のキー扱い(ポーズ中は従来どおり素通し):
+      //  - Esc = スキップ。Pointer Lock 中はカーソルが無くボタンを押せないため
+      //    キーの逃げ道が必須(Esc はまずロック解除に食われることがある。
+      //    その場合は2度押しで効く)
+      //  - 説明カード表示中は、P(ポーズ)以外のどのキーも「続行」として扱い、
+      //    ゲームへのキー(Space の交換など)は渡さない
+      if (PP.tut && PP.tut.active() && !(PP.pauseCtl && PP.pauseCtl.active)) {
+        if (event.code === "Escape") {
+          PP.tut.skip();
+          return;
+        }
+        if (PP.tut.modal()) {
+          if (event.code === "KeyP") {
+            if (PP.pauseCtl) PP.pauseCtl.toggle();
+            return;
+          }
+          if (event.code === "Space") event.preventDefault();
+          PP.tut.tapAdvance();
+          return;
+        }
       }
       PP.audio.unlock();
       // キー入力も確実なユーザー操作なのでロックを張り直すチャンス。

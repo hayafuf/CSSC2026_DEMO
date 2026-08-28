@@ -30,6 +30,9 @@
   // relabel の対象を「その瞬間に見えているもの」だけに絞る
   var langCont = null, langShape = null, langText = null, langRect = null;
   var LANG_BTN = { w: 130, h: 34 };
+  // 🎓 チュートリアル ON/OFF(タイトル / 全制覇画面。🌐 と対でパネルの左肩)
+  var tutCont = null, tutShape = null, tutText = null, tutRect = null;
+  var TUT_BTN = { w: 214, h: 34 };
   // 言語切り替え時に文字を貼り替えるビルド済みテキストの控え
   var diffCap = null, diffNameTexts = [], overCap = null, overLabels = [];
   // ポーズボタン(⏸)。プレイ中だけバーの下・右端に出す。クリック判定は
@@ -575,6 +578,7 @@
     buildDiffButtons(O);   // 難易度ボタン(【課題1】)はオーバーレイと一緒に表示される
     buildOverButtons(O);   // ゲームオーバーの進路ボタン(over 画面だけ visible)
     buildLangButton(O);    // 言語切り替えボタン(タイトル / 全制覇画面だけ visible)
+    buildTutButton(O);     // チュートリアル ON/OFF(同上。状態は tutorial.js が持つ)
     // 言語が切り替わったら、ビルド済みラベルの文字を貼り替える
     PP.i18n.onChange(relabel);
     O.visible = false;
@@ -699,6 +703,55 @@
     return x >= r.x - p && x <= r.x + r.w + p && y >= r.y - p && y <= r.y + r.h + p;
   }
 
+  // ---------- チュートリアル ON/OFF ボタン(🎓) ----------
+  // 🌐 と対にしてパネルの左肩に置く。ON なら次の出航でチュートリアルが始まる。
+  // 状態の保存と判定は tutorial.js(PP.tut.enabled / setEnabled)、クリックは input.js。
+  // 見た目は難易度ボタンと同じ文法: ON = 金縁で光る / OFF = 沈んだ青灰
+  function buildTutButton(O) {
+    tutCont = new createjs.Container();
+    var b = panelBox();
+    var x = b.x;
+    var y = b.y - TUT_BTN.h - 14;
+    tutRect = { x: x, y: y, w: TUT_BTN.w, h: TUT_BTN.h };
+    tutShape = new createjs.Shape();
+    tutShape.cache(x - 3, y - 3, TUT_BTN.w + 6, TUT_BTN.h + 6);   // 形は refresh が描く
+    tutText = new createjs.Text(PP.i18n.t("hud.tutOff"), 'bold 15px "Meiryo", sans-serif', C_VAL);
+    tutText.textAlign = "center"; tutText.textBaseline = "middle";
+    tutText.x = x + TUT_BTN.w / 2; tutText.y = y + TUT_BTN.h / 2 + 1;
+    cacheHudText(tutText, TUT_BTN.w, 20, 4);
+    tutCont.addChild(tutShape, tutText);
+    tutCont.visible = false;
+    O.addChild(tutCont);
+    refreshTutButton();
+  }
+
+  // 現在の ON/OFF に合わせて枠と文言を描き直す(表示時・切替時・言語切替時)
+  var tutDrawnOn = null;   // 直近に描いた状態(同じなら焼き直さない。起動時の進捗表示で連呼される)
+  function refreshTutButton() {
+    if (!tutCont) return;
+    var on = !!(PP.tut && PP.tut.enabled && PP.tut.enabled());
+    if (on === tutDrawnOn && tutText.text === PP.i18n.t(on ? "hud.tutOn" : "hud.tutOff")) return;
+    tutDrawnOn = on;
+    var r = tutRect, g = tutShape.graphics;
+    g.clear();
+    g.beginLinearGradientFill(
+      on ? ["#3a2c12", "#241806"] : ["rgba(20,28,40,0.85)", "rgba(8,12,20,0.85)"],
+      [0, 1], r.x, r.y, r.x, r.y + r.h)
+      .drawRoundRect(r.x, r.y, r.w, r.h, 10)
+      .setStrokeStyle(on ? 2.5 : 1.2)
+      .beginStroke(on ? "#f0c040" : "rgba(202,169,106,0.5)")
+      .drawRoundRect(r.x, r.y, r.w, r.h, 10);
+    tutShape.updateCache();
+    setCachedText(tutText, PP.i18n.t(on ? "hud.tutOn" : "hud.tutOff"), on ? "#ffdf8a" : C_VAL);
+  }
+
+  // (x, y) がチュートリアルボタンの上か(出ていない画面では常に false)
+  function hitTut(x, y) {
+    if (!PP.layers.overlay.visible || !tutCont || !tutCont.visible) return false;
+    var r = tutRect, p = TOUCH_PAD;
+    return x >= r.x - p && x <= r.x + r.w + p && y >= r.y - p && y <= r.y + r.h + p;
+  }
+
   // 言語切り替え時: ビルド時に文字列を焼き込んだラベルを貼り替える。
   // 毎フレーム更新される表示(update / rebuildEffectChips / showOverlay)は
   // 表示のたびに t() を引くので、ここで面倒を見るのは「一度だけ作った文字」のみ
@@ -711,6 +764,7 @@
     if (overCap) setCachedText(overCap, t("hud.overCaption"));
     overLabels.forEach(function (tx) { setCachedText(tx, t(tx.langKey)); });
     if (langText) setCachedText(langText, t("hud.langBtn"));
+    refreshTutButton();
   }
 
   // (x, y) が進路ボタンの上なら "continue" / "title"(外れ・非表示中は null)
@@ -773,6 +827,8 @@
     if (diffCont) diffCont.visible = canPickDifficulty();
     // 言語ボタンも「新しいランが始まる画面」だけ(難易度と同じ条件)
     if (langCont) langCont.visible = canPickDifficulty();
+    // チュートリアル ON/OFF も同じ画面だけ。完走/スキップで OFF に変わっているので描き直す
+    if (tutCont) { tutCont.visible = canPickDifficulty(); refreshTutButton(); }
     // 進路ボタン(再挑戦 / タイトルへ)はゲームオーバー画面だけ
     if (overCont) overCont.visible = PP.game.state === "over";
 
@@ -904,6 +960,8 @@
     hitWildBtn: hitWildBtn,   // 【新】🌈 虹玉ボタン(input.js が発射より先に判定)
     hitDifficulty: hitDifficulty, setDifficulty: setDifficulty,
     hitOverChoice: hitOverChoice,
-    hitLang: hitLang   // 言語切り替えボタン(input.js が難易度と同様に判定)
+    hitLang: hitLang,   // 言語切り替えボタン(input.js が難易度と同様に判定)
+    hitTut: hitTut,     // チュートリアル ON/OFF ボタン(同上)
+    refreshTutButton: refreshTutButton
   };
 })();
