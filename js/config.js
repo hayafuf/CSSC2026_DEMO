@@ -558,8 +558,25 @@
     // 各攻撃: telegraph=予兆秒数 / dur=被弾時の効果秒数 / speed=妖弾の速さ px/s
     ink:       { telegraph: 1.0, dur: 4.5, lobs: 5, grav: 560, vy0: -40,   // dur: 7.0 は視界不良が長すぎたので短縮
                  rMin: 170, rMax: 280,
-                 glMax: 5 },                 // 漆黒の墨獄: 弧を描く墨玉のカーテン。着弾点に墨だまり
-                 // glMax: WebGL(携帯)時の墨だまり同時数の上限。GL では全画面 1 枚に
+                 // bounce: 着弾した墨玉が割れて飛沫になり、跳ねてまた降る。
+                 //   bounces/bouncesP2=跳ねる回数(通常 1 / 怒り 3。2 回目以降は分裂せず、
+                 //   高さは bounceY 倍(≒保つ)・横速度は bounceX 倍(外へ広がる)で跳ね直す) /
+                 //   count/countP2=初段で割れる飛沫の数 / vx,vy=飛沫の初速レンジ
+                 //   (左右交互に散る。vy は大きいほど高く跳ねる) /
+                 //   r=飛沫の半径 / puddleMul=飛沫の墨だまりの縮小率 /
+                 //   durMul=飛沫の直撃時の視界不良時間(初段直撃 dur に対する倍率) /
+                 //   hitBlobs=飛沫の直撃で画面内に散る墨だまりの枚数 /
+                 //   addDur=無敵中(初段直撃の直後)に飛沫が当たったとき、視界不良を
+                 //          延長する秒数(仰け反りは無し。上限 dur)
+                 bounce: { bounces: 1, bouncesP2: 3, bounceY: 0.95, bounceX: 1.3,
+                           count: 2, countP2: 3, vx: [150, 260], vy: [-560, -470],
+                           r: 11, puddleMul: 0.7, durMul: 0.8, hitBlobs: 3, addDur: 1.0 },
+                 glMax: 8,                   // 漆黒の墨獄: 弧を描く墨玉のカーテン。着弾点に墨だまり
+                 maxBlobs: 16 },             // Canvas2D の墨だまり同時数の上限(超過は古い墨から晴れる)。
+                                             // 12Hz の全画面再合成で毎回全枚数を描くので、飛沫込みでも
+                                             // 初段 7 + 飛沫の最終着弾 ≒ 16 枚に収める
+                 // glMax: WebGL(携帯)時の墨だまり同時数の上限(飛沫の分裂で枚数が
+                 // 増えたので 5 → 8。これ以上は上げない)。GL では全画面 1 枚に
                  // 焼かず半径 200〜400px のブロブを直接重ねるので、10 枚超だと
                  // 1 フレーム 500 万画素級の半透明フィルになる(携帯 GPU の限界域)。
                  // 超過分は古い墨から晴らす(Canvas 2D は従来どおり無制限)
@@ -603,9 +620,26 @@
     // holdTime の間は触手が居座り、自弾を当てれば斬り返してダメージを取れる
     // 多段化: 第1波の後、extraWaves 波(怒り時 extraWavesP2)の追撃が
     // 「間 waveGap 秒 → ⚠ waveWarn 秒 → 突き上げ」のリズムで連続する。
-    // holdTime は多段化で柱が画面に溜まりすぎないよう短め
-    tentacle:  { telegraph: 1.6, zones: 2, r: 110, riseTime: 0.18, holdTime: 0.9,
-                 extraWaves: 2, extraWavesP2: 3, waveGap: 0.3, waveWarn: 0.7, waveWarnP2: 0.6,
+    // holdTime は多段化で柱が画面に溜まりすぎないよう短め。
+    // 波の型は交互(boss.js pickTentacleZones):
+    //   偶数波(第1波含む)=「自機狙い」3本: 大砲X とその左右 minGap px
+    //   奇数波=「挟み撃ち」4本: 大砲の左右 pincerInner px と、その外 minGap px
+    // minGap=⚠中心同士の最小距離。被弾判定は r+25 なので 2*(r+25)+60=330 なら
+    // 隣り合う⚠の間に必ず 60px 以上の安全帯が残る。pincerInner は自機の真下に
+    // 2*(pincerInner-(r+25)) px の安全帯を残す値(190 → 110px。動かなければ無事)。
+    // extraWaves=追撃波の数(3 → 3本,4本,3本,4本 の計4波 / 怒り 5 → 計6波)。
+    // 第1波の予告は firstWarn 秒(長め。⚠は telegraph の残り firstWarn 秒で出る)。
+    // 追撃波の予告(waveWarn)と間(waveGap)は波ごとに warnDecay/gapDecay 倍で
+    // 縮み、warnMin/gapMin で止まる=最初だけ間を空け、そこからドラムが
+    // どんどん速くなる。
+    // wallWave=最終波だけ横一列の「壁」に差し替える(既定 off。隙間は大砲から
+    // ±wallReach px 以内の1列)
+    tentacle:  { telegraph: 1.8, r: 110, riseTime: 0.18, holdTime: 0.9,
+                 extraWaves: 3, extraWavesP2: 5,
+                 firstWarn: 1.1, firstWarnP2: 1.0,
+                 waveGap: 0.25, gapDecay: 0.75, gapMin: 0.08,
+                 waveWarn: 0.65, waveWarnP2: 0.55, warnDecay: 0.8, warnMin: 0.3,
+                 minGap: 330, pincerInner: 190, wallWave: false, wallReach: 300,
                  // 触手専用の無敵秒数。orb.hitIFrames(2.0)だと追撃波(間隔≈1.0-1.3秒)が
                  // 全部無効化されて触手が無力化するので、「連続ハメだけ防ぐ」短さにする
                  hitIFrames: 1.2 },

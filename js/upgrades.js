@@ -480,11 +480,14 @@
         : t("ug.prev.parry", { a: pc(lv), b: pc(lv + 1) });
     }
     if (id === "droprate") {
-      // ドロップ率への上乗せポイント(足し算)を絶対値で見せる: +2.5% → +5%
-      var fmtPt = function (lvl) {
-        return String(+(lvl * def.dropPt * 100).toFixed(1));
-      };
-      return t("ug.prev.percent", { a: fmtPt(lv), b: fmtPt(lv + 1) });
+      // 内部はドロップ率への「ポイント加算」(+3pt/Lv)だが、表示は bombw/missw と
+      // 同じ「素の状態(基礎 15%)と比べて何 % 出やすくなるか」の相対値で見せる:
+      // +20% → +40%。以前は絶対ポイント(+3% → +6%)で出していたが、隣の
+      // 火薬の目利きが相対値(+26%)なので、同じ書式に並ぶと嗅覚が 8 倍弱く
+      // 見えてしまった(単位違いの数字を同じ見た目で並べない)
+      var baseDrop = PP.ITEMS.dropChance;
+      var relDrop = function (lvl) { return Math.round(lvl * def.dropPt / baseDrop * 100); };
+      return t("ug.prev.droprate", { a: relDrop(lv), b: relDrop(lv + 1) });
     }
     if (id === "bombw" || id === "missw") {
       // 重みの足し算は素の数値だと意味が伝わらないので、素の状態と比べて
@@ -501,7 +504,9 @@
         var share = (wBase + lvl * def.wAdd) / (sum + lvl * def.wAdd);
         return Math.round((share / (wBase / sum) - 1) * 100);
       };
-      return t("ug.prev.percent", { a: rel(lv), b: rel(lv + 1) });
+      // 文言は「爆弾の比率 / ミサイルの比率」と明示し、嗅覚の「ドロップ率」と
+      // 読み分けられるようにする
+      return t(id === "bombw" ? "ug.prev.bombw" : "ug.prev.missw", { a: rel(lv), b: rel(lv + 1) });
     }
     // 倍率(mult)カードの汎用プレビュー。「×1.45」の掛け算表記ではなく
     // 「+45%」の加算表記で見せる(ドロップ率の内部処理もポイント加算に

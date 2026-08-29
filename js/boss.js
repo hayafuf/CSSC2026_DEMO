@@ -17,7 +17,9 @@
  * 状態異常の残り秒数 PP.game.bossFx の減算はこのファイルの update() ただ
  * 1か所でだけ行う。消費側(main.js / cannon.js)は「> 0 か」を読むだけなので、
  * タイマーが 0 になれば入力・弾速・視界は必ず通常へ戻る。
- *   ink      漆黒の墨獄       … 弧を描いて降り注ぐ墨玉のカーテン。着弾点に墨だまり
+ *   ink      漆黒の墨獄       … 弧を描いて降り注ぐ墨玉のカーテン。着弾した墨玉は割れて
+ *                               飛沫になり、跳ねてまた降る(通常 1 バウンド / 怒り 3 バウンド)。
+ *                               着弾点に墨だまり
  *   addle    惑乱の逆潮       … 大珠が盤面中央でホバリングし、二段のリングを展開。
  *                               被弾で操作反転(input.js: マウスの動きを反転する相対移動)
  *   freeze   深淵の錨鎖       … ボスを中心に広がる同心二重のリング。
@@ -26,9 +28,11 @@
  *                               被弾で発射玉が極端に遅くなる(stepShots)
  *   randomize 運命のルーレット … 左右から交差する回転スイープ弾。被弾でチェーンが
  *                               ルーレット回転 → 補給と同じ塊生成ルールで色が並び直る
- *   tentacle 海淵の大触腕     … 大砲の高さに⚠予告 → 画面下から触手が突き上げ、
- *                               範囲内ならランダムなデバフ。突き上げ後も居座る触手に
- *                               自弾を当てれば「斬り返し」でボスへダメージを返せる
+ *   tentacle 海淵の大触腕     … 大砲の高さに⚠予告(鼓動が速まり影が浮上)→ 画面下から
+ *                               触手が突き上げ、範囲内ならランダムなデバフ。
+ *                               「3本=自機狙い(動け)」と「4本=左右の挟み撃ち(動くな)」を
+ *                               交互に繰り返し、波ごとに予告と間が縮む。突き上げ後も
+ *                               居座る触手に自弾を当てれば「斬り返し」でダメージを返せる
  *   tsunami  終焉の大海嘯     … 光の安全柱以外の低空を水壁が横断。柱の外だと
  *                               画面の端まで一気に押し流される(樽防衛から引き剥がされる)
  *   barrage  妖星の豪雨       … 下向きの扇弾幕を複数ボレー。隙間を縫うか撃ち落とす
@@ -611,6 +615,7 @@
                                   burst: opts.hover.burst || null, done: false };
       if (opts.hp) b.hitsLeft = opts.hp;   // 迎撃に複数発が必要な大玉(耐久値)
       if (opts.meteor) b.meteor = true;    // 隕石: 炎トレイル+地面着弾で爆発
+      if (opts.inkGen) b.inkGen = opts.inkGen;   // 墨の飛沫(世代): 着弾しても再分裂しない
       if (opts.curtain) b.curtain = true;  // 時凪のカーテン弾(一斉落下の対象)
       // 急加速(ダッシュ弾): y がしきい値を越えた瞬間、速度が mul 倍に跳ね上がる
       if (opts.dash) b.dash = { y: opts.dash.y, mul: opts.dash.mul, done: false };
@@ -914,6 +919,15 @@
           } else {
             applyOrbHit(b);
           }
+        } else if (b.type === "ink" && b.inkGen) {
+          // 無敵中でも墨の飛沫はバリアの上で「ベチャッ」と潰れて視界を汚す:
+          // 初段の直撃で入る 2 秒の無敵の間に飛沫が降ってくるので、ここを
+          // 火花だけにすると飛沫が音しか残さない。仰け反り・無敵の更新は
+          // しない(多段ハメ防止はそのまま)が、足元に墨だまり+視界不良を
+          // addDur 秒だけ延長する(上限は dur)
+          var Kb0 = PP.BOSS.ink.bounce;
+          splatInk(b.x, b.y, false, Kb0.puddleMul);
+          g.bossFx.ink = Math.max(g.bossFx.ink, Math.min(PP.BOSS.ink.dur, g.bossFx.ink + Kb0.addDur));
         } else {
           // 無敵中: 弾はバリアに弾かれて消える(小さな火花+軽い音)。
           // cross は密度線なので音だけ parryBeepCd で間引く(火花は残す)
@@ -927,9 +941,49 @@
         continue;
       }
 
-      // 墨玉は大砲の高さまで落ちたら着弾(外れても足元に墨だまりが残る)
+      // 墨玉は大砲の高さまで落ちたら着弾(外れても足元に墨だまりが残る)。
+      // 初段の墨玉は着弾で割れ、飛沫(小さな墨玉)が左右へ跳ね上がってもう一度
+      // 降ってくる(ワンバウンド)。飛沫は inkGen 付きで、着弾しても再分裂しない
+      // =弾幕が二段で終わる。飛沫も普通の ink 弾なので迎撃・パリィ・被弾判定は
+      // 初段と同じ経路を通る(被弾時の重さだけ applyOrbHit で軽くしている)
       if (b.type === "ink" && b.y >= cy - 30) {
-        splatInk(b.x, Math.min(b.y, cy - 30), false);
+        var ly = cy - 30;
+        var Kb = PP.BOSS.ink.bounce;
+        var gen = b.inkGen || 0;
+        var maxB = phase2 ? Kb.bouncesP2 : Kb.bounces;   // 何回跳ねるか(通常 1 / 怒り 3)
+        if (gen === 0) {
+          // 初段の着弾: 割れて飛沫が左右へ跳ね上がる(1 バウンド目)
+          var nb = phase2 ? Kb.countP2 : Kb.count;
+          splatInk(b.x, ly, false);
+          for (var q = 0; q < nb; q++) {
+            // 左右交互に散らし、外側の飛沫ほど遠くへ跳ねる(扇形に割れる)
+            var bdir = (q & 1) ? -1 : 1;
+            var bspread = 0.8 + (q >> 1) * 0.6;
+            var bvx = bdir * (Kb.vx[0] + Math.random() * (Kb.vx[1] - Kb.vx[0])) * bspread;
+            var bvy = Kb.vy[0] + Math.random() * (Kb.vy[1] - Kb.vy[0]);
+            spawnBullet("ink", b.x, ly - 4, bvx * spdMul(), bvy, PP.BOSS.ink.grav, Kb.r,
+                        { viewScale: Kb.r / 18, inkGen: 1 });
+          }
+          PP.fx.ring(b.x, ly, "#8a97a8", 6, 60, 300);
+          PP.fx.burst(b.x, ly - 10, "rgba(20,14,26,0.9)", 8, 1.6);
+          PP.audio.beep(70, 0.2, "sawtooth", 0.1);   // 跳ね返る低い「ボッ」(ベチャは splatInk 側)
+        } else if (gen < maxB) {
+          // 飛沫がまた跳ねる(2 バウンド目以降): 分裂はせず、高さはほぼ保ったまま
+          // (bounceY 倍)横へ加速して(bounceX 倍)外側へ展開していく。
+          // 途中のバウンドでは墨だまりを置かない(黒い飛び散り+小さな輪だけ)。
+          // 怒り時は飛沫 21 発 × 3 バウンドになるので、毎回置くと墨だまりが
+          // 最大 70 枚になり、Canvas2D の 12Hz 全画面再合成が重くなる
+          // (粒は 4 個: 怒り時は 21 発 × 3 回跳ねるので、ここが粒プールの一番の消費源)
+          PP.fx.burst(b.x, ly - 6, "rgba(20,14,26,0.9)", 4, 1.3);
+          PP.fx.ring(b.x, ly, "rgba(40,30,50,0.7)", 4, 40, 220);
+          spawnBullet("ink", b.x, ly - 4, b.vx * Kb.bounceX, -Math.abs(b.vy) * Kb.bounceY,
+                      PP.BOSS.ink.grav, Kb.r, { viewScale: Kb.r / 18, inkGen: gen + 1 });
+          PP.audio.beep(90 + gen * 20, 0.12, "sawtooth", 0.07);
+        } else {
+          // 最後の着弾: 小さな墨だまりで終わり(潰れる輪+黒い飛び散りで着弾を見せる)
+          splatInk(b.x, ly, false, Kb2Scale());
+          PP.fx.ring(b.x, ly, "rgba(40,30,50,0.8)", 4, 48, 260);
+        }
         removeBullet(i);
         continue;
       }
@@ -1012,8 +1066,15 @@
     PP.fx.shake(10, 0.3);
     PP.audio.beep(150, 0.25, "sawtooth", 0.12);
     if (b.type === "ink") {
-      splatInk(b.x, b.y, true);     // 直撃は大きな目つぶし
-      g.bossFx.ink = B.ink.dur;
+      if (b.inkGen) {
+        // 飛沫の直撃は初段より軽い: 足元+画面内に hitBlobs 枚の墨だまり、
+        // 視界不良は dur×durMul 秒(既にかかっていれば長い方)
+        splatInk(b.x, b.y, true, Kb2Scale() * 1.3, B.ink.bounce.hitBlobs);
+        g.bossFx.ink = Math.max(g.bossFx.ink, B.ink.dur * B.ink.bounce.durMul);
+      } else {
+        splatInk(b.x, b.y, true);   // 直撃は大きな目つぶし
+        g.bossFx.ink = B.ink.dur;
+      }
       PP.audio.debuff();            // ink は applyDebuff を通らないのでここで鳴らす
     } else if (b.type === "addle" || b.type === "freeze" || b.type === "shotSlow") {
       applyDebuff(b.type, 1);
@@ -1077,12 +1138,17 @@
     return sh.cacheCanvas;
   }
 
-  function splatInk(x, y, direct) {
+  // 飛沫の墨だまりの縮小率(config の bounce.puddleMul)。着弾処理と被弾処理の両方から使う
+  function Kb2Scale() { return PP.BOSS.ink.bounce.puddleMul; }
+
+  // scale: 墨だまり半径の倍率(省略=1)。飛沫の着弾は小さな墨だまりになる。
+  // count: direct 時の墨だまり枚数(省略=6。飛沫の直撃は少なめ)
+  function splatInk(x, y, direct, scale, count) {
     var B = PP.BOSS.ink;
-    var n = direct ? 6 : 1;
+    var n = direct ? (count || 6) : 1;
     if (!inkCanvas) inkCanvas = bakeInk();
     for (var i = 0; i < n; i++) {
-      var r = B.rMin + Math.random() * (B.rMax - B.rMin);
+      var r = (B.rMin + Math.random() * (B.rMax - B.rMin)) * (scale || 1);
       var bx = x, by = y;
       if (direct && i > 0) {        // 直撃は追加の墨が画面全域へ飛び散る
         bx = 120 + Math.random() * (PP.W - 240);
@@ -1091,9 +1157,12 @@
       }
       // 中心は濃い墨だがわずかに透ける(完全な闇だと理不尽なので、
       // 目を凝らせば玉列がかろうじて読める程度に留める)
-      // WebGL 時は同時数に上限(config の glMax)。超えたら一番古い墨を晴らす
-      if (PP.glActive && B.glMax > 0) {
-        while (inkBlobs.length >= B.glMax) {
+      // 同時数の上限(WebGL は config の glMax、Canvas2D は maxBlobs)。超えたら
+      // 一番古い墨を晴らす。Canvas2D も全画面再合成のたびに全枚数を描くので、
+      // 飛沫で枚数が伸びる今は無制限にしない
+      var blobCap = PP.glActive ? B.glMax : B.maxBlobs;
+      if (blobCap > 0) {
+        while (inkBlobs.length >= blobCap) {
           var old = inkBlobs.shift();
           createjs.Tween.removeTweens(old.sh);
           if (old.sh.parent) old.sh.parent.removeChild(old.sh);
@@ -1248,13 +1317,20 @@
   // Canvas2D では焼きコストが、WebGL では新規テクスチャの生成・破棄が毎回
   // 走ってしまう。線幅も scale と一緒に伸縮するが、2〜3px 級の差は判別できない
   var WARN_R0 = 64;   // 焼き込みの基準半径
-  var warnFillC = null, warnRingC = null, warnConvC = null, warnTxtC = null;
+  var warnFillC = null, warnRingC = null, warnConvC = null, warnTxtC = null, warnShadeC = null;
   function bakeWarn() {
     if (warnFillC) return;
     var s = new createjs.Shape();
-    s.graphics.beginFill("rgba(255,48,32,0.14)").drawCircle(0, 0, WARN_R0);
+    // 赤フィルは濃いめ(0.5)に焼き、表示側の alpha(0.28→充血で上げる)で薄める。
+    // globalAlpha は 1 で頭打ちなので「薄く焼いて alpha>1」では濃くできない
+    s.graphics.beginFill("rgba(255,48,32,0.5)").drawCircle(0, 0, WARN_R0);
     s.cache(-WARN_R0 - 2, -WARN_R0 - 2, WARN_R0 * 2 + 4, WARN_R0 * 2 + 4);
     warnFillC = s.cacheCanvas;
+    // 水面下から迫る「影」(暗い塊)。⚠の下からせり上がってくる
+    s = new createjs.Shape();
+    s.graphics.beginFill("rgba(6,14,10,0.55)").drawCircle(0, 0, WARN_R0);
+    s.cache(-WARN_R0 - 2, -WARN_R0 - 2, WARN_R0 * 2 + 4, WARN_R0 * 2 + 4);
+    warnShadeC = s.cacheCanvas;
     s = new createjs.Shape();
     s.graphics.setStrokeStyle(3).beginStroke("#ff3020").drawCircle(0, 0, WARN_R0);
     s.cache(-WARN_R0 - 4, -WARN_R0 - 4, WARN_R0 * 2 + 8, WARN_R0 * 2 + 8);
@@ -1281,15 +1357,19 @@
     bakeWarn();
     var k = r / WARN_R0;
     var fillSh = warnBitmap(warnFillC, x, y, k);
+    fillSh.alpha = 0.28;
     var ringSh = warnBitmap(warnRingC, x, y, k);
     var sh = warnBitmap(warnConvC, x, y, k);   // 収束リング(scale で縮める)
     var txt = warnBitmap(warnTxtC, x, y);      // ⚠は半径によらず等倍
-    warnCont.addChild(fillSh, ringSh, sh, txt);
+    var shade = warnBitmap(warnShadeC, x, PP.H + 40, k);   // 影は画面下から⚠へ浮上
+    shade.scaleY = k * 0.35;
+    warnCont.addChild(shade, fillSh, ringSh, sh, txt);
     warnings.push({ x: x, y: y, r: r, timer: timer, total: timer,
-                    sh: sh, fill: fillSh, ring: ringSh, txt: txt });
+                    sh: sh, fill: fillSh, ring: ringSh, txt: txt, shade: shade });
   }
 
   function removeWarningViews(w) {
+    if (w.shade.parent) warnCont.removeChild(w.shade);
     if (w.sh.parent) warnCont.removeChild(w.sh);
     if (w.fill.parent) warnCont.removeChild(w.fill);
     if (w.ring.parent) warnCont.removeChild(w.ring);
@@ -1304,8 +1384,13 @@
     PP.audio.bossDangerStop();
   }
 
-  // ⚠マーカーの毎フレーム描画(進行で赤リングが収束+脈動、⚠が明滅)
+  // ⚠マーカーの毎フレーム描画。残り時間 k(0→1)で恐怖感を積み上げる:
+  //   鼓動の加速(リングと⚠の明滅が速くなる)/ ⚠が膨らむ / 赤フィルが充血し
+  //   最後の 0.25 秒は高速点滅 / 水面下から影がせり上がる / 水面に気泡 /
+  //   地鳴り(shake。強い要求が勝つ実装なので他の揺れを邪魔しない)。
+  //   全部が焼き済み Bitmap の scale/alpha 操作なので毎フレームでも軽い
   function updateWarnings(dt) {
+    var kMax = -1;
     for (var i = warnings.length - 1; i >= 0; i--) {
       var w = warnings[i];
       w.timer -= dt;
@@ -1315,12 +1400,25 @@
         continue;
       }
       var k = 1 - w.timer / w.total;                 // 0→1 で収束
-      w.ring.alpha = 0.5 + 0.3 * Math.sin(t * 12);
+      if (k > kMax) kMax = k;
+      w.ring.alpha = 0.5 + 0.3 * Math.sin(t * (12 + k * 28));
       // 内側へ収束するリング=残り時間。焼き済みリングを scale で縮めるだけ。
       // 旧実装の「毎フレーム clear→パス再構築」はここでは丸ごと消えている
       w.sh.scaleX = w.sh.scaleY = (w.r * (1 - k * 0.85)) / WARN_R0;
-      w.txt.alpha = 0.6 + 0.4 * Math.sin(t * 10);
+      w.txt.alpha = 0.6 + 0.4 * Math.sin(t * (10 + k * 30));
+      w.txt.scaleX = w.txt.scaleY = 1 + k * 0.35;
+      // 赤フィルの充血(0.14 相当 → 0.4 相当)。最後の 0.25 秒は高速点滅
+      w.fill.alpha = (w.timer < 0.25) ? 0.7 + 0.3 * Math.sin(t * 60) : 0.28 + k * 0.5;
+      // 影の浮上: 画面下端の外から⚠の位置へ。近づくほど縦に膨らむ
+      w.shade.y = PP.H + 40 - (PP.H + 40 - w.y) * k;
+      w.shade.scaleY = (w.r / WARN_R0) * (0.35 + k * 0.4);
+      // 水面の気泡: 何かが上がってくる(k が進むほど頻繁に)
+      if (Math.random() < dt * (4 + k * 16)) {
+        PP.fx.burst(w.x + (Math.random() - 0.5) * w.r * 1.2, PP.H - 6,
+                    "rgba(200,230,246,0.8)", 1, 0.9);
+      }
     }
+    if (kMax >= 0) PP.fx.shake(1 + kMax * 5, 0.1);   // 地鳴り
   }
 
   function startTelegraph(key, teleOverride) {
@@ -1346,20 +1444,11 @@
     }
 
     if (key === "tentacle") {
-      // 大砲の高さに⚠を置く(1個は現在の大砲位置=「動け」という圧)
-      var K = PP.BOSS.tentacle;
-      var zones = phase2 ? K.zones + 1 : K.zones;
+      // 第1波の⚠は「ここ」ではなく、突き上げの tentWarnTime(0) 秒前に置く
+      // (update の telegraph 分岐 → placeFirstTentacleWarnings)。予兆開始時に
+      // 置くと 1.6 秒前の自機位置を狙うことになり、その間に動かれると見当違いの
+      // 場所へ突き上がる。追撃波と同じ「置いてから突き上げまで」の長さに揃える
       pendingZones.length = 0;
-      var zx = PP.cannon.x;
-      for (var i = 0; i < zones; i++) {
-        if (i > 0) {
-          var off = (180 + Math.random() * 140) * (Math.random() < 0.5 ? -1 : 1);
-          zx = Math.max(90, Math.min(PP.W - 90, PP.cannon.x + off));
-        }
-        pendingZones.push(zx);
-        addWarning(zx, PP.CANNON_Y - 20, K.r, stateT);
-      }
-      PP.audio.bossDanger();   // ⚠群の出現音(マーカー数に関係なく1回)
     } else if (key === "tsunami") {
       // 安全地帯(光の柱)を先に見せる。波は fireAttack で走り出す
       var S = PP.BOSS.tsunami;
@@ -1431,9 +1520,11 @@
         var fallT = (Math.sqrt(K.vy0 * K.vy0 + 2 * K.grav * (ty - sy)) - K.vy0) / K.grav;
         spawnBullet("ink", sx, sy, (lobT - sx) / fallT * spdMul(), K.vy0, K.grav, 18);
       }
-      // 重い墨壺を吐き出す音+体を震わせる反動
+      // 重い墨壺を吐き出す音+体を震わせる反動+口元の黒い飛沫。空が一瞬暗くなる
       PP.audio.gliss(340, 80, 0.6, "sine", 0.13);
       PP.fx.shake(8, 0.25);
+      PP.fx.burst(sx, sy, "rgba(20,14,26,0.9)", 10, 1.6);
+      PP.fx.screenFlash("rgba(10,8,20,0.18)", 0.18, 400);
     } else if (key === "freeze") {
       // 深淵の錨鎖: ボスを中心に直線で広がる同心二重の錨のリング。
       // 外環(速)と内環(遅・半歩ずれ)が時間差で押し寄せ、全弾が中玉として
@@ -1527,7 +1618,7 @@
       pendingZones.length = 0;
       tentWavesLeft = phase2 ? KT.extraWavesP2 : KT.extraWaves;
       tentPhase = "gap";
-      tentTimer = KT.waveGap;
+      tentTimer = tentGapTime(0);
       PP.fx.shake(10, 0.25);
       PP.audio.beep(90, 0.4, "sawtooth", 0.14);
       PP.audio.bossTentacle();   // 触手突き上げの専用SE
@@ -1565,27 +1656,140 @@
                    wave: waveIdx || 0 });
   }
 
+  // ⚠地点を選んで out へ push する(第1波と追撃波で共用)。波番号 waveIdx の
+  // 偶奇で 2 種類の型を交互に出す:
+  //   偶数波 = 「プレイヤー狙い」3本: 大砲の現在X + その左右 minGap px。
+  //            自機の真下が当たり範囲の中心=「動け」の圧。左右の触手との間
+  //            (60px の安全帯)へ逃げるか、外側へ大きく走るかの二択
+  //   奇数波 = 「左右の挟み撃ち」4本: 大砲の左右 pincerInner px に内側の2本、
+  //            さらに minGap 外に外側の2本。自機の真下だけが安全(幅 ≈ 2×
+  //            (pincerInner-(r+25)) px)=「動くな」の圧。動け→動くな→動け…の
+  //            交互で、リズムを読み違えた側が刺さる
+  //   minGap は被弾判定 (r+25)×2 + 60 なので、隣り合う⚠の間に必ず 60px 以上の
+  //   安全帯が残る。画面外にはみ出す本は置かない(端では本数が減る。それで良い)
+  function pickTentacleZones(waveIdx, out) {
+    var K = PP.BOSS.tentacle;
+    var lo = 90, hi = PP.W - 90;
+    var cx = Math.max(lo, Math.min(hi, PP.cannon.x));
+    if (!(waveIdx & 1)) {
+      // 自機狙い 3 本。左右の本が画面外なら、自機の当たり範囲 +30px より外で
+      // 画面端に寄せる(端でも 3 本を保つ。それも無理なら 2 本)
+      out.push(cx);
+      for (var sd = -1; sd <= 1; sd += 2) {
+        var zx = cx + sd * K.minGap;
+        if (zx >= lo && zx <= hi) { out.push(zx); continue; }
+        var eg = sd < 0 ? lo : hi;
+        if (Math.abs(eg - cx) >= K.r + 25 + 30) out.push(eg);
+      }
+      return;
+    }
+    // 挟み撃ち 4 本。自機が中央から離れていると外側(±(pincerInner+minGap))が
+    // 画面外に出るので、そのままだと 2〜3 本しか出ない。外側が置けない側は
+    //   a) 画面端に寄せる(内側の本と重なって見えない程度に離れていれば可。
+    //      当たり範囲が重なっても「端へ逃げる道が塞がる」だけで挟み撃ちの
+    //      趣旨どおり。自機の安全帯は内側 2 本で決まるので損なわれない)
+    //   b) それも無理なら反対側のさらに外(outer + minGap)へ回す
+    // で本数を保つ。自機の真下(±pincerInner 内)には決して置かない
+    var hitW = 60;   // 端に寄せた本と内側の本の最小距離(⚠が重なって見えない程度)
+    var inner = [cx - K.pincerInner, cx + K.pincerInner];
+    var outer = [cx - K.pincerInner - K.minGap, cx + K.pincerInner + K.minGap];
+    var overflow = 0;   // 置けなかった外側の本数(反対側へ回す)
+    for (var s = 0; s < 2; s++) if (inner[s] >= lo && inner[s] <= hi) out.push(inner[s]);
+    for (var s2 = 0; s2 < 2; s2++) {
+      var ox = outer[s2];
+      if (ox >= lo && ox <= hi) { out.push(ox); continue; }
+      var edge = s2 === 0 ? lo : hi;   // a) 端へ寄せる
+      var innerOk = inner[s2] < lo || inner[s2] > hi || Math.abs(edge - inner[s2]) >= hitW;
+      // 端に寄せた本は自機の当たり範囲(r+25)+30px の外にあればよい(その側の
+      // 安全帯は 30px に狭まるが、動かなければ当たらない)
+      if (Math.abs(edge - cx) >= K.r + 25 + 30 && innerOk) { out.push(edge); continue; }
+      overflow++;
+    }
+    // b) 反対側へ回す: 置けた側の外側のさらに minGap 外
+    for (var k = 0; k < overflow; k++) {
+      var far = out[out.length - 1];
+      var side = far >= cx ? 1 : -1;
+      var fx = far + side * K.minGap;
+      if (fx >= lo && fx <= hi) out.push(fx);
+    }
+  }
+
+  // 第1波の⚠(予兆の残り warnT 秒で呼ばれる)。「プレイヤー狙い」3本を
+  // 呼ばれた瞬間の自機位置で置き、警報SE+ライザーを鳴らす
+  function placeFirstTentacleWarnings(warnT) {
+    var K = PP.BOSS.tentacle;
+    pendingZones.length = 0;
+    pickTentacleZones(0, pendingZones);
+    for (var i = 0; i < pendingZones.length; i++) {
+      addWarning(pendingZones[i], PP.CANNON_Y - 20, K.r, warnT);
+    }
+    PP.audio.bossDanger();   // ⚠群の出現音(マーカー数に関係なく1回)
+    PP.audio.gliss(160, 320, warnT, "sine", 0.05);   // 突き上げまでのライザー(追撃波と同じ)
+  }
+
+  // 波番号 idx(0=第1波)の予告秒数と間(gap)秒数。波が進むほど decay 倍で縮み、
+  // 下限(warnMin/gapMin)で止まる=ドラムがどんどん速くなる
+  function tentWarnTime(idx) {
+    var K = PP.BOSS.tentacle;
+    if (idx === 0) return phase2 ? K.firstWarnP2 : K.firstWarn;   // 第1波は長めの予告
+    var base = phase2 ? K.waveWarnP2 : K.waveWarn;
+    return Math.max(K.warnMin, base * Math.pow(K.warnDecay, idx - 1));
+  }
+  function tentGapTime(idx) {
+    var K = PP.BOSS.tentacle;
+    return Math.max(K.gapMin, K.waveGap * Math.pow(K.gapDecay, idx));
+  }
+
+  // 最終波の「壁」: 画面幅いっぱいの等間隔列(間隔 2r+10)を並べ、大砲から
+  // ±wallReach px 以内にある1列を抜いて隙間にする。隙間は 1 列ぶん(≈230px)
+  // なので、⚠の予告時間(waveWarn)のうちに横へ走れば必ず入れる。
+  // 「どこへ逃げてもいい」追撃波の後に「ここへしか逃げられない」壁が来る=
+  // 波状のドラムの締めとして一番圧が高い形
+  function pickWallZones(out) {
+    var K = PP.BOSS.tentacle;
+    var step = K.r * 2 + 10;
+    var cols = [];
+    for (var x = 90; x <= PP.W - 90; x += step) cols.push(x);
+    // 隙間の候補: 大砲から wallReach 以内の列。無ければ一番近い列
+    var cand = [], nearest = 0;
+    for (var i = 0; i < cols.length; i++) {
+      var dx = Math.abs(cols[i] - PP.cannon.x);
+      if (dx <= K.wallReach) cand.push(i);
+      if (dx < Math.abs(cols[nearest] - PP.cannon.x)) nearest = i;
+    }
+    var gap = cand.length ? cand[Math.floor(Math.random() * cand.length)] : nearest;
+    for (var c = 0; c < cols.length; c++) if (c !== gap) out.push(cols[c]);
+  }
+
   // 触手の追撃波: fireAttack の第1波の後、「間(gap)→⚠(warn)→突き上げ」を
-  // tentWavesLeft 回繰り返す。⚠の1個目は警告を出す瞬間の大砲X(=「動け」の圧)、
-  // 2個目はそこから±200〜340pxオフセット。全打撃に waveWarn 秒以上の予告がある
+  // tentWavesLeft 回繰り返す。⚠は pickTentacleZones で「3本(自機狙い)→4本
+  // (挟み撃ち)」を交互に。予告と間は波ごとに縮む(tentWarnTime/tentGapTime)。
+  // wallWave を立てると最終波だけ横一列の「壁」(pickWallZones)に差し替わる。
+  // 全打撃に warnMin 秒以上の予告がある
   function updateTentacleWaves(dt) {
     if (tentWavesLeft <= 0) return;
     var K = PP.BOSS.tentacle;
     tentTimer -= dt;
     if (tentTimer > 0) return;
     if (tentPhase === "gap") {
-      // ⚠を置く: 大砲現在位置 + オフセット1本の2地点
-      var warnT = phase2 ? K.waveWarnP2 : K.waveWarn;
+      var nextIdx = tentWaveIdx + 1;           // これから予告する波の番号(0=第1波)
+      var warnT = tentWarnTime(nextIdx);
       tentPending.length = 0;
-      var zx = Math.max(90, Math.min(PP.W - 90, PP.cannon.x));
-      var off = (200 + Math.random() * 140) * (Math.random() < 0.5 ? -1 : 1);
-      var zx2 = Math.max(90, Math.min(PP.W - 90, PP.cannon.x + off));
-      tentPending.push(zx, zx2);
+      var isWall = K.wallWave && tentWavesLeft === 1;
+      if (isWall) pickWallZones(tentPending);
+      else pickTentacleZones(nextIdx, tentPending);
+      // 前の波の触手はここで引っ込める。後半の波は 0.4 秒間隔まで詰まるので、
+      // holdTime(0.9s)ぶん居座らせると前の波の柱が残ったまま次の波が生え、
+      // 画面上の本数が混ざって 3本/4本の交互が読めなくなる(斬り返しの窓は
+      // 次の⚠が出るまで=波の間隔ぶん)
+      retractStrikes();
       for (var i = 0; i < tentPending.length; i++) {
         addWarning(tentPending[i], PP.CANNON_Y - 20, K.r, warnT);
       }
       PP.audio.bossDanger();   // ⚠群の出現音(旧: マーカーごとの beep は重複するので廃止)
       PP.audio.gliss(160, 320, warnT, "sine", 0.05);   // 次撃までのライザー(緊張感)
+      // 壁波は画面全体が赤く染まる(「全部来る」を予告の色でも言う)
+      PP.fx.screenFlash(isWall ? "rgba(140,0,0,0.16)" : "rgba(140,0,0,0.08)", isWall ? 0.16 : 0.08, warnT * 1000);
       tentPhase = "warn";
       tentTimer = warnT;
     } else {
@@ -1597,15 +1801,24 @@
       tentWavesLeft--;
       PP.audio.gliss(300, 55, 0.22, "sawtooth", 0.14);
       if (tentWavesLeft <= 0) {
-        // 最終波: 締めの重低音+大きめのシェイクで「終わった」ことを体で分からせる
+        // 最終波: 締めの重低音+大きめのシェイク+赤閃で「海が割れた」を
+        // 体で分からせる(本数ぶんの個別シェイクは shake が最大値で束ねる)
         PP.audio.beep(48, 0.6, "sawtooth", 0.22);
-        PP.fx.shake(14, 0.3);
+        PP.fx.shake(18, 0.35);
+        PP.fx.screenFlash("rgba(140,0,0,0.14)", 0.14, 240);
       } else {
         PP.fx.shake(10, 0.2);
       }
       tentPhase = "gap";
-      tentTimer = K.waveGap;
+      tentTimer = tentGapTime(tentWaveIdx);
     }
+  }
+
+  // 立っている触手に「引っ込め」を予約する。実際に縮み始めるのは伸び切って
+  // 命中判定を終えた後(updateStrikes)。まだ伸びている途中の柱を途中で
+  // 戻すと、その柱の命中判定が一度も走らない(=当たらない触手)になるため
+  function retractStrikes() {
+    for (var i = 0; i < strikes.length; i++) strikes[i].retract = true;
   }
 
   function clearStrikes() {
@@ -1662,7 +1875,8 @@
       if (!s.hitDone && k >= 1) {
         s.hitDone = true;
         PP.fx.burst(s.x, PP.CANNON_Y - 60, "#ff5030", 14, 1.6);
-        PP.fx.burst(s.x, PP.H - 20, "rgba(200,230,246,0.9)", 18, 2.0);   // 突き破った水しぶき
+        PP.fx.burst(s.x, PP.H - 20, "rgba(200,230,246,0.9)", 26, 2.0);   // 突き破った水しぶき
+        PP.fx.flash(s.x, PP.H - 40, "rgba(200,230,246,0.5)", 70);          // 水面が白く裂ける
         PP.fx.ring(s.x, PP.CANNON_Y - 40, "#ff5030", 20, 120, 400);
         PP.fx.ring(s.x, PP.H - 30, "rgba(190,230,246,0.8)", 10, 90, 450);
         PP.fx.shake(14, 0.3);
@@ -1685,6 +1899,8 @@
           }
         }
       }
+      // 次の波の⚠が出ていれば、命中判定を終えた柱はすぐ縮んで戻る
+      if (s.hitDone && s.retract && s.timer > 0.18) s.timer = 0.18;
       // リスクリターンの後段: 突き上げ後も holdTime の間は触手が居座る。
       // その間に自弾を当てれば「斬り返し」= ボス本体へダメージ+触手は即退散。
       // 避けるだけでなく、あえて近くで撃ち返す択が生まれる
@@ -2277,6 +2493,15 @@
     if (state === "idle") {
       if (stateT <= 0) startTelegraph(pickAttack());
     } else if (state === "telegraph") {
+      // 墨獄の予兆: 口元から黒い滴がぽたぽた垂れる(「墨を溜めている」圧)
+      if (curAttack === "ink" && Math.random() < dt * 12) {
+        PP.fx.burst(body.x + (Math.random() - 0.5) * 40, body.y + 40,
+                    "rgba(20,14,26,0.85)", 2, 0.8);
+      }
+      // 大触腕の第1波: 突き上げ tentWarnTime(0) 秒前に、その瞬間の自機位置で⚠を置く
+      if (curAttack === "tentacle" && pendingZones.length === 0 && stateT <= tentWarnTime(0)) {
+        placeFirstTentacleWarnings(stateT);
+      }
       if (stateT <= 0) {
         var fired = curAttack;
         fireAttack(fired);
@@ -2447,6 +2672,10 @@
     getHp: function () { return hp; },
     getState: function () { return state; },
     getBulletCount: function () { return bullets.length; },
+    // ⚠のX座標一覧と触手柱の本数(触手の配置ルールの検証用)
+    getWarningXs: function () { return warnings.map(function (w) { return w.x; }); },
+    getStrikeCount: function () { return strikes.length; },
+    getInkBlobCount: function () { return inkBlobs.length; },
     // 指定した技を即座に予兆から始める(バランス調整・動作確認用)
     forceAttack: function (key) {
       if (!active || !built || !ATTACKS[key]) return false;

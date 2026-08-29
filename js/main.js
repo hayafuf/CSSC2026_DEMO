@@ -453,7 +453,7 @@
     var parts = [];
     g.eachLane(function (lane) {
       var from = lane.rail.holeD;
-      var to = Math.max(lane.leadD || 0, PP.R);   // 先頭球が最後にいた場所まで
+      var to = Math.max(lane.leadD || 0, PP.R);   // 先頭球(宝玉は除く)が最後にいた場所まで
       if (from - to < PP.D) return;               // 走る距離が無いレーンは飛ばす
       // 発進の号砲: 樽の口で大きく弾けてから走り出す
       var p0 = lane.rail.posAt(from);
@@ -822,8 +822,16 @@
   // tick 内で eachLane へ渡すループ本体。無名関数のまま渡すと毎フレーム
   // クロージャの確保が起きて GC のゴミになるので、モジュールスコープへ
   // 巻き上げる(ループの結果はモジュール変数 deadLaneFound で受け取る)
+  // 先頭球の位置を毎フレーム記録する(クリア走査の終点になる)。
+  // 宝玉は除く: 宝玉はウェーブの末尾に付くので、色玉を全滅させた直後の
+  // 数フレームは宝玉だけが balls[0] になる。それを拾うと走査が「宝玉の
+  // いた場所」まで走ってしまうので、最初の非宝玉が見つかった時だけ更新する
+  // (宝玉しか残っていないフレームでは直前の色玉先頭の値を保持)
   function recordLeadD(lane) {
-    if (lane.balls.length) lane.leadD = lane.balls[0].d;
+    var bs = lane.balls;
+    for (var i = 0; i < bs.length; i++) {
+      if (!bs[i].treasure) { lane.leadD = bs[i].d; return; }
+    }
   }
   var deadLaneFound = null;
   function findDeadLane(lane) {
