@@ -1622,6 +1622,7 @@
       // 隕石: ボレー発射は update 側のタイマーで刻む(1発目はすぐ)
       barrageLeft = B.barrage.volleys + (phase2 ? 1 : 0);
       barrageT = 0;
+      PP.audio.meteorStart();   // 降り始めの雨音(2 レイヤー同時)
     } else if (key === "cross") {
       // 両舷斉射: 予兆線を消して振り子掃引開始(実際の発射は updateCross が刻む)
       clearCrossTele();

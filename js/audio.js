@@ -136,6 +136,7 @@
   var seMode = null;        // "buffer" / "html"。null は判定前(音は鳴らさない)
   var seBuffers = {};       // src → デコード済み AudioBuffer("buffer" モード)
   var seVoices = 0;         // 再生中のサンプル SE 総数(全体上限 SE_VOICE_MAX 用)
+  var meteorLandAt = 0;     // 隕石の着弾 SE を最後に鳴らした時刻(ms。同時着弾の間引き用)
   var SE_PROBE = "SE/hit_the_ball.mp3";   // 能力判定に使う小さめの実在ファイル
 
   function decideSeMode(cb) {
@@ -400,6 +401,10 @@
   //          両舷斉射=振り子掃引で降り注ぐ弾の幕)
   var seBossBallSlow = sfx("SE/boss_ball_slow_attack.mp3", 0.7);
   var seBossWaveAttack = sfx("SE/boss_wave_attack.mp3", 0.8);
+  // 妖星の豪雨(隕石): 降り始め(2 レイヤーを同時に重ねる)と着弾
+  var seMeteorRain = sfx("SE/meteo_raining.mp3", 0.65);
+  var seMeteorRain2 = sfx("SE/meteo_raining2.mp3", 0.65);
+  var seMeteorLand = sfx("SE/meteo_land.mp3", 0.75);
   // カラーボム発動: 選ばれた色が盤面から一掃されるときの炸裂音
   // ================================================================
   // TODO【課題4】カラーボムで再生するSEファイルを指定してみよう
@@ -1086,17 +1091,26 @@
       beep(38, 1.1, "sine", 0.14);
       setTimeout(function () { gliss(90, 40, 0.5, "sawtooth", 0.1); }, 120);
     },
-    // 隕石の落下ホイッスル(ボレーごとに1回)
-    meteorFall: function () {
-      gliss(900, 200, 0.8, "sine", 0.07);
-      gliss(1200, 300, 0.7, "triangle", 0.04);
+    // 隕石の降り始め(攻撃の発動時に1回)。meteo_raining と meteo_raining2 は
+    // 重ねて鳴らす前提で作られた 2 レイヤーなので、同時に両方鳴らす
+    meteorStart: function () {
+      seMeteorRain();
+      seMeteorRain2();
     },
-    // 隕石の着弾爆発(地面を割る重さ: 超低音の腹+破裂の中音)
+    // 隕石の落下ホイッスル(ボレーごとに1回)。素材の雨音の上に薄く重ねる
+    meteorFall: function () {
+      gliss(900, 200, 0.8, "sine", 0.05);
+      gliss(1200, 300, 0.7, "triangle", 0.03);
+    },
+    // 隕石の着弾爆発: 素材(meteo_land)+超低音の腹。1ボレー 7〜8 個がほぼ同時に
+    // 落ちるので、素材は 0.12 秒に1回まで間引く(合成の低音は毎回鳴らして
+    // 「何個落ちたか」の手応えは残す)
     meteorBoom: function () {
-      beep(55, 0.35, "sawtooth", 0.26);
-      beep(40, 0.55, "sine", 0.2);
-      beep(30, 0.7, "sine", 0.14);
-      setTimeout(function () { beep(160, 0.14, "square", 0.07); }, 40);
+      var now = Date.now();
+      if (now - meteorLandAt >= 120) { meteorLandAt = now; seMeteorLand(); }
+      beep(55, 0.35, "sawtooth", 0.18);
+      beep(40, 0.55, "sine", 0.14);
+      beep(30, 0.7, "sine", 0.1);
     },
     // ---- 危機(crisis.js が毎フレーム呼ぶ) ----
     crisis: crisis,            // 0〜1 の深さで警報ループの音量/ピッチを決める
