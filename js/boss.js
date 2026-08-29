@@ -18,8 +18,8 @@
  * 1か所でだけ行う。消費側(main.js / cannon.js)は「> 0 か」を読むだけなので、
  * タイマーが 0 になれば入力・弾速・視界は必ず通常へ戻る。
  *   ink      漆黒の墨獄       … 弧を描いて降り注ぐ墨玉のカーテン。着弾した墨玉は割れて
- *                               飛沫になり、跳ねてまた降る(通常 1 バウンド / 怒り 3 バウンド)。
- *                               着弾点に墨だまり
+ *                               飛沫になり、跳ねてまた降る(怒り時は飛沫の着弾でさらに
+ *                               もう一段割れる二段分裂)。着弾点に墨だまり
  *   addle    惑乱の逆潮       … 大珠が盤面中央でホバリングし、二段のリングを展開。
  *                               被弾で操作反転(input.js: マウスの動きを反転する相対移動)
  *   freeze   深淵の錨鎖       … ボスを中心に広がる同心二重のリング。
@@ -943,42 +943,35 @@
 
       // 墨玉は大砲の高さまで落ちたら着弾(外れても足元に墨だまりが残る)。
       // 初段の墨玉は着弾で割れ、飛沫(小さな墨玉)が左右へ跳ね上がってもう一度
-      // 降ってくる(ワンバウンド)。飛沫は inkGen 付きで、着弾しても再分裂しない
-      // =弾幕が二段で終わる。飛沫も普通の ink 弾なので迎撃・パリィ・被弾判定は
-      // 初段と同じ経路を通る(被弾時の重さだけ applyOrbHit で軽くしている)
+      // 降ってくる(分裂バウンド)。怒り時は飛沫の着弾でさらにもう一段割れる
+      // (二段分裂)。世代は inkGen で数え、splits 世代まで割れたら墨だまりで終わり。
+      // 飛沫も普通の ink 弾なので迎撃・パリィ・被弾判定は初段と同じ経路を通る
+      // (被弾時の重さだけ applyOrbHit で軽くしている)
       if (b.type === "ink" && b.y >= cy - 30) {
         var ly = cy - 30;
         var Kb = PP.BOSS.ink.bounce;
         var gen = b.inkGen || 0;
-        var maxB = phase2 ? Kb.bouncesP2 : Kb.bounces;   // 何回跳ねるか(通常 1 / 怒り 3)
-        if (gen === 0) {
-          // 初段の着弾: 割れて飛沫が左右へ跳ね上がる(1 バウンド目)
-          var nb = phase2 ? Kb.countP2 : Kb.count;
-          splatInk(b.x, ly, false);
+        var maxS = phase2 ? Kb.splitsP2 : Kb.splits;   // 何段割れるか(通常 1 / 怒り 2)
+        if (gen < maxS) {
+          // 着弾で割れて飛沫が左右へ跳ね上がる。初段は count(怒り countP2)発、
+          // 二段目以降は count2 発で、勢いと粒は世代ごとに genMul 倍に落とす
+          var nb = gen === 0 ? (phase2 ? Kb.countP2 : Kb.count) : Kb.count2;
+          var gm = Math.pow(Kb.genMul, gen);
+          var rr = gen === 0 ? Kb.r : Kb.r2;
+          if (gen === 0) splatInk(b.x, ly, false);     // 初段の着弾だけ墨だまり(枚数抑制)
           for (var q = 0; q < nb; q++) {
-            // 左右交互に散らし、外側の飛沫ほど遠くへ跳ねる(扇形に割れる)
+            // 左右交互に散らし、外側の飛沫ほど遠くへ跳ねる(扇形に割れる)。
+            // 二段目も着地点から左右対称に割れる(親の進行方向へは流さない)
             var bdir = (q & 1) ? -1 : 1;
             var bspread = 0.8 + (q >> 1) * 0.6;
-            var bvx = bdir * (Kb.vx[0] + Math.random() * (Kb.vx[1] - Kb.vx[0])) * bspread;
-            var bvy = Kb.vy[0] + Math.random() * (Kb.vy[1] - Kb.vy[0]);
-            spawnBullet("ink", b.x, ly - 4, bvx * spdMul(), bvy, PP.BOSS.ink.grav, Kb.r,
-                        { viewScale: Kb.r / 18, inkGen: 1 });
+            var bvx = bdir * (Kb.vx[0] + Math.random() * (Kb.vx[1] - Kb.vx[0])) * bspread * gm;
+            var bvy = (Kb.vy[0] + Math.random() * (Kb.vy[1] - Kb.vy[0])) * gm;
+            spawnBullet("ink", b.x, ly - 4, bvx * spdMul(), bvy, PP.BOSS.ink.grav, rr,
+                        { viewScale: rr / 18, inkGen: gen + 1 });
           }
-          PP.fx.ring(b.x, ly, "#8a97a8", 6, 60, 300);
-          PP.fx.burst(b.x, ly - 10, "rgba(20,14,26,0.9)", 8, 1.6);
-          PP.audio.beep(70, 0.2, "sawtooth", 0.1);   // 跳ね返る低い「ボッ」(ベチャは splatInk 側)
-        } else if (gen < maxB) {
-          // 飛沫がまた跳ねる(2 バウンド目以降): 分裂はせず、高さはほぼ保ったまま
-          // (bounceY 倍)横へ加速して(bounceX 倍)外側へ展開していく。
-          // 途中のバウンドでは墨だまりを置かない(黒い飛び散り+小さな輪だけ)。
-          // 怒り時は飛沫 21 発 × 3 バウンドになるので、毎回置くと墨だまりが
-          // 最大 70 枚になり、Canvas2D の 12Hz 全画面再合成が重くなる
-          // (粒は 4 個: 怒り時は 21 発 × 3 回跳ねるので、ここが粒プールの一番の消費源)
-          PP.fx.burst(b.x, ly - 6, "rgba(20,14,26,0.9)", 4, 1.3);
-          PP.fx.ring(b.x, ly, "rgba(40,30,50,0.7)", 4, 40, 220);
-          spawnBullet("ink", b.x, ly - 4, b.vx * Kb.bounceX, -Math.abs(b.vy) * Kb.bounceY,
-                      PP.BOSS.ink.grav, Kb.r, { viewScale: Kb.r / 18, inkGen: gen + 1 });
-          PP.audio.beep(90 + gen * 20, 0.12, "sawtooth", 0.07);
+          PP.fx.ring(b.x, ly, "#8a97a8", 6, gen === 0 ? 60 : 44, 300);
+          PP.fx.burst(b.x, ly - 10, "rgba(20,14,26,0.9)", gen === 0 ? 8 : 4, 1.6);
+          PP.audio.beep(70 + gen * 30, 0.2, "sawtooth", gen === 0 ? 0.1 : 0.07);   // 割れる低い「ボッ」
         } else {
           // 最後の着弾: 小さな墨だまりで終わり(潰れる輪+黒い飛び散りで着弾を見せる)
           splatInk(b.x, ly, false, Kb2Scale());

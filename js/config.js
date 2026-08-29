@@ -559,19 +559,21 @@
     // 各攻撃: telegraph=予兆秒数 / dur=被弾時の効果秒数 / speed=妖弾の速さ px/s
     ink:       { telegraph: 1.0, dur: 4.5, lobs: 5, grav: 560, vy0: -40,   // dur: 7.0 は視界不良が長すぎたので短縮
                  rMin: 170, rMax: 280,
-                 // bounce: 着弾した墨玉が割れて飛沫になり、跳ねてまた降る。
-                 //   bounces/bouncesP2=跳ねる回数(通常 1 / 怒り 3。2 回目以降は分裂せず、
-                 //   高さは bounceY 倍(≒保つ)・横速度は bounceX 倍(外へ広がる)で跳ね直す) /
-                 //   count/countP2=初段で割れる飛沫の数 / vx,vy=飛沫の初速レンジ
-                 //   (左右交互に散る。vy は大きいほど高く跳ねる) /
-                 //   r=飛沫の半径 / puddleMul=飛沫の墨だまりの縮小率 /
+                 // bounce: 着弾した墨玉が割れて飛沫になり、跳ねてまた降る(分裂バウンド)。
+                 //   splits/splitsP2=何段割れるか(通常 1 / 怒り 2: 飛沫の着弾でさらに
+                 //   count2 発へ割れる=二段分裂。怒り時の弾数は 7×3×2=42+21+7) /
+                 //   count/countP2=初段で割れる飛沫の数 / count2=二段目で割れる数 /
+                 //   genMul=世代ごとの勢いの倍率(二段目は少し低く・狭く跳ねる) /
+                 //   vx,vy=飛沫の初速レンジ(左右交互に散る。vy は大きいほど高く跳ねる) /
+                 //   r=飛沫の半径 / r2=二段目の飛沫の半径 /
+                 //   puddleMul=飛沫の墨だまりの縮小率 /
                  //   durMul=飛沫の直撃時の視界不良時間(初段直撃 dur に対する倍率) /
                  //   hitBlobs=飛沫の直撃で画面内に散る墨だまりの枚数 /
                  //   addDur=無敵中(初段直撃の直後)に飛沫が当たったとき、視界不良を
                  //          延長する秒数(仰け反りは無し。上限 dur)
-                 bounce: { bounces: 1, bouncesP2: 3, bounceY: 0.95, bounceX: 1.3,
-                           count: 2, countP2: 3, vx: [150, 260], vy: [-560, -470],
-                           r: 11, puddleMul: 0.7, durMul: 0.8, hitBlobs: 3, addDur: 1.0 },
+                 bounce: { splits: 1, splitsP2: 2, count: 2, countP2: 3, count2: 2, genMul: 0.8,
+                           vx: [150, 260], vy: [-560, -470], r: 11, r2: 9,
+                           puddleMul: 0.7, durMul: 0.8, hitBlobs: 3, addDur: 1.0 },
                  glMax: 8,                   // 漆黒の墨獄: 弧を描く墨玉のカーテン。着弾点に墨だまり
                  maxBlobs: 16 },             // Canvas2D の墨だまり同時数の上限(超過は古い墨から晴れる)。
                                              // 12Hz の全画面再合成で毎回全枚数を描くので、飛沫込みでも
