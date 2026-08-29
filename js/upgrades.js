@@ -481,32 +481,34 @@
     }
     if (id === "droprate") {
       // 内部はドロップ率への「ポイント加算」(+3pt/Lv)だが、表示は bombw/missw と
-      // 同じ「素の状態(基礎 15%)と比べて何 % 出やすくなるか」の相対値で見せる:
-      // +20% → +40%。以前は絶対ポイント(+3% → +6%)で出していたが、隣の
-      // 火薬の目利きが相対値(+26%)なので、同じ書式に並ぶと嗅覚が 8 倍弱く
-      // 見えてしまった(単位違いの数字を同じ見た目で並べない)
+      // 同じ「素の状態(基礎 15%)に対する倍率」で見せる: ×1.20 → ×1.40。
+      // 以前は絶対ポイント(+3% → +6%)で出していたが、隣の火薬の目利きが
+      // 相対値(+26%)だったので同じ書式に並ぶと嗅覚が 8 倍弱く見え、逆に相対 %
+      // にすると「+46%」が「アイテムの 46% が爆弾」と誤読される。倍率なら
+      // 「何に対して」の誤読が起きない
       var baseDrop = PP.ITEMS.dropChance;
-      var relDrop = function (lvl) { return Math.round(lvl * def.dropPt / baseDrop * 100); };
-      return t("ug.prev.droprate", { a: relDrop(lv), b: relDrop(lv + 1) });
+      var mulDrop = function (lvl) { return (1 + lvl * def.dropPt / baseDrop).toFixed(2); };
+      return t("ug.prev.droprate", { a: mulDrop(lv), b: mulDrop(lv + 1) });
     }
     if (id === "bombw" || id === "missw") {
       // 重みの足し算は素の数値だと意味が伝わらないので、素の状態と比べて
-      // 「どれだけ出やすくなるか」の +% で見せる: +0% → +26%。
+      // 「どれだけ出やすくなるか」の倍率で見せる: ×1.00 → ×1.26。
       // (絶対値の出現率表示にしないのは、コースや救済で条件が変わると
-      //  実際の確率がズレて嘘の数字になるため。相対なら常に正しい)
+      //  実際の確率がズレて嘘の数字になるため。相対なら常に正しい。
+      //  「+26%」の相対 % 表記は「アイテムの 26% が爆弾」と誤読されるので倍率)
       var target = id === "bombw" ? "bomb" : "missile";
       var sum = 0, wBase = 0;
       PP.POWERUPS.forEach(function (p) {
         sum += p.w;
         if (p.id === target) wBase = p.w;
       });
-      var rel = function (lvl) {
+      var mul = function (lvl) {
         var share = (wBase + lvl * def.wAdd) / (sum + lvl * def.wAdd);
-        return Math.round((share / (wBase / sum) - 1) * 100);
+        return (share / (wBase / sum)).toFixed(2);
       };
-      // 文言は「爆弾の比率 / ミサイルの比率」と明示し、嗅覚の「ドロップ率」と
-      // 読み分けられるようにする
-      return t(id === "bombw" ? "ug.prev.bombw" : "ug.prev.missw", { a: rel(lv), b: rel(lv + 1) });
+      // 文言は「爆弾の出やすさ / ミサイルの出やすさ」と明示し、嗅覚の
+      // 「ドロップ率」と読み分けられるようにする
+      return t(id === "bombw" ? "ug.prev.bombw" : "ug.prev.missw", { a: mul(lv), b: mul(lv + 1) });
     }
     // 倍率(mult)カードの汎用プレビュー。「×1.45」の掛け算表記ではなく
     // 「+45%」の加算表記で見せる(ドロップ率の内部処理もポイント加算に

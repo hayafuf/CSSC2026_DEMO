@@ -80,10 +80,11 @@
   // 適用箇所は chain.js の speedAt。ボス戦(Stage6)は bossHpMult で調整する。
   PP.STAGE_SPEED = {
     hard: {
-      5: { entry: 820, hole: 21.0, curve: 2.1 }
+      5: { entry: 820, hole: 22.0, curve: 2.1 }
     },
     hardcore: {
-      5: { entry: 810, hole: 19.0, curve: 2.3 }
+      5: { entry: 810, hole: 20.0, curve: 2.3 }
+
     }
   };
   // 現在の 難易度×ステージ の上書き値を返す(無い項目は null = 自動計算)。
