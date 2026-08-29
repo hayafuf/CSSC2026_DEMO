@@ -732,14 +732,27 @@
     return out;
   }
 
+  // 宝玉 balls[i] の「自分の波」の色玉が前方(index < i)に残っているか。
+  // 解放条件は「レーンの先頭にいる」ではなく「自分の波を全消しした」:
+  // 前の波のチェーンがまだ残っていても、後ろの波が宝玉だけになれば解放する
+  // (前の波の玉・宝玉は wave 番号が小さいので数えない。挿入した玉も
+  //  hit.wave を引き継ぐので同じ波として数えられる)
+  function sameWaveAhead(balls, i) {
+    var w = balls[i].wave;
+    for (var j = i - 1; j >= 0; j--) {
+      if (balls[j].wave === w && !balls[j].treasure) return true;
+    }
+    return false;
+  }
+
   // 宝玉の解放・粉砕(レーン lane 内)
   function updateTreasures(lane) {
     var balls = lane.balls;
     for (var i = balls.length - 1; i >= 0; i--) {
       var t = balls[i];
       if (!t.treasure) continue;
-      if (i === 0) {
-        // 前方の玉が全滅 → 宝玉が解放されて落下する
+      if (i === 0 || !sameWaveAhead(balls, i)) {
+        // 自分の波の玉が全滅 → 宝玉が解放されて落下する
         freeTreasure(lane, i);
       } else if (i + 1 < balls.length &&
                  balls[i + 1].wave > t.wave &&
