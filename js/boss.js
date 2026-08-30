@@ -36,6 +36,11 @@
  *   tsunami  終焉の大海嘯     … 光の安全柱以外の低空を水壁が横断。柱の外だと
  *                               画面の端まで一気に押し流される(樽防衛から引き剥がされる)
  *   barrage  妖星の豪雨       … 下向きの扇弾幕を複数ボレー。隙間を縫うか撃ち落とす
+ *   thunder  裁きの雷霆       … 画面の片端から反対側へ、大砲の高さを隙間なく順番に落雷
+ *                               (各⚠予告あり。右から/左からはバナーと端の ⚡▶ で分かる。
+ *                               怒り時は反対側からもう1往路)。被弾で「暗闇」: 装填中の
+ *                               今の玉が真っ黒(色不明)になり交換も不能(cannon.js)。
+ *                               次の玉は見える。発射はできる。弾体が無いのでパリィ不可
  * 同種の重ね掛けは抽選時に「効果中の技」を候補から外して防ぐ。HP が半分を切ると
  * 怒りフェーズ: 攻撃間隔短縮・弾速アップ・発射後のコンボ追撃(短予兆の ink/freeze)。
  * 通知は「技名バナー(画面上部の帯)+HUD の状態異常チップ」の2系統に整理し、
@@ -141,6 +146,15 @@
 
   // ランダマイズ(色ルーレット)は攻撃状態と独立に回す
   var rndSpinT = 0, rndStepT = 0, rndOrig = 0;
+  // 裁きの雷霆(thunder): 右→左へ順番に落ちる落雷
+  var thunderXs = [];       // まだ⚠を置いていない落雷X(始点側から順に shift する)
+  var thunderTimer = 0;     // 次の⚠を置くまでの残り秒
+  var thunderBolts = [];    // ⚠済み・落下待ち {x, t}
+  var boltFx = [];          // 表示中の雷の線 {sh, t}
+  var thunderDir = 1;       // 1=右から左へ / -1=左から右へ(予兆で決める)
+  var thunderPasses = 0;    // 残りの往路数(怒り時は1往路の後、反対側からもう1往路)
+  var thunderArrow = null;  // 始点側の端に出す ⚡▶ の矢印(予兆中・往路の切り替え時)
+  var blackoutWas = false;  // 前フレームに暗闇中だったか(解除の瞬間に手札を描き直す)
 
   // 攻撃の定義(色は予兆リング・妖弾・宣言バナーに使う)
   // 攻撃名は i18n 辞書のキーで持つ(バナーに出す瞬間に t() で引く。
@@ -154,14 +168,15 @@
     tentacle:  { nameKey: "boss.atk.tentacle",  color: "#ff5030" },
     tsunami:   { nameKey: "boss.atk.tsunami",   color: "#4ac8e8" },
     barrage:   { nameKey: "boss.atk.barrage",   color: "#ffa040" },
-    cross:     { nameKey: "boss.atk.cross",     color: "#9fd8ff" }
+    cross:     { nameKey: "boss.atk.cross",     color: "#9fd8ff" },
+    thunder:   { nameKey: "boss.atk.thunder",   color: "#fff27a" }
   };
   var ATTACK_KEYS = ["ink", "addle", "freeze", "shotSlow", "randomize",
-                     "tentacle", "tsunami", "barrage", "cross"];
+                     "tentacle", "tsunami", "barrage", "cross", "thunder"];
   // 【強化】パリィが効かない大技。tentacle/tsunami は bullets を使わない別系統
   // なので構造的にも対象外だが、予兆の「パリィ不可」表示と将来の変更保険のため
   // 3技とも明示しておく(cross だけは弾システム内なのでこの集合が効いている)
-  var NO_PARRY = { tentacle: true, tsunami: true, cross: true };
+  var NO_PARRY = { tentacle: true, tsunami: true, cross: true, thunder: true };
 
   // ---------- クラーケンの作画 ----------
   // 既存の砲台・玉と同じ「ベクター+グラデーション」の文法で描く。
@@ -508,6 +523,7 @@
     if (fx.addle > 0) parts.push("🌀" + Math.ceil(fx.addle));
     if (fx.freeze > 0) parts.push("⚓" + Math.ceil(fx.freeze));
     if (fx.shotSlow > 0) parts.push("⏳" + Math.ceil(fx.shotSlow));
+    if (fx.blackout > 0) parts.push("🌑" + Math.ceil(fx.blackout));
     if (rndSpinT > 0) parts.push("🎲");
     if (guardT > 0) parts.push("🛡" + Math.ceil(guardT));   // ボスのシールド残り秒
     var s = parts.join(" ");
@@ -1003,14 +1019,30 @@
   }
 
   // ---------- 【強化】パリィ(構えと成否判定は upgrades.js pressParry/tryParry) ----------
-  // 成功の合図(skull.js と同型)。被弾ではないので shake は使わない。
-  // 音は上昇二連: 無敵バリアの既存 980 単発と聞き分けられるように
+  // 成功の合図。汎用の光輪ではなく「真鍮の盾で受けた」絵にする:
+  // 砲口の前に真鍮色(HUD の縁と同じ #f0c040)の三日月形の盾の弧が一瞬立って
+  // 消え、当たった点から暖色の金属片が散る。音は甲高い金属音。
+  // 被弾ではないので shake は使わない
   function fxParry(b, labelKey) {
-    PP.fx.ring(PP.cannon.x, PP.cannon.y - 40, "#8ef0d0", 8, 70, 350);
-    PP.fx.flash(b.x, b.y, "rgba(255,255,255,0.85)", 30);
-    PP.fx.floatText(PP.i18n.t(labelKey), PP.cannon.x, PP.cannon.y - 70, "#8ef0d0", 18);
-    PP.audio.beep(880, 0.06, "triangle", 0.08);
-    PP.audio.beep(1480, 0.09, "square", 0.06);
+    var cx = PP.cannon.x, cy = PP.cannon.y - 46;
+    var arc = new createjs.Shape();
+    arc.graphics.setStrokeStyle(5, "round").beginStroke("#f0c040")
+      .arc(0, 0, 44, -Math.PI * 0.85, -Math.PI * 0.15).endStroke();
+    arc.graphics.setStrokeStyle(2, "round").beginStroke("#fff3c0")
+      .arc(0, 0, 44, -Math.PI * 0.8, -Math.PI * 0.2).endStroke();
+    arc.cache(-52, -52, 104, 60);
+    arc.x = cx; arc.y = cy;
+    arc.scaleX = arc.scaleY = 0.6;
+    PP.layers.fx.addChild(arc);
+    createjs.Tween.get(arc)
+      .to({ scaleX: 1.1, scaleY: 1.1 }, 90, createjs.Ease.quadOut)
+      .to({ alpha: 0 }, 180)
+      .call(function () { if (arc.parent) arc.parent.removeChild(arc); });
+    PP.fx.burst(b.x, b.y, "#ffd27a", 10, 1.4);
+    PP.fx.burst(b.x, b.y, "#ffffff", 4, 1.0);
+    PP.fx.floatText(PP.i18n.t(labelKey), cx, cy - 34, "#ffdf8a", 18);
+    PP.audio.beep(1760, 0.05, "triangle", 0.09);
+    PP.audio.beep(2350, 0.12, "sine", 0.05);
   }
 
   // 弾き返し開始(Lv2+): 妖弾を消さずに「ボスへ戻る味方の追尾弾」に作り替える。
@@ -1042,6 +1074,13 @@
     } else if (type === "shotSlow") {
       g.bossFx.shotSlow = B.shotSlow.dur * mul;
       PP.fx.screenFlash("rgba(138,32,216,0.22)", 0.22, 600);
+    } else if (type === "blackout") {
+      // 暗闇: 手札(今の玉・次の玉)が真っ黒になり交換不能(cannon.js)。
+      // 手札の描き直しは refreshBalls の一本道を通す
+      g.bossFx.blackout = B.thunder.dur * mul;
+      PP.cannon.refreshBalls();
+      PP.fx.screenFlash("rgba(20,10,40,1)", 0.35, 500);
+      PP.fx.ring(PP.cannon.x, PP.cannon.y - 40, "#b9a3ff", 10, 90, 500);
     }
   }
 
@@ -1240,6 +1279,9 @@
       if (k === "tsunami" && wave) continue;
       if (k === "barrage" && barrageLeft > 0) continue;
       if (k === "tentacle" && tentWavesLeft > 0) continue;   // 追撃波の進行中は重ねない
+      // 裁きの雷霆: 開幕は撃たない。落雷の進行中・暗闇中は重ねない
+      if (k === "thunder" && (attackCount < 1 || thunderXs.length > 0 ||
+                              thunderBolts.length > 0 || fx.blackout > 0)) continue;
       if (k === "randomize" && (rndSpinT > 0 || sweepLeft > 0)) continue;
       if (k === "shotSlow" && curtainLeft > 0) continue;
       pool.push(k);
@@ -1309,29 +1351,13 @@
   // Bitmap + scale で使い回す。攻撃のたびに半径違いの cache を焼き直す方式は、
   // Canvas2D では焼きコストが、WebGL では新規テクスチャの生成・破棄が毎回
   // 走ってしまう。線幅も scale と一緒に伸縮するが、2〜3px 級の差は判別できない
-  var WARN_R0 = 64;   // 焼き込みの基準半径
-  var warnFillC = null, warnRingC = null, warnConvC = null, warnTxtC = null, warnShadeC = null;
+  var WARN_R0 = 64;   // 焼き込みの基準半径(⚠文字の等倍基準)
+  var warnTxtC = null;
   function bakeWarn() {
-    if (warnFillC) return;
-    var s = new createjs.Shape();
-    // 赤フィルは濃いめ(0.5)に焼き、表示側の alpha(0.28→充血で上げる)で薄める。
-    // globalAlpha は 1 で頭打ちなので「薄く焼いて alpha>1」では濃くできない
-    s.graphics.beginFill("rgba(255,48,32,0.5)").drawCircle(0, 0, WARN_R0);
-    s.cache(-WARN_R0 - 2, -WARN_R0 - 2, WARN_R0 * 2 + 4, WARN_R0 * 2 + 4);
-    warnFillC = s.cacheCanvas;
-    // 水面下から迫る「影」(暗い塊)。⚠の下からせり上がってくる
-    s = new createjs.Shape();
-    s.graphics.beginFill("rgba(6,14,10,0.55)").drawCircle(0, 0, WARN_R0);
-    s.cache(-WARN_R0 - 2, -WARN_R0 - 2, WARN_R0 * 2 + 4, WARN_R0 * 2 + 4);
-    warnShadeC = s.cacheCanvas;
-    s = new createjs.Shape();
-    s.graphics.setStrokeStyle(3).beginStroke("#ff3020").drawCircle(0, 0, WARN_R0);
-    s.cache(-WARN_R0 - 4, -WARN_R0 - 4, WARN_R0 * 2 + 8, WARN_R0 * 2 + 8);
-    warnRingC = s.cacheCanvas;
-    s = new createjs.Shape();
-    s.graphics.setStrokeStyle(2).beginStroke("rgba(255,120,90,0.8)").drawCircle(0, 0, WARN_R0);
-    s.cache(-WARN_R0 - 3, -WARN_R0 - 3, WARN_R0 * 2 + 6, WARN_R0 * 2 + 6);
-    warnConvC = s.cacheCanvas;
+    if (warnTxtC) return;
+    // 赤フィルは濃いめ(0.5)で描き、表示側の alpha(0.28→充血で上げる)で薄める。
+    // globalAlpha は 1 で頭打ちなので「薄く描いて alpha>1」では濃くできない
+    // (帯本体は addWarning が幅ごとに描く。ここで焼くのは ⚠ の文字だけ)
     var t = new createjs.Text("⚠", "700 34px sans-serif", "#ffd24a");
     t.textAlign = "center"; t.textBaseline = "middle";
     t.shadow = new createjs.Shadow("rgba(0,0,0,0.9)", 0, 2, 6);
@@ -1346,23 +1372,37 @@
     if (scale) b.scaleX = b.scaleY = scale;
     return b;
   }
+  // 危険エリアは「縦長の四角い帯」で示す。帯の半幅は r(判定は r+25 だが、
+  // +25 は大砲自身の半幅ぶん。帯を r にしておくと「大砲の体が帯に触れたら当たり」
+  // という見え方になり、当たり幅そのものを塗るより小さく正直に見える)。
+  // 高さは大砲の頭上から画面下端まで(大砲の段が対象)。
+  // 同時に出るのは多くて 8 本なので、帯は毎回 cache して描く(共有 canvas を
+  // 非等方 scale すると枠線の太さが縦横で崩れる)
   function addWarning(x, y, r, timer) {
     bakeWarn();
-    var k = r / WARN_R0;
-    var fillSh = warnBitmap(warnFillC, x, y, k);
-    fillSh.alpha = 0.28;
-    var ringSh = warnBitmap(warnRingC, x, y, k);
-    var sh = warnBitmap(warnConvC, x, y, k);   // 収束リング(scale で縮める)
-    var txt = warnBitmap(warnTxtC, x, y);      // ⚠は半径によらず等倍
-    var shade = warnBitmap(warnShadeC, x, PP.H + 40, k);   // 影は画面下から⚠へ浮上
-    shade.scaleY = k * 0.35;
-    warnCont.addChild(shade, fillSh, ringSh, sh, txt);
+    var hw = r;
+    var top = PP.CANNON_Y - 80, h = PP.H - 4 - top;
+    var fillSh = new createjs.Shape();
+    fillSh.graphics.beginFill("rgba(255,48,32,0.5)").drawRect(-hw, 0, hw * 2, h);
+    fillSh.cache(-hw - 2, -2, hw * 2 + 4, h + 4);
+    fillSh.x = x; fillSh.y = top; fillSh.alpha = 0.28;
+    var ringSh = new createjs.Shape();
+    ringSh.graphics.setStrokeStyle(3).beginStroke("#ff3020").drawRect(-hw, 0, hw * 2, h);
+    ringSh.cache(-hw - 4, -4, hw * 2 + 8, h + 8);
+    ringSh.x = x; ringSh.y = top;
+    // 収束枠: 帯の内側の枠が左右から中心へ縮む(残り時間の目安。scaleX だけ動かす)
+    var sh = new createjs.Shape();
+    sh.graphics.setStrokeStyle(2).beginStroke("rgba(255,120,90,0.8)").drawRect(-hw, 0, hw * 2, h);
+    sh.cache(-hw - 3, -3, hw * 2 + 6, h + 6);
+    sh.x = x; sh.y = top;
+    var txt = warnBitmap(warnTxtC, x, y);      // ⚠は幅によらず等倍
+    warnCont.addChild(fillSh, ringSh, sh, txt);
     warnings.push({ x: x, y: y, r: r, timer: timer, total: timer,
-                    sh: sh, fill: fillSh, ring: ringSh, txt: txt, shade: shade });
+                    sh: sh, fill: fillSh, ring: ringSh, txt: txt, shade: null });
   }
 
   function removeWarningViews(w) {
-    if (w.shade.parent) warnCont.removeChild(w.shade);
+    if (w.shade && w.shade.parent) warnCont.removeChild(w.shade);
     if (w.sh.parent) warnCont.removeChild(w.sh);
     if (w.fill.parent) warnCont.removeChild(w.fill);
     if (w.ring.parent) warnCont.removeChild(w.ring);
@@ -1397,14 +1437,16 @@
       w.ring.alpha = 0.5 + 0.3 * Math.sin(t * (12 + k * 28));
       // 内側へ収束するリング=残り時間。焼き済みリングを scale で縮めるだけ。
       // 旧実装の「毎フレーム clear→パス再構築」はここでは丸ごと消えている
-      w.sh.scaleX = w.sh.scaleY = (w.r * (1 - k * 0.85)) / WARN_R0;
+      w.sh.scaleX = 1 - k * 0.85;   // 内枠が左右から中心へ縮む
       w.txt.alpha = 0.6 + 0.4 * Math.sin(t * (10 + k * 30));
       w.txt.scaleX = w.txt.scaleY = 1 + k * 0.35;
       // 赤フィルの充血(0.14 相当 → 0.4 相当)。最後の 0.25 秒は高速点滅
       w.fill.alpha = (w.timer < 0.25) ? 0.7 + 0.3 * Math.sin(t * 60) : 0.28 + k * 0.5;
       // 影の浮上: 画面下端の外から⚠の位置へ。近づくほど縦に膨らむ
-      w.shade.y = PP.H + 40 - (PP.H + 40 - w.y) * k;
-      w.shade.scaleY = (w.r / WARN_R0) * (0.35 + k * 0.4);
+      if (w.shade) {
+        w.shade.y = PP.H + 40 - (PP.H + 40 - w.y) * k;
+        w.shade.scaleY = (w.r / WARN_R0) * (0.35 + k * 0.4);
+      }
       // 水面の気泡: 何かが上がってくる(k が進むほど頻繁に)
       if (Math.random() < dt * (4 + k * 16)) {
         PP.fx.burst(w.x + (Math.random() - 0.5) * w.r * 1.2, PP.H - 6,
@@ -1420,6 +1462,13 @@
     stateT = teleOverride || PP.BOSS[key].telegraph;
     curTeleTotal = stateT;
     var a = ATTACKS[key];
+    if (key === "thunder") {
+      // 裁きの雷霆: 右から/左からをここで決め、大砲の段を流れる矢羽で知らせる
+      // (文字では言わない。矢羽の流れる向き=掃引の向き)
+      thunderDir = Math.random() < 0.5 ? 1 : -1;
+      thunderPasses = phase2 ? 2 : 1;
+      showThunderArrow(stateT + 0.3);
+    }
     // 宣言バナー + 低い唸りの警告音。
     // チャージリングが出ている間にダメージを与えれば攻撃はキャンセルできる
     showBanner(PP.i18n.t(a.nameKey), a.color, stateT + 0.4);
@@ -1432,7 +1481,8 @@
     // 予兆の間、画面全体に薄い血の色を差す(「来るぞ」の圧)
     PP.fx.screenFlash("rgba(140,0,0,0.10)", 0.10, stateT * 1000);
     // 重量級の攻撃はボスが咆哮する
-    if (key === "tentacle" || key === "tsunami" || key === "barrage" || key === "cross") {
+    if (key === "tentacle" || key === "tsunami" || key === "barrage" || key === "cross" ||
+        key === "thunder") {
       PP.audio.bossRoar();
     }
 
@@ -1630,6 +1680,13 @@
       crossT = 0;
       crossEmitAcc = 0;
       PP.audio.bossWaveAttack();   // 両舷斉射の専用SE(bossSweep はルーレット専用に戻した)
+    } else if (key === "thunder") {
+      // 裁きの雷霆: 始点側の端から反対側へ等間隔の落雷X を用意し、updateThunder が
+      // interval 秒おきに「⚠を置く→warn 秒後に落とす」を順に刻む
+      fillThunderPass();
+      thunderTimer = 0;   // 1本目の⚠はすぐ
+      PP.audio.darkMagic();
+      PP.fx.screenFlash("rgba(255,250,200,1)", 0.12, 160);
     } else {
       // 単発の狙い撃ち(addle=速い / shotSlow=大きく遅い / randomize=中速)
       var spec = B[key];
@@ -1734,6 +1791,14 @@
     return Math.max(K.gapMin, K.waveGap * Math.pow(K.gapDecay, idx));
   }
 
+  // 締めの 1 本: 3本→4本→3本→4本 のドラムの後に、自機の真下へ 1 本だけ。
+  // 挟み撃ち(動くな)で足を止めた直後に真下へ来るので、最後にもう一歩動いて
+  // 避け切る手応えが残る
+  function pickFinalZones(out) {
+    var lo = 90, hi = PP.W - 90;
+    out.push(Math.max(lo, Math.min(hi, PP.cannon.x)));
+  }
+
   // 最終波の「壁」: 画面幅いっぱいの等間隔列(間隔 2r+10)を並べ、大砲から
   // ±wallReach px 以内にある1列を抜いて隙間にする。隙間は 1 列ぶん(≈230px)
   // なので、⚠の予告時間(waveWarn)のうちに横へ走れば必ず入れる。
@@ -1771,6 +1836,7 @@
       tentPending.length = 0;
       var isWall = K.wallWave && tentWavesLeft === 1;
       if (isWall) pickWallZones(tentPending);
+      else if (tentWavesLeft === 1) pickFinalZones(tentPending);   // 締めは真下へ 1 本
       else pickTentacleZones(nextIdx, tentPending);
       // 前の波の触手はここで引っ込める。後半の波は 0.4 秒間隔まで詰まるので、
       // holdTime(0.9s)ぶん居座らせると前の波の柱が残ったまま次の波が生え、
@@ -1917,6 +1983,195 @@
         }
       }
     }
+  }
+
+  // ---------- 裁きの雷霆(右→左へ順番に落ちる落雷。被弾で暗闇) ----------
+  // fireAttack が thunderXs(右から順)を用意し、ここが interval 秒おきに先頭を
+  // 取り出して⚠を置き(warn 秒の予告)、時間が来たら strikeBolt で落とす。
+  // 落雷は弾体を持たない(パリィ不可)。当たり判定は落ちた瞬間の1回だけ
+  // 1往路ぶんの落雷X を thunderDir の始点側から順に並べる(1往路を消費)
+  function fillThunderPass() {
+    var K = PP.BOSS.thunder;
+    var nb = phase2 ? K.boltsP2 : K.bolts;
+    thunderXs.length = 0;
+    for (var bi = 0; bi < nb; bi++) {
+      var k = bi / (nb - 1);                       // 0=始点側 → 1=終点側
+      var x = K.margin + (PP.W - K.margin * 2) * (thunderDir > 0 ? 1 - k : k);
+      thunderXs.push(x);
+    }
+    thunderPasses--;
+  }
+
+  // 掃引の向きを示す矢羽(シェブロン)の列: 大砲の段の少し上に、画面幅いっぱいの
+  // 細い光の線と、掃引の向きを向いた矢羽を等間隔に並べ、光が始点側から終点側へ
+  // 順に走る(updateThunder)。文字を使わず、流れる向きだけで「どちらから来るか」
+  // を読ませる。矢羽は共有 canvas を 1 枚焼いて Bitmap で並べる(scaleX で左右反転)
+  var chevronC = null;
+  function bakeChevron() {
+    if (chevronC) return;
+    var s = new createjs.Shape();
+    // 右向きの「›」を二重線で(外=雷の黄、内=白の芯)
+    s.graphics.setStrokeStyle(5, "round", "round").beginStroke("#fff27a")
+      .moveTo(-10, -14).lineTo(4, 0).lineTo(-10, 14).endStroke();
+    s.graphics.setStrokeStyle(2, "round", "round").beginStroke("#ffffff")
+      .moveTo(-10, -14).lineTo(4, 0).lineTo(-10, 14).endStroke();
+    s.cache(-16, -20, 32, 40);
+    chevronC = s.cacheCanvas;
+  }
+  function showThunderArrow(dur) {
+    hideThunderArrow();
+    bakeChevron();
+    var K = PP.BOSS.thunder;
+    var cont = new createjs.Container();
+    var y = PP.CANNON_Y - 70;
+    // 段の光の線(始点側が明るく、終点側へ薄れる)
+    var line = new createjs.Shape();
+    var x0 = K.margin - 40, x1 = PP.W - K.margin + 40;
+    line.graphics.beginLinearGradientFill(
+      thunderDir > 0 ? ["rgba(255,242,122,0)", "rgba(255,242,122,0.7)"]
+                     : ["rgba(255,242,122,0.7)", "rgba(255,242,122,0)"],
+      [0, 1], x0, 0, x1, 0).drawRect(x0, y - 1, x1 - x0, 2);
+    line.cache(x0, y - 2, x1 - x0, 4);
+    cont.addChild(line);
+    var chevrons = [];
+    var n = 9;
+    for (var i = 0; i < n; i++) {
+      var b = new createjs.Bitmap(chevronC);
+      b.regX = 16; b.regY = 20;
+      b.x = K.margin + (PP.W - K.margin * 2) * i / (n - 1);
+      b.y = y;
+      b.scaleX = -thunderDir;    // 右から来る(dir>0)なら左向き「‹」
+      cont.addChild(b);
+      chevrons.push(b);
+    }
+    warnCont.addChild(cont);
+    thunderArrow = { cont: cont, chevrons: chevrons, t: dur, total: dur };
+  }
+  function hideThunderArrow() {
+    if (thunderArrow && thunderArrow.cont.parent) warnCont.removeChild(thunderArrow.cont);
+    thunderArrow = null;
+  }
+
+  function updateThunder(dt) {
+    var K = PP.BOSS.thunder;
+    if (thunderArrow) {
+      thunderArrow.t -= dt;
+      if (thunderArrow.t <= 0) hideThunderArrow();
+      else {
+        // 光が始点側から終点側へ順に走る(矢羽ごとに位相をずらした明滅)。
+        // 消える直前 0.3 秒はフェードアウト
+        var ch = thunderArrow.chevrons, n = ch.length;
+        var fade = thunderArrow.t < 0.3 ? thunderArrow.t / 0.3 : 1;
+        for (var ci = 0; ci < n; ci++) {
+          var order = thunderDir > 0 ? (n - 1 - ci) : ci;    // 始点側が 0
+          var ph = t * 9 - order * 0.9;
+          var w = Math.max(0, Math.sin(ph));
+          ch[ci].alpha = (0.25 + 0.75 * w * w) * fade;
+          ch[ci].x = PP.BOSS.thunder.margin + (PP.W - PP.BOSS.thunder.margin * 2) * ci / (n - 1)
+                     - thunderDir * 6 * w;
+        }
+      }
+    }
+    if (thunderXs.length > 0) {
+      thunderTimer -= dt;
+      if (thunderTimer <= 0) {
+        var x = thunderXs.shift();
+        addWarning(x, PP.CANNON_Y - 20, K.r, K.warn);
+        thunderBolts.push({ x: x, t: K.warn });
+        PP.audio.beep(1400 - thunderBolts.length * 60, 0.08, "square", 0.05);   // 帯電のチッ
+        thunderTimer = phase2 ? K.intervalP2 : K.interval;
+        if (thunderXs.length === 0 && thunderPasses > 0) {
+          // 怒りフェーズ: 往路を撃ち終えたら反対側からもう1往路(passGap 秒の間)
+          thunderDir = -thunderDir;
+          fillThunderPass();
+          thunderTimer = K.passGap;
+          showThunderArrow(K.passGap + K.warn);   // 矢羽が逆向きに流れ出す=折り返しの合図
+          PP.audio.beep(180, 0.3, "sawtooth", 0.1);
+        }
+      }
+    }
+    for (var i = thunderBolts.length - 1; i >= 0; i--) {
+      thunderBolts[i].t -= dt;
+      if (thunderBolts[i].t <= 0) {
+        strikeBolt(thunderBolts[i].x);
+        thunderBolts.splice(i, 1);
+      }
+    }
+    // 雷の線は 0.25 秒で消える(alpha を落とすだけ)
+    for (var f = boltFx.length - 1; f >= 0; f--) {
+      var b = boltFx[f];
+      b.t -= dt;
+      if (b.t <= 0) {
+        if (b.sh.parent) b.sh.parent.removeChild(b.sh);
+        boltFx.splice(f, 1);
+      } else {
+        b.sh.alpha = b.t / 0.25;
+      }
+    }
+    // 暗闇の解除(powerups.update が 0 にする)を拾って手札の色を戻す
+    var dark = PP.game.bossFx.blackout > 0;
+    if (blackoutWas && !dark) PP.cannon.refreshBalls();
+    blackoutWas = dark;
+  }
+
+  // 落雷: ボスの高さから大砲の高さまでギザギザの線(白い芯+黄の外光)。
+  // 範囲内なら暗闇(色不明+交換不能)。触手と同じ短い専用無敵で連続ハメだけ防ぐ
+  function strikeBolt(x) {
+    var K = PP.BOSS.thunder;
+    var y0 = PP.BOSS.y + 20, y1 = PP.CANNON_Y - 20;
+    var sh = new createjs.Shape();
+    var gph = sh.graphics;
+    var pts = [], segs = 9;
+    for (var s = 0; s <= segs; s++) {
+      var yy = y0 + (y1 - y0) * s / segs;
+      var xx = x + (s === 0 || s === segs ? 0 : (Math.random() - 0.5) * 70);
+      pts.push([xx, yy]);
+    }
+    gph.setStrokeStyle(9).beginStroke("rgba(255,242,122,0.55)").moveTo(pts[0][0], pts[0][1]);
+    for (var p = 1; p < pts.length; p++) gph.lineTo(pts[p][0], pts[p][1]);
+    gph.endStroke();
+    gph.setStrokeStyle(3).beginStroke("#ffffff").moveTo(pts[0][0], pts[0][1]);
+    for (var q = 1; q < pts.length; q++) gph.lineTo(pts[q][0], pts[q][1]);
+    gph.endStroke();
+    sh.cache(x - 50, y0 - 6, 100, y1 - y0 + 12);   // GL 対応(非 cache の Shape は描かれない)
+    strikeCont.addChild(sh);
+    boltFx.push({ sh: sh, t: 0.25 });
+    // 落雷の雷鳴(SE/Thunder.mp3 + 炸裂音。間引きは audio.js)と閃光。着弾点に火花+衝撃波
+    PP.audio.thunder();
+    PP.fx.screenFlash("rgba(255,255,220,1)", 0.18, 120);
+    PP.fx.flash(x, y1, "rgba(255,250,200,0.9)", 60);
+    PP.fx.burst(x, y1, "#fff27a", 16, 1.6);
+    PP.fx.ring(x, y1, "#fff27a", 16, 110, 380);
+    PP.fx.shake(9, 0.2);
+    if (Math.abs(PP.cannon.x - x) < K.r + 25) {
+      if (orbHitCd <= 0) {
+        applyDebuff("blackout", 1.0);
+        orbHitCd = K.hitIFrames;
+        PP.cannon.setHurt(K.hitIFrames);
+        PP.fx.shake(12, 0.3);
+      } else {
+        // 無敵中はバリアが掠める演出のみ
+        PP.fx.burst(PP.cannon.x, PP.cannon.y - 40, "#9fd8ff", 6, 1.0);
+      }
+    }
+  }
+
+  // 落雷の予定と線を片付ける(撃破・リセット)。暗闇中なら手札の色も戻す
+  function clearThunder() {
+    thunderXs.length = 0;
+    thunderBolts.length = 0;
+    thunderPasses = 0;
+    hideThunderArrow();
+    for (var i = 0; i < boltFx.length; i++) {
+      if (boltFx[i].sh.parent) boltFx[i].sh.parent.removeChild(boltFx[i].sh);
+    }
+    boltFx.length = 0;
+    var fx = PP.game.bossFx;
+    if (fx.blackout > 0) {
+      fx.blackout = 0;
+      if (PP.cannon && PP.cannon.refreshBalls && PP.game.state === "playing") PP.cannon.refreshBalls();
+    }
+    blackoutWas = false;
   }
 
   // ---------- 大津波(低空を横断する水壁。安全柱の中だけが無事) ----------
@@ -2278,6 +2533,8 @@
       clearWarnings();
       clearCrossTele();
       hideSafePillar();
+      hideThunderArrow();   // 雷の方向矢印も攻撃ごと消える
+      thunderPasses = 0;
       hideBanner();
       PP.fx.floatText(PP.i18n.t("boss.stopped"), body.x, body.y + 96, "#8ef0d0", 24);
       PP.audio.beep(880, 0.12, "triangle", 0.1);
@@ -2334,6 +2591,7 @@
   function clearStatusFx() {
     var fx = PP.game.bossFx;
     fx.ink = 0; fx.addle = 0; fx.freeze = 0; fx.shotSlow = 0;
+    clearThunder();   // 落雷の予定・線を片付け、暗闇なら手札の色を戻す
     rndSpinT = 0;
     PP.game.rouletteSpin = false;
     barrageLeft = 0;
@@ -2394,6 +2652,7 @@
     updateWarnings(dt);
     updateStrikes(dt);
     updateTentacleWaves(dt);
+    updateThunder(dt);
     updateWave(dt);
     updateBarrage(dt);
     updateCross(dt);
@@ -2670,6 +2929,8 @@
     getWarningXs: function () { return warnings.map(function (w) { return w.x; }); },
     getStrikeCount: function () { return strikes.length; },
     getInkBlobCount: function () { return inkBlobs.length; },
+    // 裁きの雷霆の残り落雷数(未予告+落下待ち)
+    getThunderCount: function () { return thunderXs.length + thunderBolts.length; },
     // 指定した技を即座に予兆から始める(バランス調整・動作確認用)
     forceAttack: function (key) {
       if (!active || !built || !ATTACKS[key]) return false;

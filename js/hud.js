@@ -345,6 +345,7 @@
       if (bfx.addle > 0) parts.push("🌀" + Math.ceil(bfx.addle));
       if (bfx.ink > 0) parts.push("🦑" + Math.ceil(bfx.ink));
       if (bfx.shotSlow > 0) parts.push("⏳" + Math.ceil(bfx.shotSlow));
+      if (bfx.blackout > 0) parts.push("🌑" + Math.ceil(bfx.blackout));
     }
     if (g.special) {
       var spIcon = g.special === "missile" ? "🚀" : "💣";

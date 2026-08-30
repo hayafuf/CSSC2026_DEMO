@@ -683,6 +683,11 @@
   function swap() {
     var g = PP.game;
     if (g.state !== "playing") return;
+    // ボスの「暗闇」中は交換できない(色が読めないうえに取り替えも利かない)
+    if (g.bossFx.blackout > 0) {
+      PP.audio.beep(120, 0.06, "square", 0.05);   // 空振りのカチッ
+      return;
+    }
     if (g.special) { toggleSpecial(); return; }
     var t = g.currentColor;
     g.currentColor = g.nextColor;
@@ -756,9 +761,13 @@
     if (nextView) { nextView.parent.removeChild(nextView); }
     // 装填した玉は砲口にちょうど収まる原寸(= これから撃たれる玉そのもの)。
     // 砲口の縁 muzzleFront が loadSlot より上にあるので、下半分が口に沈んで見える。
+    // ボスの「暗闇」中は装填中の色玉が真っ黒(色不明)で見える。特殊弾・万能玉は
+    // そのまま。次の玉は見せる(次は分かるが今は分からない、交換もできない)
+    var dark = g.bossFx.blackout > 0;
     currentView = (g.special && g.specialLoaded)
       ? (g.special === "missile" ? PP.ball.makeMissileView() : PP.ball.makeBombView())
       : PP.upgrades.wildArmed() ? PP.ball.makeWildView()   // 【強化】救済中は虹の万能玉
+      : dark ? PP.ball.makeUnknownView()
       : PP.ball.makeView(g.currentColor);
     currentView.x = 0; currentView.y = LOAD_Y;
     loadSlot.addChild(currentView);

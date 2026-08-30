@@ -448,6 +448,41 @@
     return cont;
   }
 
+  // 「暗闇」(ボスの裁きの雷霆)の装填玉: 真っ黒の球体+「?」。色が読めない手札。
+  // 撃った弾そのものは本当の色で飛ぶ(cannon.js fire)ので、これは表示専用。
+  // makeView 製ではない(baseBmp を持たない)ので recolorView は効かない
+  function drawUnknownGlow(g) {
+    g.beginRadialGradientFill(["rgba(120,60,200,0.55)", "rgba(120,60,200,0)"], [0.3, 1],
+      0, 0, 0, 0, 0, R + 14).drawCircle(0, 0, R + 14);
+  }
+  function makeUnknownView() {
+    var cont = new createjs.Container();
+    var glow = partSprite("unknownGlow", R + 14, drawUnknownGlow);
+    cont.addChild(glow);
+    var body = new createjs.Shape();
+    body.graphics
+      .beginRadialGradientFill(["#3a3446", "#15121c", "#000000"], [0, 0.6, 1],
+        -R * 0.32, -R * 0.34, R * 0.06, 0, 0, R)
+      .drawCircle(0, 0, R);
+    body.graphics.setStrokeStyle(1.5).beginStroke("rgba(160,120,255,0.6)").drawCircle(0, 0, R - 0.7);
+    body.cache(-R - 2, -R - 2, (R + 2) * 2, (R + 2) * 2);
+    cont.addChild(body);
+    var q = new createjs.Text("?", "bold " + Math.round(R * 1.3) + "px sans-serif", "#b9a3ff");
+    q.textAlign = "center"; q.textBaseline = "middle";
+    q.cache(-R, -R, R * 2, R * 2);
+    cont.addChild(q);
+    var shine = partSprite("shine", R + 2, drawShine);
+    shine.alpha = 0.5;
+    cont.addChild(shine);
+    // 不穏な明滅(glow を脈動)
+    createjs.Tween.get(glow, { loop: true })
+      .to({ alpha: 0.3, scaleX: 0.9, scaleY: 0.9 }, 420, createjs.Ease.quadInOut)
+      .to({ alpha: 1, scaleX: 1.08, scaleY: 1.08 }, 420, createjs.Ease.quadInOut);
+    cont.spin = q;
+    cont.spark = glow;   // cannon.js の後始末(removeTweens(view.spark))に相乗り
+    return cont;
+  }
+
   // 装填用: チェーンに残っている色から選ぶ。基本は「盤面に実在する色」を
   // 色ごと重み1で一様に引く(本家Zuma準拠。手詰まりは原理的に起きない)。
   // そのうえで、先頭(樽に一番近い玉 = 最初の非宝玉)の色だけ PICK_FRONT_GAIN 倍に
@@ -532,6 +567,7 @@
     makeMissileView: makeMissileView,
     makeTreasureView: makeTreasureView,
     makeWildView: makeWildView,
+    makeUnknownView: makeUnknownView,   // 暗闇(裁きの雷霆)の黒い装填玉
     makeSkullOverlay: makeSkullOverlay,
     pickColor: pickColor,
     spawnColor: spawnColor

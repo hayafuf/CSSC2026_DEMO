@@ -168,8 +168,8 @@
     "skull.freeze": "⛓ 動けない!",
     "skull.addle": "🌀 操作が逆に!",
     "fx.intercept": "迎撃!",
-    "parry.guard": "🛡 パリィ!",
-    "parry.reflect": "⚔ 弾き返した!",
+    "parry.guard": "パリィ!",
+    "parry.reflect": "弾き返した!",
 
     // ---- boss.js ----
     "boss.atk.ink": "―― 漆黒の墨獄 ――",
@@ -181,6 +181,7 @@
     "boss.atk.tsunami": "―― 終焉の大海嘯 ――",
     "boss.atk.barrage": "―― 妖星の豪雨 ――",
     "boss.atk.cross": "―― 両舷斉射 ――",
+    "boss.atk.thunder": "―― 裁きの雷霆 ――",
     "boss.hpLabel": "🐙 クラーケン",
     "boss.hitsLeft": "あと{n}",
     "boss.tentacleCut": "触手を斬り払った!",
@@ -476,8 +477,8 @@
     "skull.freeze": "⛓ Can't move!",
     "skull.addle": "🌀 Controls reversed!",
     "fx.intercept": "Intercepted!",
-    "parry.guard": "🛡 Parried!",
-    "parry.reflect": "⚔ Reflected!",
+    "parry.guard": "Parried!",
+    "parry.reflect": "Reflected!",
 
     "boss.atk.ink": "―― Jet-Black Ink Prison ――",
     "boss.atk.addle": "―― Maddening Countertide ――",
@@ -488,6 +489,7 @@
     "boss.atk.tsunami": "―― Tsunami of the End ――",
     "boss.atk.barrage": "―― Rain of Baleful Stars ――",
     "boss.atk.cross": "―― Broadside Volley ――",
+    "boss.atk.thunder": "―― Judgment Thunder ――",
     "boss.hpLabel": "🐙 Kraken",
     "boss.hitsLeft": "{n} more",
     "boss.tentacleCut": "Tentacle severed!",

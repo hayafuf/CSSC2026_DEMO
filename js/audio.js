@@ -405,6 +405,9 @@
   var seMeteorRain = sfx("SE/meteo_raining.mp3", 0.65);
   var seMeteorRain2 = sfx("SE/meteo_raining2.mp3", 0.65);
   var seMeteorLand = sfx("SE/meteo_land.mp3", 0.75);
+  // 裁きの雷霆: 落雷 1 本ごとの雷鳴(0.28 秒おきに連続するので間引きは呼び出し側)
+  var seThunder = sfx("SE/Thunder.mp3", 0.8);
+  var thunderAt = 0;        // 雷鳴 SE を最後に鳴らした時刻(ms。連続落雷の間引き用)
   // カラーボム発動: 選ばれた色が盤面から一掃されるときの炸裂音
   // ================================================================
   // TODO【課題4】カラーボムで再生するSEファイルを指定してみよう
@@ -1111,6 +1114,13 @@
       beep(55, 0.35, "sawtooth", 0.18);
       beep(40, 0.55, "sine", 0.14);
       beep(30, 0.7, "sine", 0.1);
+    },
+    // 裁きの雷霆の落雷: 素材(Thunder.mp3)+合成の高い炸裂音。落雷は 0.24〜0.28 秒
+    // おきに連続するので、素材は 0.15 秒に1回まで間引く(炸裂音は毎回)
+    thunder: function () {
+      var now = Date.now();
+      if (now - thunderAt >= 150) { thunderAt = now; seThunder(); }
+      beep(2400, 0.06, "square", 0.08);
     },
     // ---- 危機(crisis.js が毎フレーム呼ぶ) ----
     crisis: crisis,            // 0〜1 の深さで警報ループの音量/ピッチを決める

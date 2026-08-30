@@ -171,8 +171,12 @@
 
     // 波の補給完了 → 末尾に宝玉(こちらも balls の一員)
     if (lane.pending === 0 && lane.needTreasure) {
-      lane.needTreasure = false;
-      if (balls.length > 0) {
+      lane.needTreasure = false;   // 必ず消す(残すと updateWaveTimer が止まり波が来ない)
+      if (balls.length === 0) {
+        // 最後の玉が湧いた瞬間に波を消し切っていた: 付ける相手がいないので
+        // 宝玉を作らず、その場で「解放」扱いにする(以前は黙って消えていた)
+        dropTreasureAt(lane, 0);
+      } else {
         var tview = PP.ball.makeTreasureView();
         tview.visible = false;
         PP.layers.ballUnder.addChildAt(tview, 0);
@@ -732,17 +736,25 @@
     return out;
   }
 
-  // 宝玉 balls[i] の「自分の波」の色玉が前方(index < i)に残っているか。
-  // 解放条件は「レーンの先頭にいる」ではなく「自分の波を全消しした」:
-  // 前の波のチェーンがまだ残っていても、後ろの波が宝玉だけになれば解放する
-  // (前の波の玉・宝玉は wave 番号が小さいので数えない。挿入した玉も
-  //  hit.wave を引き継ぐので同じ波として数えられる)
-  function sameWaveAhead(balls, i) {
-    var w = balls[i].wave;
-    for (var j = i - 1; j >= 0; j--) {
-      if (balls[j].wave === w && !balls[j].treasure) return true;
-    }
-    return false;
+  // 宝玉 balls[i] が「受け持つ」色玉がまだ残っているか。
+  // 解放条件は「レーンの先頭にいる」ではなく「自分の担当を全消しした」:
+  // 前の波の宝玉が生きていれば、そのチェーンが残っていても後ろの波が宝玉だけに
+  // なれば解放する。担当は wave 番号ではなく「並び」で決める:
+  //   前方: 直前の玉が色玉なら、次の(生きている)宝玉までの区間はまだ自分の担当。
+  //         前の波の宝玉が砕けると前の波の残りと自分の波は隙間なく1本に合体し、
+  //         プレイヤーにはそれが「自分を連れた1本のチェーン」に見える(玉に波番号は
+  //         見えない)。wave 番号で数えると、合体チェーンの後ろ半分を消しただけで
+  //         前方に玉が何個残っていても解放されてしまう(=「担当の玉が残っているのに
+  //         宝がダイヤになった」バグ)。並びで決めれば見た目と一致する
+  //   後方: 自分に接触している同じ波の色玉(宝玉を洞窟側から撃つと hit.wave を
+  //         引き継いだ玉が後ろに挿入される)。次の波(wave が大きい)の接触は粉砕側の
+  //         判定が担当するので、ここでは数えない
+  // 配列は物理順(index 0 = 樽側)なので、隣の玉を見るだけで決まる
+  function ownsBalls(balls, i) {
+    var t = balls[i];
+    if (i > 0 && !balls[i - 1].treasure) return true;
+    var b = balls[i + 1];
+    return !!b && !b.treasure && b.wave === t.wave && t.d - b.d <= D + 0.5;
   }
 
   // 宝玉の解放・粉砕(レーン lane 内)
@@ -751,7 +763,7 @@
     for (var i = balls.length - 1; i >= 0; i--) {
       var t = balls[i];
       if (!t.treasure) continue;
-      if (i === 0 || !sameWaveAhead(balls, i)) {
+      if (!ownsBalls(balls, i)) {
         // 自分の波の玉が全滅 → 宝玉が解放されて落下する
         freeTreasure(lane, i);
       } else if (i + 1 < balls.length &&
@@ -774,7 +786,13 @@
   // 波を全消しした報酬: 宝玉がその場から落下アイテムになる
   function freeTreasure(lane, index) {
     var t = removeTreasureAt(lane, index);
-    var p = lane.rail.posAt(Math.max(t.d, 0));
+    dropTreasureAt(lane, t.d);
+  }
+
+  // 「お宝解放!」の演出+落下アイテム化(レール位置 d)。freeTreasure と、
+  // 宝玉を付ける前に波を消し切った場合(spawnBalls)で共用
+  function dropTreasureAt(lane, d) {
+    var p = lane.rail.posAt(Math.max(d, 0));
     PP.fx.burst(p.x, p.y, "#ffe08a", 16);
     PP.fx.floatText(PP.i18n.t("chain.treasureFree"), p.x, p.y - 26, "#ffe08a", 20);
     PP.audio.treasure();
