@@ -893,6 +893,11 @@
       lane.recoil.idx = balls[i] ? i : i - 1;   // 引き継ぎ先の位置も更新(recoilIndex 用)
       if (!lane.recoil.anchor) lane.recoil = null;
     }
+    // 夜(night.js): 消えた場所の灯りに燃料を戻す。全撃破経路がここを通るので
+    // 1 か所で済む(消えた区間の中央のレール距離と個数を渡す)
+    if (PP.night && PP.night.active()) {
+      PP.night.onPop(lane, (removed[0].d + removed[removed.length - 1].d) / 2, removed.length);
+    }
     removed.forEach(function (b, k) {
       var p = lane.rail.posAtInto(b.d + (b.slide || 0), _pos);   // x/y は直後に消費
       b.view.x = p.x; b.view.y = p.y;

@@ -49,7 +49,7 @@
     "diff.normal.name": "一人前の海賊",
     "diff.hard.name": "海賊船長",
     "diff.hardcore.name": "深海の悪魔",
-    "diff.gale.name": "深海の悪魔+風",
+    "diff.gale.name": "深海の悪魔+風+夜",
     "hud.diffLocked": "🔒 「深海の悪魔」を制覇すると解禁",
 
     // ---- config.js: コース名 ----
@@ -203,7 +203,7 @@
     "main.gcTitleBoss": "🏆 クラーケン討伐! 全海域制覇!",
     "main.gcTitle": "🏆 全海域制覇!",
     "main.gcBody": "全 {total} ステージを生き延びた! 秘宝は我らのものだ!\n{honor}{extra}制覇ボーナス +5000\n最終スコア {score} 点\n{tap}で最初の海へ",
-    "main.gcUnlockGale": "🌪 新難易度「深海の悪魔+風」解禁!\n",
+    "main.gcUnlockGale": "🌪🌙 新難易度「深海の悪魔+風+夜」解禁!\n",
     "main.clearTitle": "⚓ ステージ {level}/{total} 制覇!",
     "main.clearBossBody": "生存ボーナス +1000 / スコア {score} 点 ――深淵の主が目を覚ました…\n🎯 クラーケンの頭に玉を当てて HP を削り切れば勝利!\n⚡ 予兆(チャージ)中に当てれば攻撃を阻止できる\n🛡 妖弾は自弾で迎撃できる(ミサイルは貫通)。樽への玉列も守り続けろ!\n{tap}で最終決戦へ",
     "main.clearBody": "耐え切って残りも掃討した! 生存ボーナス +1000\nスコア {score} 点\n{tap}で次のステージへ",
@@ -336,7 +336,8 @@
     "tut.hWildPc": "Q キーで虹玉を装填!どの色にもつながる切り札",
     "tut.hCoin": "🪙 を集めるとライフが回復する",
     "tut.hBoss": "ボス戦!玉を消して敵のHPを削れ",
-    "tut.hGale": "🌪 横風で玉が曲がる!WIND の表示で向きと風速を読め(枠が光ったら風が変わる合図)。🔭 羅針の眼なら曲がる軌道が見える",
+    "tut.hGale": "🌪 横風で玉が曲がる!砲の脇の「◀ 風速」を読め(明滅したら風が変わる合図)。🔭 羅針の眼なら曲がる軌道が見える",
+    "tut.hNight": "🌙 闇が盤面を呑む。レールの灯りは玉を消さないと消えていく(消した場所の近くほど強く戻る)。光るのは自分の玉・大砲・🔭 羅針の眼だけ",
 
     // ---- course-api.js(バリデーション。エディタ経由でユーザーに見える) ----
     "api.defaultName": "無名の航路",
@@ -371,7 +372,7 @@
     "diff.normal.name": "Seasoned Pirate",
     "diff.hard.name": "Pirate Captain",
     "diff.hardcore.name": "Devil of the Deep",
-    "diff.gale.name": "Deep Devil + Gale",
+    "diff.gale.name": "Deep Devil + Gale + Night",
     "hud.diffLocked": "🔒 Conquer \"Devil of the Deep\" to unlock",
 
     "course.route": "The Sea Route",
@@ -514,7 +515,7 @@
     "main.gcTitleBoss": "🏆 Kraken Vanquished!",
     "main.gcTitle": "🏆 Seas Conquered!",
     "main.gcBody": "All {total} stages survived! The treasure is ours!\n{honor}{extra}Conquest bonus +5000\nFinal score: {score}\n{tap} to return to the first sea",
-    "main.gcUnlockGale": "🌪 New difficulty unlocked: Deep Devil + Gale!\n",
+    "main.gcUnlockGale": "🌪🌙 New difficulty unlocked: Deep Devil + Gale + Night!\n",
     "main.clearTitle": "⚓ Stage {level}/{total} clear!",
     "main.clearBossBody": "Survival bonus +1000 / Score {score} ― the Abyss stirs…\n🎯 Whittle the Kraken's head down to zero HP to win!\n⚡ Hit it during a charge-up to interrupt the attack\n🛡 Shoot down orbs (missiles pierce). Guard the barrel!\n{tap} to enter the final battle",
     "main.clearBody": "You held out and swept the rest! Survival bonus +1000\nScore: {score}\n{tap} for the next stage",
@@ -637,7 +638,8 @@
     "tut.hWildPc": "Load a rainbow ball with Q — it matches any color!",
     "tut.hCoin": "Collect 🪙 coins to restore lives",
     "tut.hBoss": "Boss battle! Pop balls to damage the boss",
-    "tut.hGale": "🌪 Crosswind bends your shots! Read the WIND meter (it glows before the wind shifts). The 🔭 spyglass shows the curved path",
+    "tut.hGale": "🌪 Crosswind bends your shots! Read the wind speed beside the cannon (it blinks before the wind shifts). The 🔭 spyglass shows the curved path",
+    "tut.hNight": "🌙 Darkness swallows the board. The rail lanterns fade unless you keep popping balls (pops refill the lanterns nearby the most). Only your shots, the cannon and the 🔭 spyglass give light",
 
     "api.defaultName": "Unnamed Route",
     "api.lane": "Lane {n}: ",

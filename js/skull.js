@@ -705,6 +705,8 @@
     clear: clear,
     countActive: countActive,
     bulletCount: function () { return bullets.length; },   // チュートリアルが実演の弾幕の終わりを見張る
+    // 全弾の座標を渡す(night.js が妖弾の光を闇に開けるのに使う。配列は外に出さない)
+    eachBullet: function (cb) { for (var i = 0; i < bullets.length; i++) cb(bullets[i].x, bullets[i].y); },
     splatInk: splatInk,
     debugForceFire: debugForceFire
   };

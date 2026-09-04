@@ -400,7 +400,7 @@
 
   // ---------- 画面の揺れ ----------
   var SHAKE_LAYERS = ["path", "railFlow", "bridgeUnder", "ballUnder", "bridge", "ballOver",
-    "barrel", "shot", "item", "fx", "cannon"];
+    "barrel", "night", "shot", "item", "fx", "cannon"];   // night: 闇の穴が盤面とずれないように一緒に揺らす
   var shakeRefs = null;   // レイヤー参照は初回に解決して使い回す(毎フレームの名前引き回避)
   var shakePow = 0, shakeT = 0, shakeDur = 0;
 

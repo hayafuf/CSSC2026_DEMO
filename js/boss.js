@@ -2925,6 +2925,8 @@
     getHp: function () { return hp; },
     getState: function () { return state; },
     getBulletCount: function () { return bullets.length; },
+    // 全弾の座標を渡す(night.js が妖弾の光を闇に開けるのに使う。配列は外に出さない)
+    eachBullet: function (cb) { for (var i = 0; i < bullets.length; i++) cb(bullets[i].x, bullets[i].y); },
     // ⚠のX座標一覧と触手柱の本数(触手の配置ルールの検証用)
     getWarningXs: function () { return warnings.map(function (w) { return w.x; }); },
     getStrikeCount: function () { return strikes.length; },

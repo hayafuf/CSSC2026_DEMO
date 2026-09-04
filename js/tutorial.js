@@ -138,7 +138,8 @@
     wild:     function () { return PP.TOUCH ? "tut.hWild" : "tut.hWildPc"; },
     coin:     fix("tut.hCoin"),
     boss:     fix("tut.hBoss"),
-    gale:     fix("tut.hGale")    // 横風の海域(初回のイントロ明けに main.js が呼ぶ)
+    gale:     fix("tut.hGale"),   // 横風の海域(初回のイントロ明けに main.js が呼ぶ)
+    night:    fix("tut.hNight")   // 夜の海域(同上。風の直後に出る)
   };
 
   function esc(s) {

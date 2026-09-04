@@ -145,7 +145,8 @@
     g.finishing = false;
     PP.powerups.clear();
     PP.chain.resetWind();   // 風の物理も仕切り直す(吹いてる最中のリトライで凪が誤発火しないように)
-    PP.gale.reset();        // 横風(深海の悪魔+風)も凪から仕切り直す(猶予 PP.GALE.firstDelay の後に吹き始める)
+    PP.gale.reset();        // 横風(深海の悪魔+風+夜)も最初の風から仕切り直す
+    PP.night.reset();       // 夜の闇と灯りも置き直す(夜でない難易度は層を隠すだけ)
     PP.upgrades.onLevelStart();   // 【強化】自動系タイマー・救済を仕切り直す(段数は維持)
     // 骸骨玉の弾・墨と状態異常を仕切り直す(リトライ・再出航もここを通る)。
     // ボス戦は boss.setActive → reset → clearStatusFx が別途ゼロ化するが、
@@ -457,6 +458,7 @@
       PP.tut.maybeStart();
       if (g.bossMode) PP.tut.hint("boss");
       if (PP.gale.active()) PP.tut.hint("gale");   // 横風の海域: 風見と 🔭 の読み方(初回のみ)
+      if (PP.night.active()) PP.tut.hint("night"); // 夜の海域: 灯りは消し続けないと消える(初回のみ)
     }
   }
 
@@ -913,6 +915,9 @@
       // 横風(深海の悪魔+風)。playing 分岐にだけ置くので、イントロ・カード3択・
       // リトライ暗転・ポーズ中は風も止まる(風見と弾の曲がりが凍ったまま待つ)
       if (PP.gale.active()) PP.gale.update(dt);
+      // 夜: 灯りの燃料が減る(playing 中だけ。チュートリアル中は生存ゲージと同じく凍結)。
+      // 夜以外の難易度は即 return
+      PP.night.update(dt, !(PP.tut && PP.tut.active()));
       // bossFx(addle/freeze)の減算は ↑ の powerups.update に一本化されている。
       // タイマー失効と同じフレーム内で照準の橋渡しエッジを張り直す(input.js)。
       // これが無いと検知が次フレームにずれ、間に届いた mousemove が旧写像で
@@ -1018,10 +1023,14 @@
     PP.cannon.updateHurt(dt);    // 被弾後の無敵の点滅(非プレイ時は自動で解除される)
     PP.cannon.updateAim(dt);   // dt は望遠鏡の着弾走査(firstHitY)の間引きに使う
     PP.cannon.updateGuide(dt);   // 砲の真上の現在位置ガイド(格納中のカーソル代役)
+    // 夜: playing 以外(イントロ・クリア・3択など)でも砲口の光は砲に付いていくが、
+    // 燃料は減らさない(playing 中の減算は上の分岐で済んでいる)
+    if (g.state !== "playing") PP.night.update(dt, false);
     // チュートリアルの進行とトースト(DOM 描画なので下の間引きの影響を受けない)
     if (PP.tut) PP.tut.update(dt);
 
     renderChains();
+    PP.night.render();   // 夜: 玉の位置を示すゴースト(玉の座標が確定した後。夜以外は即 return)
 
     if (menuSkipDraw(g.state)) return;   // メニュー系画面の間引き(上の解説参照)
     stage.update(e);
@@ -1184,6 +1193,7 @@
   // タイトル画面の表示(起動時の音源読み込み完了後と、ゲームオーバーからの帰還で共用)
   function showTitle() {
     PP.game.state = "title";
+    PP.night.hide();   // 夜の闇はタイトルでは畳む(次の出航で startLevel が出し直す)
     PP.hud.showOverlay(PP.i18n.t("main.titleTitle"),
       PP.i18n.t(PP.TOUCH ? "main.titleTouch" : "main.titleMouse"));
   }
@@ -1312,6 +1322,7 @@
       ballOver: new createjs.Container(),
       tunnel: new createjs.Container(),   // トンネルの覆い(区間内の玉を隠す)
       barrel: new createjs.Container(),   // 樽の手前側(玉より上)
+      night: new createjs.Container(),    // 夜の闇と灯り(玉より上・弾より下。night.js。夜以外は非表示)
       shot: new createjs.Container(),
       item: new createjs.Container(),
       fx: new createjs.Container(),
@@ -1323,7 +1334,7 @@
     };
     stage.addChild(PP.layers.path, PP.layers.railFlow, PP.layers.bridgeUnder,
       PP.layers.ballUnder, PP.layers.bridge, PP.layers.ballOver,
-      PP.layers.tunnel, PP.layers.barrel,
+      PP.layers.tunnel, PP.layers.barrel, PP.layers.night,
       PP.layers.shot, PP.layers.item, PP.layers.fx, PP.layers.cannon,
       PP.layers.crisis, PP.layers.doom, PP.layers.hud, PP.layers.overlay);
     PP.layers.railFlow.mouseEnabled = false;
@@ -1341,7 +1352,8 @@
     // mouseChildren=false も付けて走査が子へ降りること自体を止める。
     // (hud / overlay / cannon はボタン類の可能性を考えて触らず残す。
     //  エディタは自前の Container にリスナーを張るので影響しない)
-    var deaf = ["path", "ballUnder", "ballOver", "barrel", "shot", "item"];
+    var deaf = ["path", "ballUnder", "ballOver", "barrel", "night", "shot", "item"];
+    PP.layers.night.visible = false;   // 夜の難易度で startLevel → night.reset が出す
     for (var di = 0; di < deaf.length; di++) {
       PP.layers[deaf[di]].mouseEnabled = false;
       PP.layers[deaf[di]].mouseChildren = false;

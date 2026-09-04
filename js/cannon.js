@@ -51,7 +51,7 @@
   var galeDots = [], galeDotCanvas = null, galeShown = false;
   var gpPts = null, gpN = 0, gpHit = false, gpEnd = { x: 0, y: 0 };   // 先読み結果
   var gpX = null, gpAx = null, gpAge = 1;   // 再計算の間引き(砲の x と風が同じなら hz 回/秒)
-  // 風の向きと強さの表示は HUD の WIND 欄(hud.js)が担当する
+  // 風の向きと風速の表示(砲の脇の「◀ 17 m/s」)は hud.js が担当し、mount で root に載せる
 
   // ---------- 現在位置ガイド(大砲の少し上に浮かぶ真鍮の羅針飾り) ----------
   // マウスは Pointer Lock でゲーム内へ格納され、OSカーソルは見えない(input.js)。
@@ -987,6 +987,29 @@
     for (var i = 0; i < galeDots.length; i++) galeDots[i].visible = false;
   }
 
+  // ---------- 夜(night.js)向け: 🔭 羅針の眼の照準に沿った光の点列 ----------
+  // 夜の闇は「照準線の上と着弾点」も見えるようにする(望遠鏡は闇を照らす道具)。
+  // updateAim が持っている状態をそのまま読む: 風で曲がっているときは予測点列
+  // (gpPts)と着弾点(gpEnd)、直線のときは砲口から着弾 y(fhCacheY)まで
+  // PP.NIGHT.spyStep 刻み。最後の要素が着弾点。配列は使い回す(毎フレーム new しない)
+  var aimLight = { n: 0, xs: [], ys: [] };
+  function aimLightPoints() {
+    aimLight.n = 0;
+    if (PP.game.state !== "playing" || !(PP.game.effects.spyglass > 0)) return aimLight;
+    var n = 0;
+    if (galeShown) {
+      for (var i = 0; i < gpN; i++) { aimLight.xs[n] = gpPts[2 * i]; aimLight.ys[n] = gpPts[2 * i + 1]; n++; }
+      aimLight.xs[n] = gpEnd.x; aimLight.ys[n] = gpEnd.y; n++;
+    } else {
+      var x = PP.cannon.x, y0 = PP.cannon.y - MUZZLE_LEN, y1 = fhCacheY;
+      var step = PP.NIGHT ? PP.NIGHT.spyStep : PP.R * 3;
+      for (var y = y0 - step; y > y1 + step * 0.5; y -= step) { aimLight.xs[n] = x; aimLight.ys[n] = y; n++; }
+      aimLight.xs[n] = x; aimLight.ys[n] = y1; n++;
+    }
+    aimLight.n = n;
+    return aimLight;
+  }
+
   // updateShots の玉座標キャッシュ。中身は毎フレーム書き直すが、配列やレーン毎の
   // 入れ物はモジュールに置いて使い回す(弾が飛んでいる間の毎フレーム確保を無くす)。
   var _cache = [], _cacheN = 0, _overPts = [], _overN = 0;
@@ -1186,6 +1209,7 @@
         if (sh.special === "bomb") PP.chain.explodeAt(sh.x, sh.y);
         else if (sh.wild) PP.chain.wildBlast(hitLane, sh, bestI);   // 虹玉は炸裂(挿入しない)
         else PP.chain.insertShot(hitLane, sh, bestI);
+        if (PP.night.active()) PP.night.onHit(sh.x, sh.y);   // 夜: 着弾点に光が残る
         if (sh.view.spark) createjs.Tween.removeTweens(sh.view.spark);
         PP.layers.shot.removeChild(sh.view);
         shots.splice(s, 1);
@@ -1210,12 +1234,16 @@
     syncColors: syncColors,
     updateAim: updateAim,
     firstHitBall: firstHitBall, // 真上に撃って最初に当たる玉(tutorial.js の照準判定)
+    muzzleY: function () { return PP.cannon.y - MUZZLE_LEN; },   // 砲口の y(night.js の大砲の光)
+    aimLightPoints: aimLightPoints,   // 🔭 の照準に沿った光の点列(night.js)
     // 横風の軌道予測(検証用の観測口)。{ pts: Float32Array(x,y,...), n, hit, x, y }
     simulateGalePath: function (x0, ax, sp) {
       simulateGalePath(x0, ax, sp);
       return { pts: gpPts, n: gpN, hit: gpHit, x: gpEnd.x, y: gpEnd.y };
     },
     updateGuide: updateGuide,   // 現在位置ガイド(main.js の tick が毎フレーム呼ぶ)
+    // 砲に随伴させたい表示物を root の子にする(hud.js の WIND タグ)。座標は砲の中心基準
+    mount: function (child) { if (root) root.addChild(child); return !!root; },
     updateShots: updateShots,
     setHurt: setHurt,        // 被弾側(boss.js / skull.js)が無敵秒数を渡す
     clearHurt: clearHurt,    // ステージリセット時の点滅解除

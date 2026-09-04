@@ -6,7 +6,7 @@
  *     または calmChance の確率で 0 = 凪。弱い風は出さない)を持ち、
  *   ・数秒ごと(PP.GALE.periodMin〜periodMax)に変わり、
  *   ・変わる PP.GALE.warn 秒前に「次の風」が決まって予兆が出る: 予告の SE が
- *     noticeCount 回(既定 3 回)鳴り、HUD の WIND 欄が脈打つ。変わった瞬間に別の SE が 1 回。
+ *     noticeCount 回(既定 3 回)鳴り、砲の脇の風速表示が明滅する。変わった瞬間に別の SE が 1 回。
  *   ・切り替わりは PP.GALE.ramp 秒かけて滑らかに補間する
  *     (HUD の表示は先に変わり、弾の曲がりは少し遅れて追いつく=読める猶予を作る)。
  * 強さは名前の表を持たず、乱数で引いた整数をそのまま HUD に出す。
@@ -14,7 +14,7 @@
  *
  * このファイルが持つのは「いまの風」の状態機械だけ。弾を実際に曲げるのは
  * cannon.js の stepShots(accel() を横加速度として積分)、🔭 の曲線予測も cannon.js、
- * HUD の WIND 欄は hud.js(info() を読む)、解禁とボタンは config.js / input.js が担当する。
+ * 砲の脇の風速表示は hud.js(info() を読む)、解禁とボタンは config.js / input.js が担当する。
  *
  * 名前について: 既存の「風」= 引き潮(PP.REVERSE_*、chain.js の resetWind、
  * PP.audio.wind)はチェーンを押し戻す別の仕組みなので、こちらは gale で統一。
@@ -91,6 +91,8 @@
     timer = G.periodMin + Math.random() * (G.periodMax - G.periodMin);
     pending = null; forced = false; streakAcc = 0;
     noticeT = 0; noticeN = 0;
+    // 風の帯は仕切り直す(前のステージの帯が画面に残らないように)
+    for (var i = 0; i < gusts.length; i++) { gusts[i].active = false; gusts[i].bmp.visible = false; gusts[i].wait = 0.2 + i * 0.5; }
   }
 
   // 毎フレーム(main.js の tick、playing 中だけ)
@@ -114,6 +116,7 @@
       }
     }
     spawnStreaks(dt);
+    updateGusts(dt);
   }
 
   // 画面を横切る風の筋。強いほど本数が増える(凪は無し)。fx のプール経由なので生成ゼロ
@@ -128,8 +131,68 @@
       var len = G.streaks.len * (0.7 + Math.random() * 0.6);
       var x0 = Math.random() * PP.W;
       // 細長い楕円(半径 4.5 の焼き込み円を横に伸ばす)が風下へ流れて薄れる
-      PP.fx.drift(x0, y, x0 + dir * len * 2.5, y, "rgba(200,225,255,0.55)",
+      PP.fx.drift(x0, y, x0 + dir * len * 3, y, "rgba(200,225,255,0.55)",
         len / 9, 0.35, G.streaks.dur * (0.8 + Math.random() * 0.4));
+    }
+  }
+
+  // ---- 風の帯(画面全体を横切る薄い光の帯) ----
+  // 風が吹いている間、画面の端から端まで風下へ流れる帯を数本出して「ステージ全体に
+  // 風が通っている」ことを見せる。焼き込み canvas 1 枚を Bitmap 数本で共有し、
+  // 毎フレームは x と alpha を書くだけ(ラスタライズもオブジェクト生成も無し)。
+  // 加算合成は専用 Container に 1 回だけ付ける(StageGL の flush 境界を増やさない)
+  var gustCont = null, gusts = [];
+  function ensureGusts() {
+    if (gustCont) return;
+    var Gs = G.gusts;
+    var s = new createjs.Shape();
+    // 横に長い楕円。左右の端へ向けて透明になる横グラデ(上下の縁は低 alpha で目立たない)
+    s.graphics.beginLinearGradientFill(
+      ["rgba(200,225,255,0)", "rgba(200,225,255,0.55)", "rgba(220,238,255,0.75)", "rgba(200,225,255,0.55)", "rgba(200,225,255,0)"],
+      [0, 0.3, 0.5, 0.7, 1], 0, 0, Gs.w, 0).drawEllipse(0, 0, Gs.w, Gs.h);
+    s.cache(0, 0, Gs.w, Gs.h);
+    gustCont = new createjs.Container();
+    gustCont.mouseEnabled = gustCont.mouseChildren = false;
+    gustCont.compositeOperation = "lighter";
+    PP.layers.fx.addChild(gustCont);
+    for (var i = 0; i < Gs.max; i++) {
+      var b = new createjs.Bitmap(s.cacheCanvas);
+      b.regY = Gs.h / 2;
+      b.visible = false;
+      gustCont.addChild(b);
+      // レコードの形は固定(active/x/y/v/wait)
+      gusts.push({ bmp: b, active: false, x: 0, y: 0, v: 0, wait: 0.2 + i * 0.5 });
+    }
+  }
+  function updateGusts(dt) {
+    ensureGusts();
+    var Gs = G.gusts;
+    var want = dir ? Math.min(Gs.max, PP.quality === 0 ? 1 : Math.ceil(strength / 9)) : 0;
+    var W = PP.W;
+    for (var i = 0; i < gusts.length; i++) {
+      var q = gusts[i], b = q.bmp;
+      if (q.active) {
+        q.x += q.v * dt;
+        b.x = q.x;
+        // 端で薄く、中央で濃く(帯の中心が画面のどこにあるかで sin の山)
+        var t = (q.x + Gs.w / 2) / (W + Gs.w);
+        b.alpha = Gs.alpha * Math.sin(Math.max(0, Math.min(1, t)) * Math.PI);
+        if ((q.v > 0 && q.x > W) || (q.v < 0 && q.x + Gs.w < 0)) {
+          q.active = false; b.visible = false;
+          q.wait = Gs.gapMin + Math.random() * (Gs.gapMax - Gs.gapMin);
+        }
+        continue;
+      }
+      if (i >= want) continue;   // 風が弱い/凪のときは寝かせておく(流れ切ったら消える)
+      q.wait -= dt;
+      if (q.wait > 0) continue;
+      q.active = true;
+      q.v = dir * (Gs.baseSpeed + strength * Gs.speedPer);
+      q.x = dir > 0 ? -Gs.w : W;
+      q.y = 90 + Math.random() * 500;
+      b.x = q.x; b.y = q.y; b.alpha = 0;
+      b.scaleY = 0.7 + Math.random() * 0.6;
+      b.visible = true;
     }
   }
 
