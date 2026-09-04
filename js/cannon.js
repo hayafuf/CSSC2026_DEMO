@@ -31,11 +31,27 @@
     s.cache(0, 0, 4, AIM_H);
     return s.cacheCanvas;
   }
+  // 横風の予測点(半径 3 の丸)。破線と同じ色を焼いて、点列で曲線を描く
+  function bakeAimDot(color) {
+    var s = new createjs.Shape();
+    s.graphics.beginFill(color).drawCircle(0, 0, 3);
+    s.cache(-4, -4, 8, 8);
+    return s.cacheCanvas;
+  }
   var stockSlot;     // 特殊弾のストックスロット(大砲の左脇に追従)
   var stockIcon;     // スロット内の特殊弾アイコン(spark トゥイーン後始末用)
   var stockLabel;    // スロットの状態表示(「待機」/「装填中」)
 
   var MUZZLE_LEN = 52; // 砲口までの高さ
+
+  // ---------- 横風(深海の悪魔+風)の予測軌道と風見 ----------
+  // 🔭 羅針の眼の間、風で曲がる軌道を「点の列」で見せる。点は Bitmap のプール
+  // (aimLine の子)で、毎フレームは座標を書くだけ(ラスタライズ無し)。経路は
+  // simulateGalePath が実弾と同じ積分で先読みする(数値は PP.GALE.preview)
+  var galeDots = [], galeDotCanvas = null, galeShown = false;
+  var gpPts = null, gpN = 0, gpHit = false, gpEnd = { x: 0, y: 0 };   // 先読み結果
+  var gpX = null, gpAx = null, gpAge = 1;   // 再計算の間引き(砲の x と風が同じなら hz 回/秒)
+  // 風の向きと強さの表示は HUD の WIND 欄(hud.js)が担当する
 
   // ---------- 現在位置ガイド(大砲の少し上に浮かぶ真鍮の羅針飾り) ----------
   // マウスは Pointer Lock でゲーム内へ格納され、OSカーソルは見えない(input.js)。
@@ -356,7 +372,18 @@
     aimRing = new createjs.Bitmap(ringS.cacheCanvas);
     aimRing.regX = aimRing.regY = 9;
     aimRing.visible = false;
-    aimLine.addChild(aimDash, aimRing);
+    aimLine.addChild(aimDash);
+    // 横風の予測点(通常弾 / 爆弾の 2 色を焼き置き。ミサイルは風を受けないので不要)
+    galeDotCanvas = { "#f5e8c8": bakeAimDot("#f5e8c8"), "#ff7a3c": bakeAimDot("#ff7a3c") };
+    gpPts = new Float32Array(2 * PP.GALE.preview.dots);
+    for (var gi = 0; gi < PP.GALE.preview.dots; gi++) {
+      var gd = new createjs.Bitmap(galeDotCanvas["#f5e8c8"]);
+      gd.regX = gd.regY = 4;
+      gd.visible = false;
+      aimLine.addChild(gd);
+      galeDots.push(gd);
+    }
+    aimLine.addChild(aimRing);   // 着弾リングは点より手前
     layer.addChild(aimLine);
 
     root = new createjs.Container();
@@ -517,6 +544,7 @@
     if (addle) guide.rotation = Math.sin(guideT * 6) * 14;
   }
 
+
   // ストックスロットの表示を現在の状態に合わせて組み直す
   function refreshStock() {
     var g = PP.game;
@@ -632,6 +660,7 @@
     g.shots.push({
       x: mx, y: my,
       vx: 0,
+      wx: 0,                // 横風による横速度(stepShots が別勘定で積分する。風の無い難易度では 0 のまま)
       // 真上に発射。ミサイルは遅い初速から加速していく(updateShots 参照)
       vy: -(special === "missile" ? PP.MISSILE_SPEED0 : PP.SHOT_SPEED),
       spd: PP.MISSILE_SPEED0, // ミサイル用のスカラー速度(他の弾は未使用)
@@ -793,10 +822,39 @@
   function updateAim(dt) {
     if (PP.game.state !== "playing") {
       if (aimDrawn) { aimLine.visible = false; aimDrawn = false; aimX = null; }
+      // 横風の点列も畳む(次に playing へ戻ったとき、gale 分岐が aimLine を出し直す)
+      if (galeShown) { galeShown = false; hideGaleDots(); aimDash.visible = true; }
       return;
     }
     var x = PP.cannon.x;
     var spy = PP.game.effects.spyglass > 0;
+    var sp = (PP.game.special && PP.game.specialLoaded) ? PP.game.special : null;
+    // 横風 + 🔭: 直線の代わりに、曲がる軌道を点列で描く。ミサイルは風を受けない
+    // ので直線のまま。再計算は砲が動いた/風が変わったとき、それ以外は hz 回/秒
+    var gax = PP.gale.accel();
+    if (spy && gax !== 0 && sp !== "missile") {
+      gpAge += dt || 0;
+      if (!galeShown || x !== gpX || gax !== gpAx || gpAge >= 1 / PP.GALE.preview.hz) {
+        gpX = x; gpAx = gax; gpAge = 0;
+        simulateGalePath(x, gax, sp);
+        layoutGaleDots(sp);
+        aimRing.x = gpEnd.x; aimRing.y = gpEnd.y;
+      }
+      if (!galeShown) {
+        galeShown = true;
+        aimDash.visible = false;
+        aimRing.visible = true;
+        aimLine.visible = true; aimLine.alpha = 0.55;
+        aimDrawn = true; aimX = null;   // 直線側のメモを捨てる(風が止んだら必ず描き直す)
+      }
+      return;
+    }
+    if (galeShown) {
+      galeShown = false;
+      hideGaleDots();
+      aimDash.visible = true;
+      aimX = null;
+    }
     var topY;
     if (spy) {
       fhAge += dt || 0;
@@ -810,7 +868,6 @@
       topY = PP.cannon.y - MUZZLE_LEN - 90;
       aimLine.alpha = 0.25;
     }
-    var sp = (PP.game.special && PP.game.specialLoaded) ? PP.game.special : null;
     if (aimDrawn && x === aimX && spy === aimSpy && topY === aimTopY && sp === aimSp) return;
     aimDrawn = true; aimX = x; aimSpy = spy; aimTopY = topY; aimSp = sp;
     aimLine.visible = true;
@@ -852,6 +909,84 @@
     return best;
   }
 
+  // ---------- 横風の軌道予測(🔭 羅針の眼の間だけ) ----------
+  // 実弾(stepShots)と同じ式で先読みする: 縦は SHOT_SPEED から SHOT_ACCEL で加速し
+  // SHOT_SPEED_MAX で頭打ち、横は風の加速度 ax を積分(maxLateral で上限)。
+  // 命中判定も stepShots と同じ条件(洞窟の中・トンネル内・桁の下・宝玉は当たらない)
+  // にそろえ、「予測の輪の玉」に本当に当たるようにする。
+  // 結果はモジュール変数へ: gpPts/gpN(点列)、gpHit(玉に当たるか)、gpEnd(着弾点
+  // = 当たる玉の中心。当たらなければ経路の末端)。検証用に PP.cannon から引ける
+  function simulateGalePath(x0, ax, sp) {
+    var P = PP.GALE.preview, h = P.step;
+    var R = PP.R, D = PP.D, W = PP.W;
+    var HIT_R2 = (D * 0.92) * (D * 0.92);
+    var OVER_BIAS = (D * 0.6) * (D * 0.6);
+    var SKIP_R2 = HIT_R2 + OVER_BIAS;
+    var bomb = sp === "bomb";
+    var ml = PP.GALE.maxLateral;
+    var x = x0, y = PP.cannon.y - MUZZLE_LEN, v = PP.SHOT_SPEED, wx = 0;
+    var spacing = 18, acc = spacing;   // 点の間隔 px(最初の点は砲口のすぐ上)
+    refreshBallPos(PP.game.lanes);     // 玉の画面座標は最新に(20Hz なので全玉走査でも安い)
+    gpN = 0; gpHit = false;
+    for (var s = 0; s < P.maxSteps; s++) {
+      if (v < PP.SHOT_SPEED_MAX) v = Math.min(PP.SHOT_SPEED_MAX, v + PP.SHOT_ACCEL * h);
+      wx += ax * h;
+      if (wx > ml) wx = ml; else if (wx < -ml) wx = -ml;
+      x += wx * h;
+      y -= v * h;
+      acc += v * h;
+      if (acc >= spacing && gpN < P.dots) {
+        gpPts[2 * gpN] = x; gpPts[2 * gpN + 1] = y; gpN++;
+        acc = 0;
+      }
+      if (y < AIM_TOP || x < R || x > W - R) break;
+      // 最近接の玉(stepShots と同じ採点: 見えている上の帯を優先)
+      var bestLane = -1, bestI = -1, bestScore = Infinity, bestDist = Infinity;
+      for (var li = 0; li < _cacheN; li++) {
+        var c = _cache[li];
+        for (var i = 0; i < c.n; i++) {
+          var dy = y - c.by[i];
+          if (dy * dy >= SKIP_R2) continue;
+          var b = c.balls[i];
+          if (b.treasure && !bomb) continue;
+          if (b.d < R) continue;
+          if (c.btun[i]) continue;
+          var dx = x - c.bx[i];
+          var dist = dx * dx + dy * dy;
+          if (dist >= SKIP_R2) continue;
+          if (_overN && !c.bover[i] && occludedByDeck(c.bx[i], c.by[i])) continue;
+          var score = dist;
+          if (c.bover[i]) score -= OVER_BIAS;
+          if (score < bestScore) { bestScore = score; bestDist = dist; bestI = i; bestLane = li; }
+        }
+      }
+      if (bestI >= 0 && bestDist < HIT_R2) {
+        gpHit = true;
+        gpEnd.x = _cache[bestLane].bx[bestI];
+        gpEnd.y = _cache[bestLane].by[bestI];
+        return;
+      }
+    }
+    gpEnd.x = x; gpEnd.y = Math.max(y, AIM_TOP);
+  }
+  // 先読みした点列をプールの Bitmap に写す(座標と表示だけ。焼き直し無し)
+  function layoutGaleDots(sp) {
+    var img = galeDotCanvas[sp === "bomb" ? "#ff7a3c" : "#f5e8c8"];
+    for (var i = 0; i < galeDots.length; i++) {
+      var d = galeDots[i];
+      if (i < gpN) {
+        d.image = img;
+        d.x = gpPts[2 * i]; d.y = gpPts[2 * i + 1];
+        d.visible = true;
+      } else if (d.visible) {
+        d.visible = false;
+      }
+    }
+  }
+  function hideGaleDots() {
+    for (var i = 0; i < galeDots.length; i++) galeDots[i].visible = false;
+  }
+
   // updateShots の玉座標キャッシュ。中身は毎フレーム書き直すが、配列やレーン毎の
   // 入れ物はモジュールに置いて使い回す(弾が飛んでいる間の毎フレーム確保を無くす)。
   var _cache = [], _cacheN = 0, _overPts = [], _overN = 0;
@@ -868,6 +1003,10 @@
   // 最悪でも dt/4 で、弾半径に対するすり抜け余裕は実用上足りる
   function updateShots(dt) {
     var steps = (dt > 0.02) ? Math.min(4, Math.ceil(dt / 0.0167)) : 1;
+    // 横風中は横速度(最大 PP.GALE.maxLateral)が足されて 1 ステップの移動が当たり半径を
+    // 超えうるので、通常速度でも最低 3 分割にしてすり抜けを防ぐ
+    // ((2600 + 2000) / 180 ≈ 26px < 当たり半径 44px)
+    if (PP.gale.accel() !== 0) steps = Math.max(steps, 3);
     var h = dt / steps;
     _posDirty = true;   // チェーンはフレーム間でしか進まないので、引き直しはフレームに1回
     for (var i = 0; i < steps; i++) stepShots(h);
@@ -973,7 +1112,16 @@
         sh.vx *= nsp / sp; sh.vy *= nsp / sp;
         sp = nsp;
       }
-      sh.x += sh.vx * dt;
+      // 横風(深海の悪魔+風): 風の加速度を「横速度 wx」として別勘定で積分する。
+      // vx に混ぜると上の再正規化(nsp/sp 倍)で毎ステップ横成分が縮んでしまうため。
+      // 通常弾・万能玉・爆弾に効く(ミサイルは上の分岐で抜けているので受けない)
+      var gax = PP.gale.accel();
+      if (gax !== 0 || sh.wx !== 0) {
+        sh.wx += gax * dt;
+        var ml = PP.GALE.maxLateral;
+        if (sh.wx > ml) sh.wx = ml; else if (sh.wx < -ml) sh.wx = -ml;
+      }
+      sh.x += (sh.vx + sh.wx) * dt;
       sh.y += sh.vy * dt;
       sh.roll += sp * dt;   // 転がりも実速度に追従させる
       sh.view.x = sh.x; sh.view.y = sh.y;
@@ -1062,6 +1210,11 @@
     syncColors: syncColors,
     updateAim: updateAim,
     firstHitBall: firstHitBall, // 真上に撃って最初に当たる玉(tutorial.js の照準判定)
+    // 横風の軌道予測(検証用の観測口)。{ pts: Float32Array(x,y,...), n, hit, x, y }
+    simulateGalePath: function (x0, ax, sp) {
+      simulateGalePath(x0, ax, sp);
+      return { pts: gpPts, n: gpN, hit: gpHit, x: gpEnd.x, y: gpEnd.y };
+    },
     updateGuide: updateGuide,   // 現在位置ガイド(main.js の tick が毎フレーム呼ぶ)
     updateShots: updateShots,
     setHurt: setHurt,        // 被弾側(boss.js / skull.js)が無敵秒数を渡す

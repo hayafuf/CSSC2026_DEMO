@@ -49,6 +49,8 @@
     "diff.normal.name": "一人前の海賊",
     "diff.hard.name": "海賊船長",
     "diff.hardcore.name": "深海の悪魔",
+    "diff.gale.name": "深海の悪魔+風",
+    "hud.diffLocked": "🔒 「深海の悪魔」を制覇すると解禁",
 
     // ---- config.js: コース名 ----
     "course.route": "航路",
@@ -133,7 +135,7 @@
     "hud.wildChip": "🌈 装填 x{n}",
     "hud.bossGauge": "討伐せよ!",
     "hud.remain": "残り {n}",
-    "hud.diffCaption": "難易度をえらぶ(1〜4 キーでも選べる)",
+    "hud.diffCaption": "難易度をえらぶ(1〜5 キーでも選べる)",
     "hud.overContinue": "⚓ この海域から再挑戦",
     "hud.overTitle": "🏠 タイトルへ戻る",
     "hud.overCaption": "R / T キーでも選べる",
@@ -200,7 +202,8 @@
     "main.gcContinues": "🔱 コンティニュー {n}回 (ステージ {stages} で再起)\n",
     "main.gcTitleBoss": "🏆 クラーケン討伐! 全海域制覇!",
     "main.gcTitle": "🏆 全海域制覇!",
-    "main.gcBody": "全 {total} ステージを生き延びた! 秘宝は我らのものだ!\n{honor}制覇ボーナス +5000\n最終スコア {score} 点\n{tap}で最初の海へ",
+    "main.gcBody": "全 {total} ステージを生き延びた! 秘宝は我らのものだ!\n{honor}{extra}制覇ボーナス +5000\n最終スコア {score} 点\n{tap}で最初の海へ",
+    "main.gcUnlockGale": "🌪 新難易度「深海の悪魔+風」解禁!\n",
     "main.clearTitle": "⚓ ステージ {level}/{total} 制覇!",
     "main.clearBossBody": "生存ボーナス +1000 / スコア {score} 点 ――深淵の主が目を覚ました…\n🎯 クラーケンの頭に玉を当てて HP を削り切れば勝利!\n⚡ 予兆(チャージ)中に当てれば攻撃を阻止できる\n🛡 妖弾は自弾で迎撃できる(ミサイルは貫通)。樽への玉列も守り続けろ!\n{tap}で最終決戦へ",
     "main.clearBody": "耐え切って残りも掃討した! 生存ボーナス +1000\nスコア {score} 点\n{tap}で次のステージへ",
@@ -333,6 +336,7 @@
     "tut.hWildPc": "Q キーで虹玉を装填!どの色にもつながる切り札",
     "tut.hCoin": "🪙 を集めるとライフが回復する",
     "tut.hBoss": "ボス戦!玉を消して敵のHPを削れ",
+    "tut.hGale": "🌪 横風で玉が曲がる!上の WIND 欄で向きと強さを読め(枠が光ったら風が変わる合図)。🔭 羅針の眼なら曲がる軌道が見える",
 
     // ---- course-api.js(バリデーション。エディタ経由でユーザーに見える) ----
     "api.defaultName": "無名の航路",
@@ -367,6 +371,8 @@
     "diff.normal.name": "Seasoned Pirate",
     "diff.hard.name": "Pirate Captain",
     "diff.hardcore.name": "Devil of the Deep",
+    "diff.gale.name": "Deep Devil + Gale",
+    "hud.diffLocked": "🔒 Conquer \"Devil of the Deep\" to unlock",
 
     "course.route": "The Sea Route",
     "course.bridge": "The Bridge Road",
@@ -446,7 +452,7 @@
     "hud.wildChip": "🌈 armed x{n}",
     "hud.bossGauge": "Slay the beast!",
     "hud.remain": "{n} left",
-    "hud.diffCaption": "Choose your difficulty (keys 1–4 also work)",
+    "hud.diffCaption": "Choose your difficulty (keys 1–5 also work)",
     "hud.overContinue": "⚓ Retry this sea",
     "hud.overTitle": "🏠 Back to title",
     "hud.overCaption": "R / T keys also work",
@@ -507,7 +513,8 @@
     "main.gcContinues": "🔱 {n} continue(s) (rallied at stage {stages})\n",
     "main.gcTitleBoss": "🏆 Kraken Vanquished!",
     "main.gcTitle": "🏆 Seas Conquered!",
-    "main.gcBody": "All {total} stages survived! The treasure is ours!\n{honor}Conquest bonus +5000\nFinal score: {score}\n{tap} to return to the first sea",
+    "main.gcBody": "All {total} stages survived! The treasure is ours!\n{honor}{extra}Conquest bonus +5000\nFinal score: {score}\n{tap} to return to the first sea",
+    "main.gcUnlockGale": "🌪 New difficulty unlocked: Deep Devil + Gale!\n",
     "main.clearTitle": "⚓ Stage {level}/{total} clear!",
     "main.clearBossBody": "Survival bonus +1000 / Score {score} ― the Abyss stirs…\n🎯 Whittle the Kraken's head down to zero HP to win!\n⚡ Hit it during a charge-up to interrupt the attack\n🛡 Shoot down orbs (missiles pierce). Guard the barrel!\n{tap} to enter the final battle",
     "main.clearBody": "You held out and swept the rest! Survival bonus +1000\nScore: {score}\n{tap} for the next stage",
@@ -630,6 +637,7 @@
     "tut.hWildPc": "Load a rainbow ball with Q — it matches any color!",
     "tut.hCoin": "Collect 🪙 coins to restore lives",
     "tut.hBoss": "Boss battle! Pop balls to damage the boss",
+    "tut.hGale": "🌪 Crosswind bends your shots! Read the WIND meter up top (it glows before the wind shifts). The 🔭 spyglass shows the curved path",
 
     "api.defaultName": "Unnamed Route",
     "api.lane": "Lane {n}: ",

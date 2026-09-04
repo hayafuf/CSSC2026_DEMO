@@ -145,6 +145,7 @@
     g.finishing = false;
     PP.powerups.clear();
     PP.chain.resetWind();   // 風の物理も仕切り直す(吹いてる最中のリトライで凪が誤発火しないように)
+    PP.gale.reset();        // 横風(深海の悪魔+風)も凪から仕切り直す(猶予 PP.GALE.firstDelay の後に吹き始める)
     PP.upgrades.onLevelStart();   // 【強化】自動系タイマー・救済を仕切り直す(段数は維持)
     // 骸骨玉の弾・墨と状態異常を仕切り直す(リトライ・再出航もここを通る)。
     // ボス戦は boss.setActive → reset → clearStatusFx が別途ゼロ化するが、
@@ -216,6 +217,14 @@
     PP.audio.setDanger(false);
     PP.audio.clear();
     if (isFinal) {
+      // 難易度の解禁(config.js の unlocks。深海の悪魔 → 深海の悪魔+風)。
+      // コンティニューの有無は問わない(自作コースは isFinal で既に除外)。
+      // 保存は localStorage なので次回起動でも解禁されたまま。初回だけ制覇画面で祝う
+      var unlockKey = PP.diff().unlocks;
+      if (unlockKey && PP.store && !PP.store.get(unlockKey, false)) {
+        PP.store.set(unlockKey, true);
+        g.newUnlock = "gale";
+      }
       g.state = "gameclear";
       g.score += 5000;         // 全海域制覇ボーナス
       PP.hud.update();
@@ -248,8 +257,10 @@
     var honor = g.continues === 0
       ? t("main.gcNoContinue")
       : t("main.gcContinues", { n: g.continues, stages: g.continueStages.join(", ") });
+    // 新しい難易度を解禁したランなら、その一行を添える(1行固定: パネルの余白が小さい)
+    var extra = g.newUnlock === "gale" ? t("main.gcUnlockGale") : "";
     PP.hud.showOverlay(t(g.bossMode ? "main.gcTitleBoss" : "main.gcTitle"),
-      t("main.gcBody", { total: PP.COURSES.length, honor: honor, score: g.score, tap: PP.TAP }));
+      t("main.gcBody", { total: PP.COURSES.length, honor: honor, extra: extra, score: g.score, tap: PP.TAP }));
   }
 
   // ---------- ステージクリアの爆発走査(Zuma 式の距離ボーナス) ----------
@@ -445,6 +456,7 @@
     if (PP.tut) {
       PP.tut.maybeStart();
       if (g.bossMode) PP.tut.hint("boss");
+      if (PP.gale.active()) PP.tut.hint("gale");   // 横風の海域: 風見と 🔭 の読み方(初回のみ)
     }
   }
 
@@ -898,6 +910,9 @@
       g.eachLane(recordLeadD);
       PP.cannon.updateShots(dt);   // 命中時にその場でマッチ判定される
       PP.powerups.update(dt);
+      // 横風(深海の悪魔+風)。playing 分岐にだけ置くので、イントロ・カード3択・
+      // リトライ暗転・ポーズ中は風も止まる(風見と弾の曲がりが凍ったまま待つ)
+      if (PP.gale.active()) PP.gale.update(dt);
       // bossFx(addle/freeze)の減算は ↑ の powerups.update に一本化されている。
       // タイマー失効と同じフレーム内で照準の橋渡しエッジを張り直す(input.js)。
       // これが無いと検知が次フレームにずれ、間に届いた mousemove が旧写像で
@@ -1196,6 +1211,7 @@
     g.continues = 0;
     g.continueStages = [];
     g.failStreak = 0;
+    g.newUnlock = null;      // 解禁のお祝いは制覇画面で済んでいる
     PP.upgrades.onRunReset();
     PP.audio.gameStart();    // ゲームオーバー曲から通常曲へ戻す
     PP.hud.update();

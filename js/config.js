@@ -38,6 +38,10 @@
   //   useLives:  false にすると【課題5】のコイン→ライフ回復が効かない
   //              (深海の悪魔は救済なしの1発ゲームオーバー)
   //   bgm:       その難易度のプレイ中BGMのファイルパス
+  //   gale:      true なら「横風」が吹く(発射した玉が左右に流される。js/gale.js)
+  //   unlockKey: この難易度を選ぶのに必要な解禁フラグ(PP.store のキー)。
+  //              無ければ最初から選べる。解禁の判定は PP.diffLocked(下)
+  //   unlocks:   この難易度で全海域制覇したときに立てる解禁フラグ(main.js levelClear)
   // ================================================================
   // TODO【課題4】難易度ごとのBGMを組み込もう。今は4難易度とも同じ曲。
   //   1) 好きな mp3 を BGM/ フォルダに入れる(例: BGM/hardcore.mp3)
@@ -53,7 +57,12 @@
     easy:     { entryMult: 0.85, holeMult: 0.90, curveMult: 1.15, timeMult: 0.85, colorAdd: 0, colorMin: 4, colorMax: 6, barrelBonus: 2,  useLives: true,  bossHpMult: 0.8,  bgm: "BGM/Easy.mp3" },
     normal:   { entryMult: 1.00, holeMult: 1.00, curveMult: 1.00, timeMult: 1.00, colorAdd: 0, colorMin: 4, colorMax: 6, barrelBonus: 0,  useLives: true,  bossHpMult: 1.0,  bgm: "BGM/Game_music.mp3" },
     hard:     { entryMult: 1.12, holeMult: 1.06, curveMult: 0.90, timeMult: 1.00, colorAdd: 1, colorMin: 4, colorMax: 7, barrelBonus: 0,  useLives: true,  bossHpMult: 1.2,  bgm: "BGM/Hard.mp3" },
-    hardcore: { entryMult: 1.15, holeMult: 1.10, curveMult: 0.88, timeMult: 1.10, colorAdd: 1, colorMin: 4, colorMax: 7, barrelBonus: 0, useLives: false, bossHpMult: 1.35, bgm: "BGM/HardCore.mp3" }
+    hardcore: { entryMult: 1.15, holeMult: 1.10, curveMult: 0.88, timeMult: 1.10, colorAdd: 1, colorMin: 4, colorMax: 7, barrelBonus: 0, useLives: false, bossHpMult: 1.35, bgm: "BGM/HardCore.mp3",
+                unlocks: "galeUnlocked" },
+    // 「深海の悪魔+風」: 速度・色数・ライフ無しは深海の悪魔と同じで、そこに横風が加わる。
+    // 深海の悪魔を全海域制覇すると解禁(unlockKey)。風の強さ・周期は PP.GALE(下の「大砲」節)
+    gale:     { entryMult: 1.15, holeMult: 1.10, curveMult: 0.88, timeMult: 1.10, colorAdd: 1, colorMin: 4, colorMax: 7, barrelBonus: 0, useLives: false, bossHpMult: 1.35, bgm: "BGM/HardCore.mp3",
+                gale: true, unlockKey: "galeUnlocked" }
   };
   // (holeMult/curveMult 改定: easy は速度全体の底上げ(SPEED.levelStep・コース hole)を
   //  相殺して従来の体感を維持、hard/hardcore は normal との差が +2% しかなく
@@ -85,6 +94,10 @@
     hardcore: {
       5: { entry: 810, hole: 20.0, curve: 2.3 }
 
+    },
+    // 深海の悪魔+風は速度を hardcore と同値に保つ(違いは風だけ)。hardcore を直したらここも
+    gale: {
+      5: { entry: 810, hole: 20.0, curve: 2.3 }
     }
   };
   // 現在の 難易度×ステージ の上書き値を返す(無い項目は null = 自動計算)。
@@ -102,10 +115,19 @@
     ovVal = { entry: ovNum(src, "entry"), hole: ovNum(src, "hole"), curve: ovNum(src, "curve") };
     return ovVal;
   };
-  // タイトル画面のボタンの並び順(1〜4 キーもこの順)
-  PP.DIFFICULTY_ORDER = ["easy", "normal", "hard", "hardcore"];
+  // タイトル画面のボタンの並び順(1〜5 キーもこの順)
+  PP.DIFFICULTY_ORDER = ["easy", "normal", "hard", "hardcore", "gale"];
   // 現在の難易度プリセットを引くヘルパ(反映ロジック側が使う。ここは触らない)
   PP.diff = function () { return PP.DIFFICULTY[PP.game.difficulty] || PP.DIFFICULTY.normal; };
+  // 難易度がまだ解禁されていないか(unlockKey を持つ難易度だけロックされ得る)。
+  // 解禁フラグは PP.store(localStorage)に残るので、次回起動でも選べる。
+  // 開発・検証用に URL の ?gale=1 で全ロックを外せる(main.js の ?level と同じ流儀)
+  PP.GALE_DEBUG = /[?&]gale=1(&|$)/.test(location.search);
+  PP.diffLocked = function (key) {
+    var d = PP.DIFFICULTY[key];
+    if (!d || !d.unlockKey || PP.GALE_DEBUG) return false;
+    return !(PP.store && PP.store.get(d.unlockKey, false));
+  };
   // 樽の許容個数(難易度補正込み・最低1)。
   // 【強化】「深い樽底」(barrelcap)の段数ぶん上乗せされる(upgrades.js)
   PP.barrelCap = function () {
@@ -838,6 +860,40 @@
   PP.CANNON_Y = 648;      // 大砲の高さ(固定)。横位置はマウス追従
   PP.CANNON_MARGIN = 50;  // 大砲が動ける左右の余白
 
+  // ---------- 横風(難易度「深海の悪魔+風」。js/gale.js) ----------
+  // 発射した玉に「横向きの加速度」が掛かり、放物線を描いて左右へ流される。
+  // 加速度なので、高い段を狙うほど(飛んでいる時間が長いほど)ずれが大きくなる。
+  //   ずれ = ½ × accel × 飛行時間²。弾は 1400→2600px/s で最上段(約 490px 上)まで
+  //   およそ 0.26 秒なので、accel 2200 で約 73px(玉 1.5 個ぶん)、700 で約 23px。
+  // 引き潮(PP.REVERSE_*: チェーンを押し戻す「逆風」)とは別物なので名前を分けてある。
+  PP.GALE = {
+    // 強さ = 風速 m/s。strengthMin〜strengthMax の整数を乱数で引き、HUD にそのまま
+    // 「◀ 12 m/s」と出す(名前の表は持たない)。横加速度 = 風速 × accelPer(px/s²)。
+    // 中途半端に弱い風(1〜9 m/s)は出さない: 曲がっているのか分からず読みの練習にならない。
+    // 代わりに calmChance の確率で「0 m/s(凪)」が来る=真上に撃てる息継ぎの時間。
+    //   例: 25 m/s で 7500px/s² → 最上段(約 0.26 秒)で約 250px = 玉 5 個ぶん流される
+    //       10 m/s でも約 100px(玉 2 個ぶん)。中段(約 0.15 秒)は最上段の 1/3 程度
+    strengthMin: 10, strengthMax: 25,
+    calmChance: 0.15,
+    accelPer:  300,
+    periodMin: 6.0, periodMax: 10.0,   // 次の風に変わるまでの秒(この範囲の一様乱数)
+    warn:      1.8,                    // 切り替わる何秒前に予兆(音+HUD の脈動)を出すか。次の風はこの時点で決まる
+    ramp:      1.0,                    // 風が切り替わるときの補間秒(HUD が先に変わり、弾は後から曲がる)
+    bossMult:  0.7,                    // ボス海域の風の倍率(1.0 で通常面と同じ、0 で無風)
+    maxLateral: 2000,                  // 玉の横速度の上限 px/s(25 m/s で最上段に届く頃の横速度。
+                                       // 縦 2600 と合わせても 1/180 秒の移動は玉の当たり半径より小さい)
+    announceFrom: 20,                  // この風速(m/s)以上の風が来たら砲の上に文言を出す(99 で出さない)
+    meterTick: 5,                      // HUD のメーターの目盛りの刻み(m/s)
+    // 音量(audio.js の合成音 beep/gliss)。予兆は向き反転=上昇3音 / 強さだけ=同音2連、
+    // 切り替わりの瞬間は下降の風切り音。BGM に埋もれない程度に大きめ
+    warnVol: 0.10, gustVol: 0.08,
+    // 🔭 羅針の眼の曲線予測: 実弾と同じ積分を step 秒刻みで maxSteps 回まで先読みし、
+    // dots 個の点で描く。再計算は砲が動いたときと hz 回/秒(全玉走査なので間引く)
+    preview: { step: 1 / 120, maxSteps: 240, dots: 32, hz: 20 },
+    // 画面を横切る風の筋(fx プール)。本数/秒 = 風速 × perStrength、長さ px、寿命 ms
+    streaks: { perStrength: 0.75, len: 90, dur: 900 }
+  };
+
   // ---------- 照準(マウス)の方式と再同期 ----------
   // マウス操作の本線は「移動量」駆動: プレイ中は Pointer Lock でマウスをゲーム内へ
   // 格納し、movementX(カーソル無しの純粋な移動量)で砲台を動かす(input.js)。
@@ -1393,7 +1449,8 @@
                           // 済むので立てない — view の差し替えや宝玉の追加など、
                           // 並びの前提が崩れるまれなイベントだけが立てる
     colorsDirty: true,    // 盤面の色 or 手札が変わった=装填色の見張りを回す(cannon.js syncColors)
-    shots: [],            // 飛行中の玉 {x, y, vx, vy, color, roll, view}(全レーン共通)
+    shots: [],            // 飛行中の玉 {x, y, vx, vy, wx, color, roll, view}(全レーン共通。wx は横風による横速度)
+    newUnlock: null,      // 全海域制覇で新しく解禁した難易度 id(制覇画面で1回祝ってから null へ)
     finishing: false,     // 掃討フェーズ(ゲージが空。補給は止まり、全レーン消し切ればクリア)
     timeLeft: 0,          // 生存ゲージ残り秒
     timeTotal: 0,
@@ -1433,10 +1490,11 @@
   };
 
   // 前回遊んだ難易度を復元する(input.js が選択のたびに保存する)。
-  // 保存が無い/知らないキーなら既定の "normal" のまま
+  // 保存が無い/知らないキー/まだ解禁されていない難易度なら既定の "normal" のまま
+  // (別ブラウザや保存消去後に "gale" だけ残っていても、ロック中のものは選ばない)
   (function () {
     var saved = PP.store ? PP.store.get("lastDiff", null) : null;
-    if (saved && PP.DIFFICULTY[saved]) PP.game.difficulty = saved;
+    if (saved && PP.DIFFICULTY[saved] && !PP.diffLocked(saved)) PP.game.difficulty = saved;
   })();
 
   // ステージとレイヤー(main.js の init で設定)

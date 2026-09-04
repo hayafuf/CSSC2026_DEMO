@@ -137,7 +137,8 @@
     parry:    function () { return PP.TOUCH ? "tut.hParry" : "tut.hParryPc"; },
     wild:     function () { return PP.TOUCH ? "tut.hWild" : "tut.hWildPc"; },
     coin:     fix("tut.hCoin"),
-    boss:     fix("tut.hBoss")
+    boss:     fix("tut.hBoss"),
+    gale:     fix("tut.hGale")    // 横風の海域(初回のイントロ明けに main.js が呼ぶ)
   };
 
   function esc(s) {

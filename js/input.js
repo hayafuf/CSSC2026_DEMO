@@ -143,9 +143,23 @@
     game.continues = 0;
     game.continueStages = [];
     game.failStreak = 0;
+    game.newUnlock = null;   // 解禁のお祝いは制覇画面で済んでいる
     PP.upgrades.onRunReset();
     PP.hud.hideOverlay();
     startLevel();
+  }
+
+  // 難易度ボタン / 1〜5 キーで難易度を選ぶ。ロック中(config.js の PP.diffLocked)は
+  // 選ばせず、空振りの音と解禁条件の一言で「まだ開いていない」ことを伝える
+  function pickDifficulty(key) {
+    if (PP.diffLocked(key)) {
+      PP.audio.beep(120, 0.06, "square", 0.05);   // 空撃ちと同じカチッという手応え
+      PP.fx.floatText(PP.i18n.t("hud.diffLocked"), PP.W / 2, PP.H / 2 + 150, "#ffdf8a", 18);
+      return;
+    }
+    PP.game.difficulty = key;
+    PP.hud.setDifficulty(key);
+    if (PP.store) PP.store.set("lastDiff", key);   // 次回起動時に復元
   }
 
   // ゲームオーバーからのコンティニュー: 同じ海域をスコア0で再挑戦。
@@ -209,11 +223,11 @@
       PP.hud.refreshTutButton();
       return;
     }
-    var difficulty = PP.hud.hitDifficulty(event.stageX, event.stageY);
+    // 難易度ボタン(ロック中のボタンも「押した」ことは拾い、pickDifficulty が弾く)
+    var difficulty = PP.hud.hitDifficulty(event.stageX, event.stageY) ||
+                     PP.hud.hitLockedDifficulty(event.stageX, event.stageY);
     if (difficulty) {
-      game.difficulty = difficulty;
-      PP.hud.setDifficulty(difficulty);
-      if (PP.store) PP.store.set("lastDiff", difficulty);   // 次回起動時に復元
+      pickDifficulty(difficulty);
       return;
     }
 
@@ -433,16 +447,12 @@
         if (PP.settings) PP.settings.syncMute();   // 右上 🔊 ボタンの絵と同期
       } else if (/^Digit[1-3]$/.test(event.code) && PP.game.state === "choosing") {
         PP.upgrades.chooseIndex(parseInt(event.code.charAt(5), 10) - 1);
-      } else if (/^Digit[1-4]$/.test(event.code)) {
+      } else if (/^Digit[1-5]$/.test(event.code)) {
         var state = PP.game.state;
         // over 画面はコンティニュー(同ラン継続)になったので難易度は変えられない
         if (state === "title" || state === "gameclear") {
           var key = PP.DIFFICULTY_ORDER[parseInt(event.code.charAt(5), 10) - 1];
-          if (key) {
-            PP.game.difficulty = key;
-            PP.hud.setDifficulty(key);
-            if (PP.store) PP.store.set("lastDiff", key);   // 次回起動時に復元
-          }
+          if (key) pickDifficulty(key);   // ロック中の難易度はここで弾かれる
         }
       }
     });

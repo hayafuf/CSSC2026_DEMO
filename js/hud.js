@@ -19,7 +19,9 @@
   // 難易度ボタン(【課題1】)。難易度は「1回の出航(ラン)」単位で選ぶものなので、
   // 新しいランが始まる画面(タイトル / ゲームオーバー / 全ステージ制覇後)だけに出す。
   // ステージクリア画面では出さない = キャンペーンの途中では変えられない。
-  var diffCont, diffShapes = [], diffRects = [];
+  // 5 つ目「深海の悪魔+風」は解禁制(config.js の PP.diffLocked)。ロック中は沈んだ
+  // 色+🔒 で「存在は見えるが押せない」ことを示し、hitDifficulty は当たりを返さない
+  var diffCont, diffShapes = [], diffRects = [], diffLabelTexts = [];
   var DIFF_BTN = { w: 172, h: 56, gap: 16 };
   // ゲームオーバー画面の進路ボタン(⚓再挑戦 / 🏠タイトルへ)。over 画面だけに出す
   var overCont, overRects = [];
@@ -65,6 +67,16 @@
   // レイアウト(バーは 62px。1段目 y=104 に触れない高さで、文字を大きく取る)
   var BAR = 62;
   var GAUGE_X = 500, GAUGE_W = 182, GAUGE_H = 18, GAUGE_Y = 30;
+  // 風(難易度「深海の悪魔+風」だけ)。SURVIVAL の右の区画(仕切り x=812 の先)に
+  // 「WIND」ラベル+強さの数値+風のメーターを置く。メーターは生存ゲージと同じ
+  // 「暗いガラス+真鍮縁」の器で、中央のピボットから風下側へ金のフィルが伸びる
+  // (長さ = 風速 / strengthMax。meterTick 刻みの目盛り付き)。両端の矢尻は風下側だけ灯る。
+  // 風が変わる前は枠が金色に脈打つ。
+  // この欄が出ている間、パワーアップのチップ列は WIND_SHIFT ぶん右へ寄る
+  var windCont = null, windLbl = null, windName = null, windMeter = null, windGlow = null;
+  var WIND_X = 812, WIND_SHIFT = 140;
+  var WM = { w: 120, h: GAUGE_H, pivot: 3, pad: 3 };
+  var lastWindKey = null, windGlowOn = false, windGlowDrawn = false;
 
   // フォント(数値・ラベルは Cinzel、絵文字はシステム絵文字、効果は Meiryo)
   var F_LBL  = '600 12px "Cinzel", serif';
@@ -204,6 +216,25 @@
     hudEffects.shadow = new createjs.Shadow("rgba(20,120,110,0.7)", 0, 0, 8);
     cacheHudText(hudEffects, 460, 26, 20);   // blur 8 のグローが切れない余白
     L.addChild(hudEffects);
+
+    // ---- 風(WIND 欄。表示の切り替えと中身は updateWind) ----
+    windCont = new createjs.Container();
+    windCont.visible = false;
+    windLbl = new createjs.Text("WIND", F_LBL, C_LBL);   // 他のラベルと同じ英字固定
+    windLbl.x = WIND_X; windLbl.y = 9;
+    cacheHudText(windLbl, 50, 16, 4);
+    windName = new createjs.Text("", 'bold 15px "Meiryo", sans-serif', "#ffdf8a");
+    windName.x = WIND_X + 44; windName.y = 6;
+    windName.shadow = new createjs.Shadow("rgba(0,0,0,0.65)", 0, 1, 3);
+    cacheHudText(windName, 110, 18, 6);
+    windGlow = new createjs.Shape();        // 予兆の金の脈動(枠の外。gaugeGlow と同じ作り)
+    windGlow.x = WIND_X; windGlow.y = GAUGE_Y;
+    windGlow.cache(-4, -4, WM.w + 8, WM.h + 8);
+    windMeter = new createjs.Shape();       // 形は風が変わったときだけ drawWindMeter が描き直す
+    windMeter.x = WIND_X; windMeter.y = GAUGE_Y;
+    windMeter.cache(-13, -3, WM.w + 26, WM.h + 6);   // 両端の矢尻ぶん広く取る
+    windCont.addChild(windLbl, windName, windGlow, windMeter);
+    L.addChild(windCont);
 
     // 【課題5】コインとライフの表示(右端)
     hudCoinLife = new createjs.Text("", '800 18px "Cinzel","Hiragino Kaku Gothic ProN","Meiryo",serif', C_VAL);
@@ -375,6 +406,78 @@
     }
   }
 
+  // ---------- 風の欄(WIND) ----------
+  // メーターの作画。局所座標は器の左上 (0,0)、幅 WM.w × 高さ WM.h。
+  // 中央のピボットから風下側へ、強さ / strengthMax の長さだけ金のフィルが伸びる
+  // (生存ゲージと同じ塗り)。両側に 1 刻みの目盛り、両端の矢尻は風下側だけ灯す。
+  // 風向きと強さが変わったときだけ呼ばれる
+  function drawWindMeter(dir, s) {
+    var gg = windMeter.graphics; gg.clear();
+    var w = WM.w, h = WM.h, cx = w / 2;
+    var half = cx - WM.pivot - WM.pad;                 // 片側のフィルの最大長
+    var maxS = PP.GALE.strengthMax;
+    var len = s > 0 ? Math.max(4, half * Math.min(1, s / maxS)) : 0;   // 凪(0)はフィル無し
+    // 矢尻(枠の外)。風下側 = 金、風上側 = 沈んだ真鍮
+    gg.beginFill(dir < 0 ? "#f0c040" : "#4a3a1a").moveTo(-11, h / 2).lineTo(-3, 3).lineTo(-3, h - 3).closePath();
+    gg.beginFill(dir > 0 ? "#f0c040" : "#4a3a1a").moveTo(w + 11, h / 2).lineTo(w + 3, 3).lineTo(w + 3, h - 3).closePath();
+    // 器(暗ガラス)
+    gg.beginFill("rgba(4,8,12,0.7)").drawRoundRect(0, 0, w, h, 7);
+    // フィル(風下側へ)
+    if (len > 0) {
+      var x0 = dir > 0 ? cx + WM.pivot : cx - WM.pivot - len;
+      gg.beginLinearGradientFill(["#ffe89a", "#f0c040", "#b8860b"], [0, 0.5, 1], 0, 1.5, 0, h - 1.5)
+        .drawRoundRect(x0, 1.5, len, h - 3, 4);
+      gg.beginFill("rgba(255,255,255,0.28)").drawRoundRect(x0 + 1, 2.5, len - 2, 3, 2);   // 上端の照り
+    }
+    // 目盛り(両側とも PP.GALE.meterTick m/s 刻み。生存ゲージの目盛りと同じ描き方)
+    gg.setStrokeStyle(1).beginStroke("rgba(0,0,0,0.4)");
+    var tick = PP.GALE.meterTick || 1;
+    for (var t = tick; t < maxS; t += tick) {
+      var d = half * (t / maxS);
+      gg.moveTo(cx + WM.pivot + d, 3).lineTo(cx + WM.pivot + d, h - 3);
+      gg.moveTo(cx - WM.pivot - d, 3).lineTo(cx - WM.pivot - d, h - 3);
+    }
+    gg.endStroke();
+    // ピボット(中央の真鍮の柱)と真鍮縁
+    gg.beginFill("#c9a86a").drawRect(cx - 1, 2, 2, h - 4);
+    gg.setStrokeStyle(1.5).beginStroke("#c9a86a").drawRoundRect(0, 0, w, h, 7);
+    windMeter.updateCache();
+  }
+  // 毎 tick(updateEffects から)。風の無い難易度では欄を畳み、チップ列を元の位置へ戻す
+  function updateWind(g) {
+    var on = PP.gale.active();
+    if (windCont.visible !== on) windCont.visible = on;
+    var ex = on ? 826 + WIND_SHIFT : 826;
+    if (hudEffects.x !== ex) { hudEffects.x = ex; lastEffectsText = null; }   // チップは次の構築で描き直す
+    if (!on) {
+      if (windGlowOn) { windGlow.alpha = 0; windGlowOn = false; }
+      return;
+    }
+    var inf = PP.gale.info();
+    var key = inf.dir + ":" + inf.strength;
+    if (key !== lastWindKey) {
+      lastWindKey = key;
+      drawWindMeter(inf.dir, inf.strength);
+      // 風速 m/s をそのまま(名前の表は持たない)。矢印は風下側に付ける(凪は矢印無し)
+      var ms = inf.strength + " m/s";
+      setCachedText(windName, inf.dir < 0 ? "◀ " + ms : inf.dir > 0 ? ms + " ▶" : ms);
+    }
+    // 予兆: 次の風が決まってから切り替わるまで、枠が金色に速く脈打つ
+    if (inf.pending) {
+      if (!windGlowDrawn) {
+        windGlowDrawn = true;
+        windGlow.graphics.beginStroke("rgba(255,220,120,1)").setStrokeStyle(3.5)
+          .drawRoundRect(-1.5, -1.5, WM.w + 3, WM.h + 3, 8);
+        windGlow.updateCache();   // 初回だけ焼く(以後は alpha 操作のみ)
+      }
+      windGlow.alpha = 0.3 + 0.5 * (0.5 + 0.5 * Math.sin(animT * 10));
+      windGlowOn = true;
+    } else if (windGlowOn) {
+      windGlow.alpha = 0;
+      windGlowOn = false;
+    }
+  }
+
   // 毎tick: スコアのカウントアップ、生存ゲージ、時間制パワーアップの残り
   function updateEffects() {
     var g = PP.game;
@@ -386,6 +489,7 @@
     // (プレイ以外の画面では showOverlay() が隠す)
     if (pauseBtn) pauseBtn.visible = true;
     if (swapBtn) swapBtn.visible = true;
+    updateWind(g);   // 風の海域だけ WIND 欄を出し、チップ列を右へ寄せる
 
     // 【新】🌈 虹玉ボタンの表示更新(PC=キャンバス / タッチ=DOM の #tWild)
     var wInfo = PP.upgrades.wildInfo();
@@ -591,8 +695,12 @@
   }
 
   // ---------- 難易度ボタン(【課題1】) ----------
-  // パネルの下に4つ並べる。クリック判定は main.js が hitDifficulty で行う
+  // パネルの下に5つ並べる。クリック判定は input.js が hitDifficulty で行う
   // (CreateJS のイベントではなく矩形判定にして、発射クリックと混ざらないようにする)。
+  // ボタンの表示名。ロック中は 🔒 を頭に付ける(解禁の瞬間に redrawDiffButtons が外す)
+  function diffName(key) {
+    return (PP.diffLocked(key) ? "🔒 " : "") + PP.i18n.t("diff." + key + ".name");
+  }
   function buildDiffButtons(O) {
     diffCont = new createjs.Container();
     var keys = PP.DIFFICULTY_ORDER;
@@ -612,12 +720,13 @@
       var t1 = new createjs.Text((i + 1) + "  " + key.toUpperCase(), F_LBL, C_LBL);
       t1.textAlign = "center"; t1.x = bx + DIFF_BTN.w / 2; t1.y = y + 9;
       cacheHudText(t1, DIFF_BTN.w, 16, 4);
-      var t2 = new createjs.Text(PP.i18n.t("diff." + key + ".name"), 'bold 17px "Meiryo", sans-serif', C_VAL);
+      var t2 = new createjs.Text(diffName(key), 'bold 17px "Meiryo", sans-serif', C_VAL);
       t2.textAlign = "center"; t2.x = bx + DIFF_BTN.w / 2; t2.y = y + 27;
-      t2.langKey = "diff." + key + ".name";   // relabel が貼り替えるための控え
+      t2.diffKey = key;   // relabel / 解禁時に diffName で貼り替えるための控え
       cacheHudText(t2, DIFF_BTN.w + 24, 22, 6);
       diffCont.addChild(t1, t2);
       diffNameTexts.push(t2);
+      diffLabelTexts.push(t1);
       diffShapes.push(s);
       diffRects.push({ key: key, x: bx, y: y, w: DIFF_BTN.w, h: DIFF_BTN.h });
     });
@@ -761,7 +870,7 @@
     // どのラベルも cache 済みなので、代入ではなく setCachedText で
     // 「変わったときだけ焼き直す」(直接 .text に書くと表示が更新されない)
     if (diffCap) setCachedText(diffCap, t("hud.diffCaption"));
-    diffNameTexts.forEach(function (tx) { setCachedText(tx, t(tx.langKey)); });
+    diffNameTexts.forEach(function (tx) { setCachedText(tx, diffName(tx.diffKey)); });
     if (overCap) setCachedText(overCap, t("hud.overCaption"));
     overLabels.forEach(function (tx) { setCachedText(tx, t(tx.langKey)); });
     if (langText) setCachedText(langText, t("hud.langBtn"));
@@ -785,27 +894,47 @@
     return st === "title" || st === "gameclear";
   }
 
-  // 選択中のボタンだけ金縁で光らせる
+  // 選択中のボタンだけ金縁で光らせる。ロック中のボタンは沈めて 🔒 を付ける
+  // (表示のたびに呼ばれるので、全海域制覇で解禁された直後の制覇画面でも 🔒 が外れる)
   function redrawDiffButtons() {
     var sel = PP.game.difficulty;
     diffRects.forEach(function (r, i) {
       var g = diffShapes[i].graphics;
       var on = r.key === sel;
+      var locked = PP.diffLocked(r.key);
       g.clear();
       g.beginLinearGradientFill(
-        on ? ["#3a2c12", "#241806"] : ["rgba(20,28,40,0.85)", "rgba(8,12,20,0.85)"],
+        on ? ["#3a2c12", "#241806"]
+        : locked ? ["rgba(14,14,18,0.6)", "rgba(6,6,10,0.6)"]
+        : ["rgba(20,28,40,0.85)", "rgba(8,12,20,0.85)"],
         [0, 1], r.x, r.y, r.x, r.y + r.h)
         .drawRoundRect(r.x, r.y, r.w, r.h, 12);
       g.setStrokeStyle(on ? 2.5 : 1.2)
-        .beginStroke(on ? "#f0c040" : "rgba(202,169,106,0.5)")
+        .beginStroke(on ? "#f0c040" : locked ? "rgba(120,110,90,0.35)" : "rgba(202,169,106,0.5)")
         .drawRoundRect(r.x, r.y, r.w, r.h, 12);
       diffShapes[i].updateCache();   // 選択変更時のみ呼ばれる=焼き直しもそのときだけ
+      // 文字は alpha で沈める(cache 済み Text は色替えより alpha の方が安い)
+      var a = locked ? 0.45 : 1;
+      if (diffLabelTexts[i]) diffLabelTexts[i].alpha = a;
+      if (diffNameTexts[i]) {
+        diffNameTexts[i].alpha = a;
+        setCachedText(diffNameTexts[i], diffName(r.key));   // 解禁で 🔒 が取れる
+      }
     });
   }
 
   // (x, y) が難易度ボタンの上なら、その難易度キーを返す(外れなら null)。
-  // ボタンが出ていない画面(ステージクリア等)では常に null
+  // ボタンが出ていない画面(ステージクリア等)と、ロック中のボタンでは null
   function hitDifficulty(x, y) {
+    var key = hitAnyDifficulty(x, y);
+    return (key && !PP.diffLocked(key)) ? key : null;
+  }
+  // ロック中のボタンの上なら、そのキーを返す(input.js が「未解禁」の手応えを出す)
+  function hitLockedDifficulty(x, y) {
+    var key = hitAnyDifficulty(x, y);
+    return (key && PP.diffLocked(key)) ? key : null;
+  }
+  function hitAnyDifficulty(x, y) {
     if (!PP.layers.overlay.visible || !diffCont || !diffCont.visible) return null;
     for (var i = 0; i < diffRects.length; i++) {
       var r = diffRects[i];
@@ -824,8 +953,12 @@
     // 【強化】パリィの構えシールドが overlay 越しに光り続けないように片付ける
     // (プレイ中しか update されないため、ここで隠すのが唯一の確実な出口)
     if (PP.upgrades && PP.upgrades.hideParryShield) PP.upgrades.hideParryShield();
-    // 難易度ボタンは新しいランが始まる画面だけ(呼び出し側で state を先に確定させている)
-    if (diffCont) diffCont.visible = canPickDifficulty();
+    // 難易度ボタンは新しいランが始まる画面だけ(呼び出し側で state を先に確定させている)。
+    // 出すときは描き直す: 直前のランで解禁された難易度の 🔒 をここで外す
+    if (diffCont) {
+      diffCont.visible = canPickDifficulty();
+      if (diffCont.visible) redrawDiffButtons();
+    }
     // 言語ボタンも「新しいランが始まる画面」だけ(難易度と同じ条件)
     if (langCont) langCont.visible = canPickDifficulty();
     // チュートリアル ON/OFF も同じ画面だけ。完走/スキップで OFF に変わっているので描き直す
@@ -890,6 +1023,7 @@
     if (pauseBtn) pauseBtn.visible = false;   // 全画面パネルの上にボタンを残さない
     if (swapBtn) swapBtn.visible = false;
     if (wildBtn) wildBtn.visible = false;
+    if (windCont) windCont.visible = false;   // WIND 欄もパネルの間は畳む(プレイ再開で updateWind が出す)
 
     O.visible = true; O.alpha = 0;
     createjs.Tween.get(O, { override: true }).to({ alpha: 1 }, s.fade);
@@ -964,6 +1098,7 @@
     hitSwapBtn: hitSwapBtn,
     hitWildBtn: hitWildBtn,   // 【新】🌈 虹玉ボタン(input.js が発射より先に判定)
     hitDifficulty: hitDifficulty, setDifficulty: setDifficulty,
+    hitLockedDifficulty: hitLockedDifficulty,   // ロック中の難易度ボタン(input.js が空振りの手応えを出す)
     hitOverChoice: hitOverChoice,
     hitLang: hitLang,   // 言語切り替えボタン(input.js が難易度と同様に判定)
     hitTut: hitTut,     // チュートリアル ON/OFF ボタン(同上)

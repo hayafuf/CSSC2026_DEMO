@@ -446,10 +446,18 @@
     spawnDot(dotFor(color), "lighter", x, y, x, y, s0, s0, s1, s1, durMs, { a0: a0 });
   }
 
+  // (x0,y0)→(x1,y1) へ流れて消える発光の筋(横風の風筋など)。細長い楕円は
+  // 円の焼き込みを scale で潰して作る(sx, sy は半径 DOT_R に対する倍率)。
+  // spawnDot のプール経由なので毎フレーム呼んでも生成ゼロ、StageGL でも安全
+  function drift(x0, y0, x1, y1, color, sx, sy, durMs, a0) {
+    spawnDot(dotFor(color), "lighter", x0, y0, x1, y1,
+      sx, sy, sx * 0.6, sy * 0.6, durMs, { a0: a0 === undefined ? 0.6 : a0 });
+  }
+
   PP.fx = {
     particles: particles, burst: burst, floatText: floatText,
     ring: ring, flash: flash, splash: splash, missileTrail: missileTrail,
-    screenFlash: screenFlash, glowDot: glowDot,
+    screenFlash: screenFlash, glowDot: glowDot, drift: drift,
     updateParticles: updateParticles, particleLoad: particleLoad,
     shake: shake, updateShake: updateShake, resetShake: resetShake
   };
