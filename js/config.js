@@ -876,17 +876,18 @@
     strengthMin: 10, strengthMax: 25,
     calmChance: 0.15,
     accelPer:  300,
-    periodMin: 6.0, periodMax: 10.0,   // 次の風に変わるまでの秒(この範囲の一様乱数)
+    periodMin: 12.0, periodMax: 18.0,  // 次の風に変わるまでの秒(この範囲の一様乱数)。
+                                       // 短いと読む前に変わって運ゲーになる(6〜10 秒は忙しすぎた)
     warn:      1.8,                    // 切り替わる何秒前に予兆(音+HUD の脈動)を出すか。次の風はこの時点で決まる
+    noticeCount: 3, noticeGap: 0.45,   // 予告音(SE/window_change_notice.mp3)を鳴らす回数と間隔(秒)。
+                                       // 3回目が鳴り終わるころに切り替わる(count-1)×gap < warn にしておく
     ramp:      1.0,                    // 風が切り替わるときの補間秒(HUD が先に変わり、弾は後から曲がる)
     bossMult:  0.7,                    // ボス海域の風の倍率(1.0 で通常面と同じ、0 で無風)
     maxLateral: 2000,                  // 玉の横速度の上限 px/s(25 m/s で最上段に届く頃の横速度。
                                        // 縦 2600 と合わせても 1/180 秒の移動は玉の当たり半径より小さい)
     announceFrom: 20,                  // この風速(m/s)以上の風が来たら砲の上に文言を出す(99 で出さない)
     meterTick: 5,                      // HUD のメーターの目盛りの刻み(m/s)
-    // 音量(audio.js の合成音 beep/gliss)。予兆は向き反転=上昇3音 / 強さだけ=同音2連、
-    // 切り替わりの瞬間は下降の風切り音。BGM に埋もれない程度に大きめ
-    warnVol: 0.10, gustVol: 0.08,
+    // 音は SE(audio.js の galeNotice / galeChanged)。音量はそちらの sfx(...) の第2引数
     // 🔭 羅針の眼の曲線予測: 実弾と同じ積分を step 秒刻みで maxSteps 回まで先読みし、
     // dots 個の点で描く。再計算は砲が動いたときと hz 回/秒(全玉走査なので間引く)
     preview: { step: 1 / 120, maxSteps: 240, dots: 32, hz: 20 },

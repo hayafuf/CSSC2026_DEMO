@@ -336,7 +336,7 @@
     "tut.hWildPc": "Q キーで虹玉を装填!どの色にもつながる切り札",
     "tut.hCoin": "🪙 を集めるとライフが回復する",
     "tut.hBoss": "ボス戦!玉を消して敵のHPを削れ",
-    "tut.hGale": "🌪 横風で玉が曲がる!上の WIND 欄で向きと強さを読め(枠が光ったら風が変わる合図)。🔭 羅針の眼なら曲がる軌道が見える",
+    "tut.hGale": "🌪 横風で玉が曲がる!WIND の表示で向きと風速を読め(枠が光ったら風が変わる合図)。🔭 羅針の眼なら曲がる軌道が見える",
 
     // ---- course-api.js(バリデーション。エディタ経由でユーザーに見える) ----
     "api.defaultName": "無名の航路",
@@ -637,7 +637,7 @@
     "tut.hWildPc": "Load a rainbow ball with Q — it matches any color!",
     "tut.hCoin": "Collect 🪙 coins to restore lives",
     "tut.hBoss": "Boss battle! Pop balls to damage the boss",
-    "tut.hGale": "🌪 Crosswind bends your shots! Read the WIND meter up top (it glows before the wind shifts). The 🔭 spyglass shows the curved path",
+    "tut.hGale": "🌪 Crosswind bends your shots! Read the WIND meter (it glows before the wind shifts). The 🔭 spyglass shows the curved path",
 
     "api.defaultName": "Unnamed Route",
     "api.lane": "Lane {n}: ",

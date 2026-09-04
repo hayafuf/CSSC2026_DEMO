@@ -368,6 +368,9 @@
   var seSlow = sfx("SE/prisoner.mp3", 0.6);
   // 追加SE: 逆風(発動)/ 生存ゲージの時間切れ(掃討フェーズ移行)
   var seWind = sfx("SE/wind.mp3", 0.6);
+  // 横風(深海の悪魔+風。gale.js): 風が変わる前の予告(3回鳴る)と、変わった瞬間の合図
+  var seGaleNotice = sfx("SE/window_change_notice.mp3", 0.7);
+  var seGaleChanged = sfx("SE/window_changed.mp3", 0.75);
   var seTimeOver = sfx("SE/time_over.mp3", 0.7);
   // 追加SE: 爆弾の炸裂(合成音に重ねる)/ ミサイル発射
   var seBombBoom = sfx("SE/bomb_explosion.mp3", 0.85);
@@ -959,6 +962,8 @@
     slow: seSlow,
     // 逆風の発動音
     wind: seWind,
+    galeNotice: seGaleNotice,     // 横風の予告(変わる前に3回)
+    galeChanged: seGaleChanged,   // 横風が変わった瞬間(1回)
     // 生存ゲージの時間切れ(掃討フェーズ移行)
     timeOver: seTimeOver,
     // 手持ち玉の交換(手動操作: 交換キー・特殊弾トグル)

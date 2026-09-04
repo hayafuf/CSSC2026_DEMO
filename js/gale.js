@@ -5,8 +5,8 @@
  *   ・向き(左 / 右)と強さ(風速 m/s = PP.GALE.strengthMin〜strengthMax の整数、
  *     または calmChance の確率で 0 = 凪。弱い風は出さない)を持ち、
  *   ・数秒ごと(PP.GALE.periodMin〜periodMax)に変わり、
- *   ・変わる PP.GALE.warn 秒前に「次の風」が決まって予兆(音と HUD の脈動)が出る。
- *     向きが反転するときは予兆音が違う(こちらが本命の警告)。
+ *   ・変わる PP.GALE.warn 秒前に「次の風」が決まって予兆が出る: 予告の SE が
+ *     noticeCount 回(既定 3 回)鳴り、HUD の WIND 欄が脈打つ。変わった瞬間に別の SE が 1 回。
  *   ・切り替わりは PP.GALE.ramp 秒かけて滑らかに補間する
  *     (HUD の表示は先に変わり、弾の曲がりは少し遅れて追いつく=読める猶予を作る)。
  * 強さは名前の表を持たず、乱数で引いた整数をそのまま HUD に出す。
@@ -32,6 +32,7 @@
   var from = 0, target = 0, rampT = 1;   // 補間の始点・終点・進み(0→1)
   var timer = 0;                 // 次の風に変わるまでの秒
   var pending = null;            // 予兆中の「次の風」{dir, strength}(warn 秒前に決まる)
+  var noticeT = 0, noticeN = 0;  // 予告音: 予兆開始からの経過秒と、鳴らした回数
   var forced = false;            // force() 中は自動で切り替えない(検証用)
   var streakAcc = 0;             // 風の筋のスポーン蓄積(小数の本数/秒を整数に均す)
 
@@ -57,28 +58,22 @@
     return { dir: d, strength: s };
   }
 
-  // 予兆: 次の風が決まった合図。向きが変わる(反転・凪との出入り)なら上昇する3音、
-  // 強さだけなら同じ高さの2連音。mp3 は足さず合成音で済ませる(audio.js の beep)
-  function warnSound(next) {
-    var v = G.warnVol;
-    if (next.dir !== dir) {
-      PP.audio.beep(440, 0.10, "triangle", v);
-      setTimeout(function () { PP.audio.beep(660, 0.10, "triangle", v); }, 140);
-      setTimeout(function () { PP.audio.beep(880, 0.18, "triangle", v); }, 280);
-    } else {
-      PP.audio.beep(560, 0.07, "triangle", v * 0.8);
-      setTimeout(function () { PP.audio.beep(560, 0.07, "triangle", v * 0.8); }, 150);
+  // 予告音: 予兆の間、noticeGap 秒おきに noticeCount 回鳴らす。setTimeout ではなく
+  // update の経過秒で鳴らすので、ポーズ中は予告も止まる(再開後に続きが鳴る)
+  function tickNotice(dt) {
+    noticeT += dt;
+    while (noticeN < G.noticeCount && noticeT >= noticeN * G.noticeGap) {
+      noticeN++;
+      PP.audio.galeNotice();
     }
   }
 
-  // 風の目標を差し替える(補間はここから ramp 秒)。突風の風切り音と、強い風なら文言も
+  // 風の目標を差し替える(補間はここから ramp 秒)。切り替わりの SE と、強い風なら文言も
   function setTarget(d, s) {
     dir = d; strength = s;
     from = cur; rampT = 0;
     target = accelOf(d, s);
-    // 切り替わりの瞬間: 高いところから落ちる風切り音(強いほど高く長い)。凪は短く静かに
-    if (s > 0) PP.audio.gliss(500 + 60 * s, 90, 0.35 + 0.03 * s, "sawtooth", G.gustVol);
-    else PP.audio.gliss(300, 120, 0.25, "sine", G.gustVol * 0.6);
+    PP.audio.galeChanged();
     // 強い風は砲の上にも一言(向きと数値)
     if (s >= G.announceFrom && PP.cannon) {
       PP.fx.floatText((d < 0 ? "◀ " : "") + "WIND " + s + " m/s" + (d > 0 ? " ▶" : ""),
@@ -95,6 +90,7 @@
     rampT = 1;
     timer = G.periodMin + Math.random() * (G.periodMax - G.periodMin);
     pending = null; forced = false; streakAcc = 0;
+    noticeT = 0; noticeN = 0;
   }
 
   // 毎フレーム(main.js の tick、playing 中だけ)
@@ -108,8 +104,9 @@
       timer -= dt;
       if (!pending && timer <= G.warn) {
         pending = decideNext();
-        warnSound(pending);
+        noticeT = 0; noticeN = 0;   // 予告音はここから鳴り始める(1回目は即)
       }
+      if (pending) tickNotice(dt);
       if (timer <= 0) {
         setTarget(pending.dir, pending.strength);
         pending = null;

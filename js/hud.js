@@ -67,15 +67,20 @@
   // レイアウト(バーは 62px。1段目 y=104 に触れない高さで、文字を大きく取る)
   var BAR = 62;
   var GAUGE_X = 500, GAUGE_W = 182, GAUGE_H = 18, GAUGE_Y = 30;
-  // 風(難易度「深海の悪魔+風」だけ)。SURVIVAL の右の区画(仕切り x=812 の先)に
-  // 「WIND」ラベル+強さの数値+風のメーターを置く。メーターは生存ゲージと同じ
-  // 「暗いガラス+真鍮縁」の器で、中央のピボットから風下側へ金のフィルが伸びる
-  // (長さ = 風速 / strengthMax。meterTick 刻みの目盛り付き)。両端の矢尻は風下側だけ灯る。
-  // 風が変わる前は枠が金色に脈打つ。
-  // この欄が出ている間、パワーアップのチップ列は WIND_SHIFT ぶん右へ寄る
-  var windCont = null, windLbl = null, windName = null, windMeter = null, windGlow = null;
+  // 風(難易度「深海の悪魔+風」だけ)。「WIND」ラベル+風速の数値+風のメーター。
+  // メーターは生存ゲージと同じ「暗いガラス+真鍮縁」の器で、中央のピボットから風下側へ
+  // 金のフィルが伸びる(長さ = 風速 / strengthMax。meterTick 刻みの目盛り付き)。
+  // 両端の矢尻は風下側だけ灯る。風が変わる前は枠が金色に脈打つ。
+  // 置き場所は端末で変える:
+  //   PC     … 画面左下(大砲と同じ高さ)の真鍮縁プレート。照準と同じ視線の高さで読める。
+  //            cannon レイヤーの最背面に置き、砲が左端まで来たときは砲が手前に重なる
+  //   タッチ … 左下は ◀ ▶ ボタンが占めるので、HUD バーの SURVIVAL の右の区画に小さく出す。
+  //            その間、パワーアップのチップ列は WIND_SHIFT ぶん右へ寄る
+  // windUI に「どちらの部品か」をまとめ、updateWind はそれだけを見る
+  var windUI = null;   // { cont, name, meter, glow, mw(メーター幅), bar(バー版か) }
   var WIND_X = 812, WIND_SHIFT = 140;
-  var WM = { w: 120, h: GAUGE_H, pivot: 3, pad: 3 };
+  var WM = { h: GAUGE_H, pivot: 3, pad: 3 };
+  var WIND_PLATE = { x: 16, y: 604, w: 196, h: 86, mw: 160 };
   var lastWindKey = null, windGlowOn = false, windGlowDrawn = false;
 
   // フォント(数値・ラベルは Cinzel、絵文字はシステム絵文字、効果は Meiryo)
@@ -217,24 +222,8 @@
     cacheHudText(hudEffects, 460, 26, 20);   // blur 8 のグローが切れない余白
     L.addChild(hudEffects);
 
-    // ---- 風(WIND 欄。表示の切り替えと中身は updateWind) ----
-    windCont = new createjs.Container();
-    windCont.visible = false;
-    windLbl = new createjs.Text("WIND", F_LBL, C_LBL);   // 他のラベルと同じ英字固定
-    windLbl.x = WIND_X; windLbl.y = 9;
-    cacheHudText(windLbl, 50, 16, 4);
-    windName = new createjs.Text("", 'bold 15px "Meiryo", sans-serif', "#ffdf8a");
-    windName.x = WIND_X + 44; windName.y = 6;
-    windName.shadow = new createjs.Shadow("rgba(0,0,0,0.65)", 0, 1, 3);
-    cacheHudText(windName, 110, 18, 6);
-    windGlow = new createjs.Shape();        // 予兆の金の脈動(枠の外。gaugeGlow と同じ作り)
-    windGlow.x = WIND_X; windGlow.y = GAUGE_Y;
-    windGlow.cache(-4, -4, WM.w + 8, WM.h + 8);
-    windMeter = new createjs.Shape();       // 形は風が変わったときだけ drawWindMeter が描き直す
-    windMeter.x = WIND_X; windMeter.y = GAUGE_Y;
-    windMeter.cache(-13, -3, WM.w + 26, WM.h + 6);   // 両端の矢尻ぶん広く取る
-    windCont.addChild(windLbl, windName, windGlow, windMeter);
-    L.addChild(windCont);
+    // ---- 風(WIND 表示。表示の切り替えと中身は updateWind) ----
+    windUI = PP.TOUCH ? buildWindBar(L) : buildWindPlate();
 
     // 【課題5】コインとライフの表示(右端)
     hudCoinLife = new createjs.Text("", '800 18px "Cinzel","Hiragino Kaku Gothic ProN","Meiryo",serif', C_VAL);
@@ -406,14 +395,84 @@
     }
   }
 
-  // ---------- 風の欄(WIND) ----------
-  // メーターの作画。局所座標は器の左上 (0,0)、幅 WM.w × 高さ WM.h。
-  // 中央のピボットから風下側へ、強さ / strengthMax の長さだけ金のフィルが伸びる
-  // (生存ゲージと同じ塗り)。両側に 1 刻みの目盛り、両端の矢尻は風下側だけ灯す。
+  // ---------- 風の表示(WIND) ----------
+  // タッチ端末向け: HUD バー内の小さな欄(SURVIVAL の右)
+  function buildWindBar(L) {
+    var mw = 120;
+    var cont = new createjs.Container();
+    cont.visible = false;
+    var lbl = new createjs.Text("WIND", F_LBL, C_LBL);   // 他のラベルと同じ英字固定
+    lbl.x = WIND_X; lbl.y = 9;
+    cacheHudText(lbl, 50, 16, 4);
+    var name = new createjs.Text("", 'bold 15px "Meiryo", sans-serif', "#ffdf8a");
+    name.x = WIND_X + 44; name.y = 6;
+    name.shadow = new createjs.Shadow("rgba(0,0,0,0.65)", 0, 1, 3);
+    cacheHudText(name, 110, 18, 6);
+    var glow = new createjs.Shape();        // 予兆の金の脈動(枠の外。gaugeGlow と同じ作り)
+    glow.x = WIND_X; glow.y = GAUGE_Y;
+    glow.cache(-4, -4, mw + 8, WM.h + 8);
+    var meter = new createjs.Shape();       // 形は風が変わったときだけ drawWindMeter が描き直す
+    meter.x = WIND_X; meter.y = GAUGE_Y;
+    meter.cache(-13, -3, mw + 26, WM.h + 6);   // 両端の矢尻ぶん広く取る
+    cont.addChild(lbl, name, glow, meter);
+    L.addChild(cont);
+    return { cont: cont, name: name, meter: meter, glow: glow, mw: mw, bar: true };
+  }
+
+  // PC 向け: 画面左下の真鍮縁プレート(大砲と同じ高さ)。意匠はオーバーレイの
+  // パネル(SKINS.normal: 革の地・真鍮縁・四隅のリベット・Cinzel の見出し)と同じ語彙
+  function buildWindPlate() {
+    var P = WIND_PLATE;
+    var cont = new createjs.Container();
+    cont.x = P.x; cont.y = P.y;
+    cont.visible = false;
+    cont.mouseEnabled = cont.mouseChildren = false;
+    var bg = new createjs.Shape();
+    var g = bg.graphics;
+    // 柔らかい金の後光 → 革の地 → 真鍮縁
+    g.beginFill("rgba(240,192,64,0.10)").drawRoundRect(-3, -3, P.w + 6, P.h + 6, 11);
+    g.beginLinearGradientFill(["#2a1f10", "#150e06"], [0, 1], 0, 0, 0, P.h).drawRoundRect(0, 0, P.w, P.h, 8);
+    g.setStrokeStyle(2).beginStroke("#f0c040").drawRoundRect(0, 0, P.w, P.h, 8);
+    // 見出しの下の装飾線(中央が明るい真鍮の細線)
+    g.beginLinearGradientFill(["rgba(240,192,64,0)", "rgba(240,192,64,0.7)", "rgba(240,192,64,0)"],
+      [0, 0.5, 1], 12, 0, P.w - 12, 0).drawRect(12, 25, P.w - 24, 1);
+    // 四隅のリベット
+    [[9, 9], [P.w - 9, 9], [9, P.h - 9], [P.w - 9, P.h - 9]].forEach(function (r) {
+      g.beginRadialGradientFill(["#f6e2a0", "#8a6a2a"], [0, 1], r[0] - 1, r[1] - 1, 0.5, r[0], r[1], 3.4).drawCircle(r[0], r[1], 3);
+    });
+    bg.cache(-4, -4, P.w + 8, P.h + 8);
+    cont.addChild(bg);
+    var lbl = new createjs.Text("WIND", '600 13px "Cinzel", serif', C_LBL);
+    lbl.textAlign = "center"; lbl.x = P.w / 2; lbl.y = 7;
+    cacheHudText(lbl, 80, 18, 4);
+    cont.addChild(lbl);
+    // 風速: 生存ゲージの残り秒と同じ書体・大きさ(Cinzel の数字、矢印は Meiryo に落ちる)
+    var name = new createjs.Text("", F_GT, "#ffdf8a");
+    name.textAlign = "center"; name.textBaseline = "middle";
+    name.x = P.w / 2; name.y = 43;
+    name.shadow = new createjs.Shadow("rgba(0,0,0,0.65)", 0, 1, 3);
+    cacheHudText(name, 180, 30);
+    cont.addChild(name);
+    var mx = (P.w - P.mw) / 2, my = 60;
+    var glow = new createjs.Shape();
+    glow.x = mx; glow.y = my;
+    glow.cache(-4, -4, P.mw + 8, WM.h + 8);
+    var meter = new createjs.Shape();
+    meter.x = mx; meter.y = my;
+    meter.cache(-13, -3, P.mw + 26, WM.h + 6);
+    cont.addChild(glow, meter);
+    // 砲より奥に置く(HUD レイヤーだと砲の上に被ってしまう)
+    PP.layers.cannon.addChildAt(cont, 0);
+    return { cont: cont, name: name, meter: meter, glow: glow, mw: P.mw, bar: false };
+  }
+
+  // メーターの作画。局所座標は器の左上 (0,0)、幅 w × 高さ WM.h。
+  // 中央のピボットから風下側へ、風速 / strengthMax の長さだけ金のフィルが伸びる
+  // (生存ゲージと同じ塗り)。両側に meterTick 刻みの目盛り、両端の矢尻は風下側だけ灯す。
   // 風向きと強さが変わったときだけ呼ばれる
-  function drawWindMeter(dir, s) {
-    var gg = windMeter.graphics; gg.clear();
-    var w = WM.w, h = WM.h, cx = w / 2;
+  function drawWindMeter(shape, w, dir, s) {
+    var gg = shape.graphics; gg.clear();
+    var h = WM.h, cx = w / 2;
     var half = cx - WM.pivot - WM.pad;                 // 片側のフィルの最大長
     var maxS = PP.GALE.strengthMax;
     var len = s > 0 ? Math.max(4, half * Math.min(1, s / maxS)) : 0;   // 凪(0)はフィル無し
@@ -441,39 +500,44 @@
     // ピボット(中央の真鍮の柱)と真鍮縁
     gg.beginFill("#c9a86a").drawRect(cx - 1, 2, 2, h - 4);
     gg.setStrokeStyle(1.5).beginStroke("#c9a86a").drawRoundRect(0, 0, w, h, 7);
-    windMeter.updateCache();
+    shape.updateCache();
   }
-  // 毎 tick(updateEffects から)。風の無い難易度では欄を畳み、チップ列を元の位置へ戻す
+  // 毎 tick(updateEffects から)。風の無い難易度では表示を畳み、
+  // (バー版なら)チップ列を元の位置へ戻す
   function updateWind(g) {
+    var ui = windUI;
+    if (!ui) return;
     var on = PP.gale.active();
-    if (windCont.visible !== on) windCont.visible = on;
-    var ex = on ? 826 + WIND_SHIFT : 826;
-    if (hudEffects.x !== ex) { hudEffects.x = ex; lastEffectsText = null; }   // チップは次の構築で描き直す
+    if (ui.cont.visible !== on) ui.cont.visible = on;
+    if (ui.bar) {
+      var ex = on ? 826 + WIND_SHIFT : 826;
+      if (hudEffects.x !== ex) { hudEffects.x = ex; lastEffectsText = null; }   // チップは次の構築で描き直す
+    }
     if (!on) {
-      if (windGlowOn) { windGlow.alpha = 0; windGlowOn = false; }
+      if (windGlowOn) { ui.glow.alpha = 0; windGlowOn = false; }
       return;
     }
     var inf = PP.gale.info();
     var key = inf.dir + ":" + inf.strength;
     if (key !== lastWindKey) {
       lastWindKey = key;
-      drawWindMeter(inf.dir, inf.strength);
+      drawWindMeter(ui.meter, ui.mw, inf.dir, inf.strength);
       // 風速 m/s をそのまま(名前の表は持たない)。矢印は風下側に付ける(凪は矢印無し)
       var ms = inf.strength + " m/s";
-      setCachedText(windName, inf.dir < 0 ? "◀ " + ms : inf.dir > 0 ? ms + " ▶" : ms);
+      setCachedText(ui.name, inf.dir < 0 ? "◀ " + ms : inf.dir > 0 ? ms + " ▶" : ms);
     }
     // 予兆: 次の風が決まってから切り替わるまで、枠が金色に速く脈打つ
     if (inf.pending) {
       if (!windGlowDrawn) {
         windGlowDrawn = true;
-        windGlow.graphics.beginStroke("rgba(255,220,120,1)").setStrokeStyle(3.5)
-          .drawRoundRect(-1.5, -1.5, WM.w + 3, WM.h + 3, 8);
-        windGlow.updateCache();   // 初回だけ焼く(以後は alpha 操作のみ)
+        ui.glow.graphics.beginStroke("rgba(255,220,120,1)").setStrokeStyle(3.5)
+          .drawRoundRect(-1.5, -1.5, ui.mw + 3, WM.h + 3, 8);
+        ui.glow.updateCache();   // 初回だけ焼く(以後は alpha 操作のみ)
       }
-      windGlow.alpha = 0.3 + 0.5 * (0.5 + 0.5 * Math.sin(animT * 10));
+      ui.glow.alpha = 0.3 + 0.5 * (0.5 + 0.5 * Math.sin(animT * 10));
       windGlowOn = true;
     } else if (windGlowOn) {
-      windGlow.alpha = 0;
+      ui.glow.alpha = 0;
       windGlowOn = false;
     }
   }
@@ -1023,7 +1087,7 @@
     if (pauseBtn) pauseBtn.visible = false;   // 全画面パネルの上にボタンを残さない
     if (swapBtn) swapBtn.visible = false;
     if (wildBtn) wildBtn.visible = false;
-    if (windCont) windCont.visible = false;   // WIND 欄もパネルの間は畳む(プレイ再開で updateWind が出す)
+    if (windUI) windUI.cont.visible = false;   // WIND 表示もパネルの間は畳む(プレイ再開で updateWind が出す)
 
     O.visible = true; O.alpha = 0;
     createjs.Tween.get(O, { override: true }).to({ alpha: 1 }, s.fade);
