@@ -159,6 +159,7 @@
     "chain.treasureCrushed": "宝が砕けた…",
     "chain.combo": "コンボ x{n}!",
     "chain.skullReward": "☠ 撃破! +{n}",
+    "night.blind": "🌙 暗闇消し! +{n}",
 
     // ---- crisis.js ----
     "crisis.mouthOpen": "樽が口を開けた!",
@@ -337,7 +338,7 @@
     "tut.hCoin": "🪙 を集めるとライフが回復する",
     "tut.hBoss": "ボス戦!玉を消して敵のHPを削れ",
     "tut.hGale": "🌪 横風で玉が曲がる!砲の脇の「◀ 風速」を読め(明滅したら風が変わる合図)。🔭 羅針の眼なら曲がる軌道が見える",
-    "tut.hNight": "🌙 闇が盤面を呑む。レールの灯りは玉を消さないと消えていく(消した場所の近くほど強く戻る)。光るのは自分の玉・大砲・🔭 羅針の眼だけ",
+    "tut.hNight": "🌙 闇が盤面を呑む。灯りは消さないと消え、消えた灯りは近くで消すか玉を当てて灯し直せ。闇の中でそろえれば「暗闇消し」でスコア 2 倍。風が強いほど灯りは早く燃え尽きる",
 
     // ---- course-api.js(バリデーション。エディタ経由でユーザーに見える) ----
     "api.defaultName": "無名の航路",
@@ -475,6 +476,7 @@
     "chain.treasureCrushed": "The treasure shattered…",
     "chain.combo": "Combo x{n}!",
     "chain.skullReward": "☠ Destroyed! +{n}",
+    "night.blind": "🌙 BLIND! +{n}",
 
     "crisis.mouthOpen": "The barrel gapes open!",
     "crisis.swallowedLeft": "Swallowed!  {n} more to doom",
@@ -639,7 +641,7 @@
     "tut.hCoin": "Collect 🪙 coins to restore lives",
     "tut.hBoss": "Boss battle! Pop balls to damage the boss",
     "tut.hGale": "🌪 Crosswind bends your shots! Read the wind speed beside the cannon (it blinks before the wind shifts). The 🔭 spyglass shows the curved path",
-    "tut.hNight": "🌙 Darkness swallows the board. The rail lanterns fade unless you keep popping balls (pops refill the lanterns nearby the most). Only your shots, the cannon and the 🔭 spyglass give light",
+    "tut.hNight": "🌙 Darkness swallows the board. Lanterns fade unless you pop; a dead lantern only relights from a pop nearby or a shot that hits there. Match in the dark for a BLIND bonus (2× score). Strong wind burns lanterns faster",
 
     "api.defaultName": "Unnamed Route",
     "api.lane": "Lane {n}: ",

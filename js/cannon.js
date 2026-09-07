@@ -1206,10 +1206,13 @@
       }
       if (bestI >= 0 && bestDist < HIT_R2) {
         var hitLane = _cache[bestLane].lane;
+        // 当たった玉のレール距離は割り込み/爆発の前に控える(c.balls は lane.balls の別名で、
+        // insertShot の splice 後は bestI が別の玉を指す)。夜の「灯し直し」に使う
+        var hitD = _cache[bestLane].balls[bestI].d;
         if (sh.special === "bomb") PP.chain.explodeAt(sh.x, sh.y);
         else if (sh.wild) PP.chain.wildBlast(hitLane, sh, bestI);   // 虹玉は炸裂(挿入しない)
         else PP.chain.insertShot(hitLane, sh, bestI);
-        if (PP.night.active()) PP.night.onHit(sh.x, sh.y);   // 夜: 着弾点に光が残る
+        if (PP.night.active()) PP.night.onHit(sh.x, sh.y, hitLane, hitD);   // 夜: 残光+最寄りの灯りを灯し直す
         if (sh.view.spark) createjs.Tween.removeTweens(sh.view.spark);
         PP.layers.shot.removeChild(sh.view);
         shots.splice(s, 1);

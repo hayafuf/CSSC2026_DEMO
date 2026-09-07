@@ -9,6 +9,17 @@
  * 「消し続けないと視界を失う」= 守りに入った瞬間に盤面が見えなくなる、が設計の芯。
  * 風(gale.js)と組み合わさって最後の腕試しになる。
  *
+ * ---- 駆け引き(4 つ。数値と on/off は PP.NIGHT) ----
+ *   ・暗闇消し(isDark): 灯りの外でそろえて消すとスコアと戻る燃料が増える。「光が来るのを
+ *     待つ」か「さっき見えた色を覚えて撃つ」か。判定は chain.js の popRun が消す前に行う
+ *   ・消えた灯りは遠くの消しでは戻らない(onPop の globalNeedsFlame): 放置した区間は自分で
+ *     取り返しに行くしかない = 闇が居座る
+ *   ・偵察射撃(onHit): 当てた場所の最寄りの灯りが灯り直る。列に玉を 1 個足す損と引き換えに
+ *     視界を買う。灯し直した分は relightGrace 秒だけ暗闇消しの判定に数えない(自分の偵察光で
+ *     狙った列が「明るい」になってボーナスを失わないため)
+ *   ・風 × 灯り(gale.lean): 光だまりが風下へずれ、灯体が傾き、風が強いほど燃料が早く減る。
+ *     凪が「灯りが保つ」息継ぎになる
+ *
  * ---- 絵の作り(3 枚重ね) ----
  *  1) 闇: 1 枚のオフスクリーン canvas。全面を深い藍で塗り、光源ごとに柔らかい
  *     グラデ(holeImg)を destination-out で drawImage して穴を開ける。ランタンの穴は
@@ -42,12 +53,14 @@
   var HOLE_UR = 64;   // 穴のグラデを焼く単位半径(実際の半径は drawImage の拡縮で付ける)
 
   // ---- 状態 ----
-  var lanterns = [];          // { d, x, y, ang, fuel, phase, glow, body }
+  var lanterns = [];          // { lane, d, x, y, ang, c, s, fuel, phase, relitT, preFuel, glow, body }
+  var leanFrac = 0, leanPx = 0, decayMul = 1;   // 風の傾き(-1〜+1)、光だまりの風下へのずれ px、燃料の減る倍率
   var pool = [];              // 使い回す Bitmap の組 { glow, body }
   var built = false;
   var darkCanvas = null, darkCtx = null, darkBmp = null, darkScale = 1, darkFill = null;
   var glowCont = null, holeImg = null, warmImg = null, coolImg = null, lampImg = null;
   var muzzleGlow = null, shotGlows = [];
+  var bossGlow = null;              // ボスに当たる月明かり(青白。ボス海域だけ alpha を上げる)
   var ghostCont = null, ghostImg = null, ghosts = [], ghostsUsed = 0;   // 玉の位置を示すゴースト
   var mouths = [];                  // 樽の口の常夜灯 { x, y, glow }(レーンごと。燃料なし)
   var mouthPool = [];
@@ -174,6 +187,13 @@
     muzzleGlow.scaleX = muzzleGlow.scaleY = N.cannonR / coolImg._r;
     muzzleGlow.alpha = 0.55;
     glowCont.addChild(muzzleGlow);
+    // ボスの月明かり: 縦長の楕円(穴 bossLightRX/RY と同じ比)。位置は update が毎フレーム追う
+    bossGlow = new createjs.Bitmap(coolImg);
+    bossGlow.regX = bossGlow.regY = coolImg._r;
+    bossGlow.scaleX = N.bossLightRX / coolImg._r;
+    bossGlow.scaleY = N.bossLightRY / coolImg._r;
+    bossGlow.alpha = 0;
+    glowCont.addChild(bossGlow);
   }
   function shotGlow(i) {
     var b = shotGlows[i];
@@ -207,6 +227,7 @@
     lanterns = [];
     redrawAcc = 0;
     fade = 0;
+    leanFrac = 0; leanPx = 0; decayMul = 1;   // 風は gale.reset が立て直す。次の update で追いつく
     for (var gi = 0; gi < ghostsUsed; gi++) ghosts[gi].alpha = 0;   // 前のコースの位置に残さない
     ghostsUsed = 0;
     for (var hi = 0; hi < hits.length; hi++) { hits[hi].t = 1e9; hits[hi].glow.alpha = 0; }
@@ -241,9 +262,12 @@
         pair.body.x = _pos.x + _pos.ty * R * 1.5;
         pair.body.y = _pos.y - _pos.tx * R * 1.5;
         glowCont.addChild(pair.glow, pair.body);
+        // c/s は進行方向の cos/sin(isDark の楕円判定用。毎回 atan2/cos を呼ばない)。
+        // relitT/preFuel は偵察射撃で灯し直した時刻と、その直前の燃料(relightGrace の間はこちらで判定)
         lanterns.push({
-          lane: lane, d: d, x: _pos.x, y: _pos.y, ang: ang, fuel: N.startFuel,
-          phase: Math.random() * Math.PI * 2, glow: pair.glow, body: pair.body
+          lane: lane, d: d, x: _pos.x, y: _pos.y, ang: ang, c: Math.cos(ang), s: Math.sin(ang),
+          fuel: N.startFuel, phase: Math.random() * Math.PI * 2, relitT: -1e9, preFuel: 0,
+          glow: pair.glow, body: pair.body
         });
       }
     }
@@ -257,7 +281,12 @@
     if (!built || !PP.layers.night.visible) return;
     clock += dt;
     if (fade < 1) { fade = Math.min(1, fade + dt / N.fadeIn); darkBmp.alpha = fade; }
-    var decay = playing ? dt / decaySec() : 0;
+    // 風 × 灯り: 傾き(補間済みなので風が変わっても灯りは滑らかに追う)から、光だまりの
+    // 風下へのずれと燃料の減る倍率を作る。風は横向きなので x だけずらす
+    leanFrac = PP.gale.lean();
+    leanPx = leanFrac * N.windLean;
+    decayMul = 1 + N.windDecay * Math.abs(leanFrac);
+    var decay = playing ? dt * decayMul / decaySec() : 0;
     var fl = N.flicker;
     var sx = N.lanternStretch, sy = 1 / Math.sqrt(N.lanternStretch);
     for (var i = 0; i < lanterns.length; i++) {
@@ -270,6 +299,8 @@
       // 光の絵の大きさは glowR 基準(穴の lanternR とは別。重なりの白飛びを防ぐ)
       var k = N.glowR / warmImg._r * (0.35 + 0.65 * l.fuel);
       l.glow.scaleX = k * sx; l.glow.scaleY = k * sy;
+      l.glow.x = l.x + leanPx;                 // 光の絵は穴(redraw)と同じだけ風下へ
+      l.body.rotation = leanFrac * N.windTilt; // 灯体は風下へ傾く(transform だけ。生成なし)
       l.body.alpha = 0.25 + 0.75 * l.fuel * wob;
     }
     // 着弾点の光: hitSec 秒で直線に消える
@@ -283,6 +314,10 @@
     }
     muzzleGlow.x = PP.cannon.x;
     muzzleGlow.y = PP.cannon.muzzleY();
+    // ボスの月明かり: ボス海域でボスが立っている間だけ頭に追従(それ以外は 0 で描画スキップ)
+    bossLit = false;
+    if (PP.game.bossMode && PP.boss && PP.boss.eachLight) PP.boss.eachLight(followBoss);
+    if (!bossLit && bossGlow.alpha !== 0) bossGlow.alpha = 0;
     var shots = PP.game.shots, si;
     for (si = 0; si < shots.length; si++) {
       var sg = shotGlow(si);
@@ -313,18 +348,76 @@
     ctx.drawImage(holeImg, -rx * s, -ry * s, rx * 2 * s, ry * 2 * s);
     ctx.restore();
   }
+  // 横長の楕円の穴(ボスの月明かり用。傾きなし)
+  function holeEllipse(x, y, rx, ry) {
+    var s = darkScale;
+    darkCtx.drawImage(holeImg, (x - rx) * s, (y - ry) * s, rx * 2 * s, ry * 2 * s);
+  }
   function treasureHole(b) {
     if (b.treasure && b.view.visible) hole(b.view.x, b.view.y, N.treasureR);
   }
   function bulletHole(x, y) { hole(x, y, N.bulletR); }
+  // ボス(boss.js の eachLight): 穴は redraw、光の絵の追従は update から呼ばれる
+  var bossLit = false;
+  function bossHole(x, y) { holeEllipse(x, y + N.bossLightDY, N.bossLightRX, N.bossLightRY); }
+  function followBoss(x, y) { bossLit = true; bossGlow.x = x; bossGlow.y = y + N.bossLightDY; bossGlow.alpha = 0.6; }
 
   // 自弾がチェーンに当たった(cannon.js の stepShots)。着弾点に hitSec 秒だけ光を残す
-  // = 当たった周りの玉が読める。撃つこと自体が偵察になる
-  function onHit(x, y) {
+  // = 当たった周りの玉が読める。撃つこと自体が偵察になる。
+  // さらに「偵察射撃で灯し直す」: 当たった玉のレーン lane・レール距離 d を受け取り、同じ
+  // レーンで relightDist 以内の最寄りの灯り 1 つに relightFuel を入れる。外した玉は列に
+  // 残る(損)ので、視界を買う対価になっている。灯し直す前の燃料を preFuel に控え、
+  // relightGrace 秒の間は isDark がそちらを見る(自分の偵察光で暗闇消しを失わない)
+  function onHit(x, y, lane, d) {
     if (!built) return;
     var oldest = hits[0];
     for (var i = 1; i < hits.length; i++) if (hits[i].t > oldest.t) oldest = hits[i];
     oldest.x = x; oldest.y = y; oldest.t = 0;
+    if (!lane || d === undefined || N.relightFuel <= 0) return;
+    var best = null, bd = N.relightDist;
+    for (var j = 0; j < lanterns.length; j++) {
+      var l = lanterns[j];
+      if (l.lane !== lane) continue;
+      var dd = Math.abs(l.d - d);
+      if (dd < bd) { bd = dd; best = l; }
+    }
+    if (best) {
+      best.preFuel = best.fuel;
+      best.relitT = clock;
+      best.fuel = Math.min(1, best.fuel + N.relightFuel);
+    }
+  }
+
+  // (lane, d) がどの光の中にも無ければ true = 暗闇消しの対象。chain.js の popRun が
+  // 消す前(燃料が戻る前)に呼ぶ。数えるのはランタン・樽の口の常夜灯・砲口・🔭 だけ。
+  // 自弾の光・着弾の残光・💎 は数えない(撃った玉自身の光で必ず「明るい」になり成立しない)。
+  // 闇が降りきる前(fade<1)は盤面が見えているので暗くない。トンネル内は昼でも見えないので
+  // ボーナスにしない(トンネルの手前に光は届かないが「闇で読んだ」わけではない)
+  function isDark(lane, d) {
+    if (!active() || !built || fade < 1) return false;
+    if (PP.game.effects.spyglass > 0) return false;
+    var rail = lane.rail;
+    if (rail.tunnelAt(d)) return false;
+    rail.posAtInto(d, _pos);   // _pos は reset 以外で使っていない(reset 中に isDark は呼ばれない)
+    var x = _pos.x, y = _pos.y, dx, dy;
+    dx = x - PP.cannon.x; dy = y - PP.cannon.muzzleY();
+    if (dx * dx + dy * dy < N.cannonR * N.cannonR) return false;
+    for (var mi = 0; mi < mouths.length; mi++) {
+      dx = x - mouths[mi].x; dy = y - mouths[mi].y;
+      if (dx * dx + dy * dy < N.barrelR * N.barrelR) return false;
+    }
+    var lf = N.litFrac;
+    for (var i = 0; i < lanterns.length; i++) {
+      var l = lanterns[i];
+      var fuel = (clock - l.relitT < N.relightGrace) ? l.preFuel : l.fuel;
+      if (fuel <= 0) continue;
+      var r = N.lanternR * (N.lanternPow === 1 ? fuel : Math.pow(fuel, N.lanternPow)) * lf;
+      var rx = r * N.lanternStretch, ry = r / Math.sqrt(N.lanternStretch);   // holeAlong と同じ楕円
+      dx = x - (l.x + leanPx); dy = y - l.y;                                   // 風で流れた中心
+      var u = dx * l.c + dy * l.s, v = -dx * l.s + dy * l.c;                   // 進行方向 u / 法線 v
+      if (u * u / (rx * rx) + v * v / (ry * ry) <= 1) return false;
+    }
+    return true;
   }
   function redraw() {
     var ctx = darkCtx, w = darkCanvas.width, h = darkCanvas.height;
@@ -341,7 +434,7 @@
       if (l.fuel <= 0) continue;
       var r = N.lanternR * (N.lanternPow === 1 ? l.fuel : Math.pow(l.fuel, N.lanternPow));
       r *= 1 + 0.04 * Math.sin(clock * 9 + l.phase);
-      holeAlong(l.x, l.y, l.ang, r);
+      holeAlong(l.x + leanPx, l.y, l.ang, r);   // 風下へずらす(isDark の楕円も同じ中心)
     }
     // 2) 大砲の砲口(プレイヤーの位置。手前の段が読める)
     hole(PP.cannon.x, PP.cannon.muzzleY(), N.cannonR);
@@ -365,6 +458,9 @@
     // 8) 妖弾は自ら光る(骸骨玉の弾幕・ボスの弾幕)
     if (PP.skull) PP.skull.eachBullet(bulletHole);
     if (PP.game.bossMode && PP.boss && PP.boss.eachBullet) PP.boss.eachBullet(bulletHole);
+    // 9) ボスに当たる月明かり(頭を中心に横長。ボス本体は闇より上の層なので常に見え、
+    //    この穴は「ボスの足元の玉列」がどこまで照らされるかを決める)
+    if (PP.game.bossMode && PP.boss && PP.boss.eachLight) PP.boss.eachLight(bossHole);
     ctx.globalCompositeOperation = "source-over";
     darkCanvas._invalid = true;   // StageGL にテクスチャの送り直しを頼む(cache と同じ印)
     redraws++;
@@ -397,21 +493,29 @@
 
   // 玉が消えた(chain.js の destroyRange: マッチ・爆弾・ミサイル・機銃の唯一の通り道)。
   // lane のレール距離 d を中心に n 個消えた。近くの灯りは大きく、全灯りは少し戻る。
-  // コンボ中は戻りが増える(連鎖は闇を大きく押し返す=攻めの報酬)
-  function onPop(lane, d, n) {
+  // コンボ中は戻りが増える(連鎖は闇を大きく押し返す=攻めの報酬)。
+  // blind は「灯りの外でそろえて消した」(popRun が isDark で判定して渡す): 戻りが blindFuelMul 倍。
+  // 全体回復は globalNeedsFlame なら火が残っている灯りにだけ届く(消えた灯りは遠くの消しでは戻らない)
+  function onPop(lane, d, n, blind) {
     if (!active() || !lanterns.length) return;
     var combo = PP.game.combo || 1;
     var mul = 1 + N.comboMul * Math.max(0, combo - 1);
+    if (blind) mul *= N.blindFuelMul;
     var local = n * N.gainPerBall * mul;
     var global = n * N.gainGlobal * mul;
     for (var i = 0; i < lanterns.length; i++) {
       var l = lanterns[i];
-      var add = global;
+      var add = (l.fuel > 0 || !N.globalNeedsFlame) ? global : 0;
       if (l.lane === lane) {
         var k = 1 - Math.abs(l.d - d) / N.gainSpread;
         if (k > 0) add += local * k;
       }
-      if (add > 0) l.fuel = Math.min(1, l.fuel + add);
+      if (add > 0) {
+        l.fuel = Math.min(1, l.fuel + add);
+        // 偵察射撃の猶予(relightGrace)中でも「本物の消し」で戻った分は明るい扱いにする。
+        // こうしないと着弾直後の連鎖 2 段目が 1 段目の回復を無視して暗闇消しになってしまう
+        l.preFuel = Math.min(1, l.preFuel + add);
+      }
     }
   }
 
@@ -437,6 +541,8 @@
       minFuel: lanterns.length ? min : 0,
       redraws: redraws,
       decaySec: decaySec(),
+      decayMul: decayMul, lean: leanFrac, leanPx: leanPx,   // 風 × 灯り
+      relitT: lanterns.map(function (l) { return l.relitT; }),
       fade: fade,
       ghosts: ghostsUsed,
       fuels: lanterns.map(function (l) { return l.fuel; }),
@@ -446,5 +552,5 @@
     };
   }
 
-  PP.night = { active: active, reset: reset, update: update, render: render, onPop: onPop, onHit: onHit, hide: hide, force: force, info: info };
+  PP.night = { active: active, reset: reset, update: update, render: render, onPop: onPop, onHit: onHit, isDark: isDark, hide: hide, force: force, info: info };
 })();

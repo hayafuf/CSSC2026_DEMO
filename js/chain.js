@@ -848,13 +848,19 @@
     g.combo = chained ? (g.comboTimer > 0 ? g.combo + 1 : 1) : 1;
     // 【強化】「コンボの余韻」で窓が延びる(未取得なら val は 1 = 従来どおり)
     g.comboTimer = PP.COMBO_WINDOW * PP.upgrades.val("combo");
-    var points = n * 10 * g.combo;
+    var mid = balls[Math.floor((i + j) / 2)];
+    var mp = lane.rail.posAt(mid.d);
+    // 夜(night.js)の「暗闇消し」: 消した区間の中央が灯りの外ならスコア blindScoreMul 倍。
+    // destroyRange(=onPop で燃料が戻る)より前に判定しないと、自分の消しで明るくなった
+    // 後を見てしまう。連鎖 2 段目は 1 段目の回復で明るくなるので成立しにくい(仕様)
+    var base = n * 10 * g.combo, points = base;
+    var blind = !!(PP.night && PP.night.active() && PP.night.isDark(lane, mid.d));
+    if (blind) points = Math.round(base * PP.NIGHT.blindScoreMul);
     g.score += points;
 
     // 演出
-    var mid = balls[Math.floor((i + j) / 2)];
-    var mp = lane.rail.posAt(mid.d);
     PP.fx.floatText("+" + points, mp.x, mp.y - 24, "#ffe08a");
+    if (blind) PP.fx.floatText(PP.i18n.t("night.blind", { n: points - base }), mp.x, mp.y - 72, "#b9c8ff", 20);
     if (g.combo >= 2) {
       PP.fx.floatText(PP.i18n.t("chain.combo", { n: g.combo }), mp.x, mp.y - 48, "#ff5d8f", 20);
       PP.audio.combo(g.combo);
@@ -862,7 +868,7 @@
       PP.audio.pop(n);
     }
 
-    destroyRange(lane, i, j);
+    destroyRange(lane, i, j, blind);
     PP.powerups.maybeDrop(mp.x, mp.y);
     PP.hud.update();
 
@@ -870,8 +876,9 @@
     joinAt(lane, i);
   }
 
-  // balls[i..j] を列から取り除き、弾ける演出を付ける(スコアや連鎖判定はしない)
-  function destroyRange(lane, i, j) {
+  // balls[i..j] を列から取り除き、弾ける演出を付ける(スコアや連鎖判定はしない)。
+  // blind は popRun だけが渡す「暗闇消し」の印(夜の燃料回復が増える)。他の経路は省略 = false
+  function destroyRange(lane, i, j, blind) {
     var balls = lane.balls;
     var removed = balls.splice(i, j - i + 1);
     // ballsDirty は立てない: 玉が減っても残りの並びは正準のまま。消えた玉の
@@ -894,9 +901,9 @@
       if (!lane.recoil.anchor) lane.recoil = null;
     }
     // 夜(night.js): 消えた場所の灯りに燃料を戻す。全撃破経路がここを通るので
-    // 1 か所で済む(消えた区間の中央のレール距離と個数を渡す)
+    // 1 か所で済む(消えた区間の中央のレール距離と個数、暗闇消しの印を渡す)
     if (PP.night && PP.night.active()) {
-      PP.night.onPop(lane, (removed[0].d + removed[removed.length - 1].d) / 2, removed.length);
+      PP.night.onPop(lane, (removed[0].d + removed[removed.length - 1].d) / 2, removed.length, !!blind);
     }
     removed.forEach(function (b, k) {
       var p = lane.rail.posAtInto(b.d + (b.slide || 0), _pos);   // x/y は直後に消費

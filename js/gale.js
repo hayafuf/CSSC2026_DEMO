@@ -199,13 +199,27 @@
   // いま弾に効く横加速度 px/s²(風の無い難易度では常に 0 = 他モジュールの分岐がここで閉じる)
   function accel() { return active() ? cur : 0; }
 
+  // 風の「傾き」-1〜+1: いま弾に効いている横加速度 cur を満風(strengthMax)で割った値。
+  // 夜(night.js)が「光だまりを風下へ流す量」「灯体の傾き」「燃料の減る速さ」に使う。
+  // 補間済みの cur から作るので、風が切り替わるときも灯りは ramp 秒かけて滑らかに傾く。
+  // 満風の基準は accelOf(1, strengthMax) = ボス海域の倍率(bossMult)込み。
+  // strengthMax × accelPer で割るとボス海域では ±0.7 までしか届かず、灯りの流れも
+  // 燃え方も「常に弱風」になってしまう。風の無い難易度は 0(他モジュールの分岐はここで閉じる)
+  function lean() {
+    if (!active()) return 0;
+    var max = accelOf(1, G.strengthMax);
+    return max ? Math.max(-1, Math.min(1, cur / max)) : 0;
+  }
+
   // HUD・検証用の観測口。dir/strength は目標、cur は補間中の実効値、frac は補間の進み、
-  // pending は予兆中の次の風(無ければ null)、warn は予兆の進み 0→1(予兆中でなければ 0)
+  // pending は予兆中の次の風(無ければ null)、warn は予兆の進み 0→1(予兆中でなければ 0)、
+  // lean は上の傾き(-1〜+1)
   function info() {
     return {
       dir: dir, strength: strength, cur: cur, target: target, frac: rampT,
       pending: pending,
-      warn: pending ? 1 - Math.max(0, timer) / G.warn : 0
+      warn: pending ? 1 - Math.max(0, timer) / G.warn : 0,
+      lean: lean()
     };
   }
 
@@ -220,5 +234,5 @@
     if (hold) forced = false;
   }
 
-  PP.gale = { active: active, reset: reset, update: update, accel: accel, info: info, force: force };
+  PP.gale = { active: active, reset: reset, update: update, accel: accel, lean: lean, info: info, force: force };
 })();
