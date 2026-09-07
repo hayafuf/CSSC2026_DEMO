@@ -31,11 +31,27 @@
     s.cache(0, 0, 4, AIM_H);
     return s.cacheCanvas;
   }
-  // 横風の予測点(半径 3 の丸)。破線と同じ色を焼いて、点列で曲線を描く
-  function bakeAimDot(color) {
+  // 横風の「流され線」の部品。棒は長さ DRIFT_L の水平線を焼き、scaleX で必要な長さに
+  // 伸縮する(左端が原点。rotation で向きを付ける)。山形(>)は先端が +x 側で、
+  // 原点は背側。棒の両端に置いて「>—<」の形にする
+  // 太さは中心線(2px)よりはっきり太くする: 縦線は玉の上に重なるので細いと埋もれる。
+  // 縁に暗い下地を敷いて、明るい玉の上でも輪郭が立つようにする
+  var DRIFT_L = 64, DRIFT_H = 14, DRIFT_W = 5;
+  var CHEV_W = 14, CHEV_H = 22, CHEV_REG_X = 5, CHEV_REG_Y = 5 + CHEV_H / 2;   // 原点 = 山形の背の中央
+  function bakeDriftBar(color) {
     var s = new createjs.Shape();
-    s.graphics.beginFill(color).drawCircle(0, 0, 3);
-    s.cache(-4, -4, 8, 8);
+    var g = s.graphics;
+    g.setStrokeStyle(DRIFT_W + 3, "round").beginStroke("rgba(0,0,0,0.55)").moveTo(0, DRIFT_H / 2).lineTo(DRIFT_L, DRIFT_H / 2);
+    g.setStrokeStyle(DRIFT_W, "round").beginStroke(color).moveTo(0, DRIFT_H / 2).lineTo(DRIFT_L, DRIFT_H / 2);
+    s.cache(0, 0, DRIFT_L, DRIFT_H);
+    return s.cacheCanvas;
+  }
+  function bakeDriftChevron(color) {
+    var s = new createjs.Shape();
+    var g = s.graphics;
+    g.setStrokeStyle(DRIFT_W + 3, "round", "round").beginStroke("rgba(0,0,0,0.55)").moveTo(0, 0).lineTo(CHEV_W, CHEV_H / 2).lineTo(0, CHEV_H);
+    g.setStrokeStyle(DRIFT_W, "round", "round").beginStroke(color).moveTo(0, 0).lineTo(CHEV_W, CHEV_H / 2).lineTo(0, CHEV_H);
+    s.cache(-CHEV_REG_X, -5, CHEV_W + CHEV_REG_X + 5, CHEV_H + 10);
     return s.cacheCanvas;
   }
   var stockSlot;     // 特殊弾のストックスロット(大砲の左脇に追従)
@@ -44,11 +60,18 @@
 
   var MUZZLE_LEN = 52; // 砲口までの高さ
 
-  // ---------- 横風(深海の悪魔+風)の予測軌道と風見 ----------
-  // 🔭 羅針の眼の間、風で曲がる軌道を「点の列」で見せる。点は Bitmap のプール
-  // (aimLine の子)で、毎フレームは座標を書くだけ(ラスタライズ無し)。経路は
-  // simulateGalePath が実弾と同じ積分で先読みする(数値は PP.GALE.preview)
-  var galeDots = [], galeDotCanvas = null, galeShown = false;
+  // ---------- 横風(深海の悪魔+風)の予測: 中心線+流され線 ----------
+  // 🔭 羅針の眼の間も照準は「まっすぐな中心線+着弾リング」のまま(風なしと同じ)。
+  // その上で、中心線の着弾点に「短い縦線」を生み、「風で流される先」(simulateGalePath が
+  // 実弾と同じ積分で先読みした着弾点 gpEnd)へ横滑りさせながら縮めて薄れさせ、gpEnd で
+  // ちょうど消える、を繰り返す(PP.GALE.preview.drift)。
+  // 「縦線が消える場所 = 玉が流れ着く場所」を動きで伝える。曲がった点列は描かず、
+  // 風が無ければ何も足さない(曲線そのものより、中心からどれだけずれるかが読みたい情報)。
+  // 部品は 3 つの Bitmap(棒・上端の山形・下端の山形)で、毎フレームは座標と拡縮を書くだけ
+  var galeShown = false;
+  var driftCont = null;   // 流され線の入れ物(照準 aimLine の半透明とは別に、濃く出す)
+  var driftBar = null, driftTail = null, driftHead = null, driftBarCanvas = null, driftChevCanvas = null;
+  var driftT = 0;   // 流され線のアニメ位相(秒)
   var gpPts = null, gpN = 0, gpHit = false, gpEnd = { x: 0, y: 0 };   // 先読み結果
   var gpX = null, gpAx = null, gpAge = 1;   // 再計算の間引き(砲の x と風が同じなら hz 回/秒)
   // 風の向きと風速の表示(砲の脇の「◀ 17 m/s」)は hud.js が担当し、mount で root に載せる
@@ -373,18 +396,24 @@
     aimRing.regX = aimRing.regY = 9;
     aimRing.visible = false;
     aimLine.addChild(aimDash);
-    // 横風の予測点(通常弾 / 爆弾の 2 色を焼き置き。ミサイルは風を受けないので不要)
-    galeDotCanvas = { "#f5e8c8": bakeAimDot("#f5e8c8"), "#ff7a3c": bakeAimDot("#ff7a3c") };
-    gpPts = new Float32Array(2 * PP.GALE.preview.dots);
-    for (var gi = 0; gi < PP.GALE.preview.dots; gi++) {
-      var gd = new createjs.Bitmap(galeDotCanvas["#f5e8c8"]);
-      gd.regX = gd.regY = 4;
-      gd.visible = false;
-      aimLine.addChild(gd);
-      galeDots.push(gd);
-    }
-    aimLine.addChild(aimRing);   // 着弾リングは点より手前
-    layer.addChild(aimLine);
+    // 横風の流され線(通常弾 / 爆弾の 2 色を焼き置き。ミサイルは風を受けないので不要)
+    driftBarCanvas = { "#f5e8c8": bakeDriftBar("#f5e8c8"), "#ff7a3c": bakeDriftBar("#ff7a3c") };
+    driftChevCanvas = { "#f5e8c8": bakeDriftChevron("#f5e8c8"), "#ff7a3c": bakeDriftChevron("#ff7a3c") };
+    gpPts = new Float32Array(2 * PP.GALE.preview.dots);   // 先読み点列(検証用の観測口が返す)
+    driftBar = new createjs.Bitmap(driftBarCanvas["#f5e8c8"]);
+    driftBar.regX = 0; driftBar.regY = DRIFT_H / 2;
+    driftTail = new createjs.Bitmap(driftChevCanvas["#f5e8c8"]);
+    driftHead = new createjs.Bitmap(driftChevCanvas["#f5e8c8"]);
+    driftTail.regX = driftHead.regX = CHEV_REG_X; driftTail.regY = driftHead.regY = CHEV_REG_Y;
+    driftBar.visible = driftTail.visible = driftHead.visible = false;
+    // 照準(aimLine)は望遠鏡中でも alpha 0.55 の控えめな線なので、流され線は別の器に
+    // 入れて濃く出す(玉の上に重なる印なので、照準と同じ薄さだと埋もれる)
+    driftCont = new createjs.Container();
+    driftCont.mouseEnabled = driftCont.mouseChildren = false;
+    driftCont.alpha = 0.95;
+    driftCont.addChild(driftBar, driftTail, driftHead);
+    aimLine.addChild(aimRing);
+    layer.addChild(aimLine, driftCont);   // 流され線は照準より手前
 
     root = new createjs.Container();
     root.x = PP.cannon.x;
@@ -822,39 +851,12 @@
   function updateAim(dt) {
     if (PP.game.state !== "playing") {
       if (aimDrawn) { aimLine.visible = false; aimDrawn = false; aimX = null; }
-      // 横風の点列も畳む(次に playing へ戻ったとき、gale 分岐が aimLine を出し直す)
-      if (galeShown) { galeShown = false; hideGaleDots(); aimDash.visible = true; }
+      if (galeShown) { galeShown = false; hideDrift(); }   // 流され線も畳む
       return;
     }
     var x = PP.cannon.x;
     var spy = PP.game.effects.spyglass > 0;
     var sp = (PP.game.special && PP.game.specialLoaded) ? PP.game.special : null;
-    // 横風 + 🔭: 直線の代わりに、曲がる軌道を点列で描く。ミサイルは風を受けない
-    // ので直線のまま。再計算は砲が動いた/風が変わったとき、それ以外は hz 回/秒
-    var gax = PP.gale.accel();
-    if (spy && gax !== 0 && sp !== "missile") {
-      gpAge += dt || 0;
-      if (!galeShown || x !== gpX || gax !== gpAx || gpAge >= 1 / PP.GALE.preview.hz) {
-        gpX = x; gpAx = gax; gpAge = 0;
-        simulateGalePath(x, gax, sp);
-        layoutGaleDots(sp);
-        aimRing.x = gpEnd.x; aimRing.y = gpEnd.y;
-      }
-      if (!galeShown) {
-        galeShown = true;
-        aimDash.visible = false;
-        aimRing.visible = true;
-        aimLine.visible = true; aimLine.alpha = 0.55;
-        aimDrawn = true; aimX = null;   // 直線側のメモを捨てる(風が止んだら必ず描き直す)
-      }
-      return;
-    }
-    if (galeShown) {
-      galeShown = false;
-      hideGaleDots();
-      aimDash.visible = true;
-      aimX = null;
-    }
     var topY;
     if (spy) {
       fhAge += dt || 0;
@@ -867,6 +869,22 @@
     } else {
       topY = PP.cannon.y - MUZZLE_LEN - 90;
       aimLine.alpha = 0.25;
+    }
+    // 横風 + 🔭: 中心線はそのままに、着弾点から「流される先」へ縮んで消える線を足す。
+    // ミサイルは風を受けないので何も足さない。先読みの再計算は砲が動いた/風が
+    // 変わったとき、それ以外は hz 回/秒。線のアニメは毎フレーム(座標と拡縮だけ)
+    var gax = PP.gale.accel();
+    if (spy && gax !== 0 && sp !== "missile") {
+      gpAge += dt || 0;
+      if (!galeShown || x !== gpX || gax !== gpAx || gpAge >= 1 / PP.GALE.preview.hz) {
+        gpX = x; gpAx = gax; gpAge = 0;
+        simulateGalePath(x, gax, sp);
+      }
+      galeShown = true;
+      layoutDrift(dt || 0, x, topY, sp);
+    } else if (galeShown) {
+      galeShown = false;
+      hideDrift();
     }
     if (aimDrawn && x === aimX && spy === aimSpy && topY === aimTopY && sp === aimSp) return;
     aimDrawn = true; aimX = x; aimSpy = spy; aimTopY = topY; aimSp = sp;
@@ -969,42 +987,62 @@
     }
     gpEnd.x = x; gpEnd.y = Math.max(y, AIM_TOP);
   }
-  // 先読みした点列をプールの Bitmap に写す(座標と表示だけ。焼き直し無し)
-  function layoutGaleDots(sp) {
-    var img = galeDotCanvas[sp === "bomb" ? "#ff7a3c" : "#f5e8c8"];
-    for (var i = 0; i < galeDots.length; i++) {
-      var d = galeDots[i];
-      if (i < gpN) {
-        d.image = img;
-        d.x = gpPts[2 * i]; d.y = gpPts[2 * i + 1];
-        d.visible = true;
-      } else if (d.visible) {
-        d.visible = false;
-      }
+  // 流され線: 中心線と平行な「短い縦線」。中心線の着弾点 P0=(x, y0) に生まれ、位相 t
+  // (0→1、loop 秒)で風の予測着弾点 P1=gpEnd へ横滑りしながら、長さは len×(1−t) に
+  // 縮み、alpha は 1−t² で薄れて P1 でちょうど消える。hold 秒だけ何も出さずに繰り返す。
+  // 上下の端に内向きの山形(上は ∨、下は ∧)を付けて「線」ではなく「印」に見せる
+  function layoutDrift(dt, x, y0, sp) {
+    var Dp = PP.GALE.preview.drift;
+    driftT += dt;
+    var cyc = Dp.loop + Dp.hold;
+    if (driftT >= cyc) driftT -= cyc;
+    var t = driftT / Dp.loop;
+    var dx = gpEnd.x - x, dy = gpEnd.y - y0;
+    if (t >= 1 || Math.abs(dx) < Dp.minLen) { hideDrift(); return; }
+    var key = sp === "bomb" ? "#ff7a3c" : "#f5e8c8";
+    if (driftBar.image !== driftBarCanvas[key]) {
+      driftBar.image = driftBarCanvas[key];
+      driftTail.image = driftHead.image = driftChevCanvas[key];
     }
+    var sx = x + dx * t, sy = y0 + dy * t;   // 縦線の中心(風下へ横滑り。流される先の高さにも寄せる)
+    var L = Dp.len * (1 - t);
+    var a = 1 - t * t;
+    // 棒は左端が原点で +x 方向へ伸びる焼き込み。−90° 回して上向きにし、下端を sy+L/2 に置く
+    driftBar.x = sx; driftBar.y = sy + L / 2; driftBar.rotation = -90;
+    driftBar.scaleX = L / DRIFT_L; driftBar.alpha = a;
+    // 山形も線と一緒に少し縮める(縮み切る手前で上下の山形が重なって砂時計にならないように)
+    var cs = 0.5 + 0.5 * (1 - t);
+    driftTail.x = sx; driftTail.y = sy - L / 2; driftTail.rotation = 90; driftTail.alpha = a;    // 上端: 先端が下向き ∨
+    driftHead.x = sx; driftHead.y = sy + L / 2; driftHead.rotation = -90; driftHead.alpha = a;   // 下端: 先端が上向き ∧
+    driftTail.scaleX = driftTail.scaleY = driftHead.scaleX = driftHead.scaleY = cs;
+    if (!driftBar.visible) driftBar.visible = driftTail.visible = driftHead.visible = true;
   }
-  function hideGaleDots() {
-    for (var i = 0; i < galeDots.length; i++) galeDots[i].visible = false;
+  function hideDrift() {
+    if (driftBar && driftBar.visible) driftBar.visible = driftTail.visible = driftHead.visible = false;
   }
 
   // ---------- 夜(night.js)向け: 🔭 羅針の眼の照準に沿った光の点列 ----------
   // 夜の闇は「照準線の上と着弾点」も見えるようにする(望遠鏡は闇を照らす道具)。
-  // updateAim が持っている状態をそのまま読む: 風で曲がっているときは予測点列
-  // (gpPts)と着弾点(gpEnd)、直線のときは砲口から着弾 y(fhCacheY)まで
-  // PP.NIGHT.spyStep 刻み。最後の要素が着弾点。配列は使い回す(毎フレーム new しない)
+  // updateAim が持っている状態をそのまま読む: 砲口から中心線の着弾 y(fhCacheY)まで
+  // PP.NIGHT.spyStep 刻み。風があるときはさらに、着弾点から「流される先」(gpEnd)までの
+  // 横の区間も同じ刻みで常に照らし、最後の要素が gpEnd。配列は使い回す(毎フレーム new しない)
   var aimLight = { n: 0, xs: [], ys: [] };
   function aimLightPoints() {
     aimLight.n = 0;
     if (PP.game.state !== "playing" || !(PP.game.effects.spyglass > 0)) return aimLight;
     var n = 0;
+    var x = PP.cannon.x, y0 = PP.cannon.y - MUZZLE_LEN, y1 = fhCacheY;
+    var step = PP.NIGHT ? PP.NIGHT.spyStep : PP.R * 3;
+    for (var y = y0 - step; y > y1 + step * 0.5; y -= step) { aimLight.xs[n] = x; aimLight.ys[n] = y; n++; }
+    aimLight.xs[n] = x; aimLight.ys[n] = y1; n++;
     if (galeShown) {
-      for (var i = 0; i < gpN; i++) { aimLight.xs[n] = gpPts[2 * i]; aimLight.ys[n] = gpPts[2 * i + 1]; n++; }
+      // 風: 中心線の着弾点から「流される先」までを step 刻みで常に照らす(流され線の
+      // アニメとは無関係に点きっぱなし)。最後の要素が流される先 = 着弾点の光
+      var dx = gpEnd.x - x, dy = gpEnd.y - y1;
+      var dist = Math.sqrt(dx * dx + dy * dy);
+      var k = Math.ceil(dist / step);
+      for (var i = 1; i < k; i++) { aimLight.xs[n] = x + dx * i / k; aimLight.ys[n] = y1 + dy * i / k; n++; }
       aimLight.xs[n] = gpEnd.x; aimLight.ys[n] = gpEnd.y; n++;
-    } else {
-      var x = PP.cannon.x, y0 = PP.cannon.y - MUZZLE_LEN, y1 = fhCacheY;
-      var step = PP.NIGHT ? PP.NIGHT.spyStep : PP.R * 3;
-      for (var y = y0 - step; y > y1 + step * 0.5; y -= step) { aimLight.xs[n] = x; aimLight.ys[n] = y; n++; }
-      aimLight.xs[n] = x; aimLight.ys[n] = y1; n++;
     }
     aimLight.n = n;
     return aimLight;
@@ -1244,6 +1282,14 @@
       simulateGalePath(x0, ax, sp);
       return { pts: gpPts, n: gpN, hit: gpHit, x: gpEnd.x, y: gpEnd.y };
     },
+    // 流され線の観測口と位相の固定(検証用。PP.gale.force と同じ流儀)
+    driftInfo: function () {
+      return { t: driftT, shown: galeShown, visible: !!(driftBar && driftBar.visible),
+               x: driftBar ? driftBar.x : 0, y: driftBar ? driftBar.y : 0,
+               len: driftBar ? driftBar.scaleX * DRIFT_L : 0, alpha: driftBar ? driftBar.alpha : 0,
+               endX: gpEnd.x, endY: gpEnd.y };
+    },
+    forceDrift: function (sec) { driftT = sec; },
     updateGuide: updateGuide,   // 現在位置ガイド(main.js の tick が毎フレーム呼ぶ)
     // 砲に随伴させたい表示物を root の子にする(hud.js の WIND タグ)。座標は砲の中心基準
     mount: function (child) { if (root) root.addChild(child); return !!root; },

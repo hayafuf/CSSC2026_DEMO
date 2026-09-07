@@ -416,16 +416,19 @@
     return _joints;
   }
 
-  // 1) 前進。錨(stop)=停止 / 逆風(reverse)=正味速度で後退 / 通常=位置依存の速度で前進。
+  // 1) 前進。逆風(reverse)=正味速度で後退 / 錨(stop)=停止 / 通常=位置依存の速度で前進。
+  // 力関係は 逆風 > 錨: 両方が効いているときは「押し戻す」方が「止める」より強い。
+  // 以前は錨が勝っていたため、引き潮の最中に錨を拾うと風が凍って 5 秒が丸ごと無駄になり、
+  // 錨の最中に引き潮を拾っても何も起きなかった(弱い方が強い方を打ち消す逆転)。
+  // 逆風の間は錨の残り秒数を減らさない(powerups.update)ので、風が止んだ後に錨が続く
   function advance(lane, dt, starts) {
     var g = PP.game;
     var eff = g.effects;
     var balls = lane.balls;
     var i;
 
-    if (eff.stop > 0 || (PP.tut && PP.tut.chainHeld())) {
-      // 錨(またはチュートリアルの練習中): 何も動かない。前進だけを止めるので、
-      // 消した後の詰め・スライド・追撃マッチは通常どおり動く(⚓と同一挙動)
+    if (PP.tut && PP.tut.chainHeld()) {
+      // チュートリアルの練習中: 何も動かない(⚓と同一挙動。アイテムより優先)
     } else if (eff.reverse > 0) {
       // 逆風: 「進行方向の速度」から風速 reverseV(フレーム先頭で更新済み)を
       // 引いた"正味の速度"で後退させる。正味が正=まだ流れが風に勝っている間は
@@ -440,6 +443,9 @@
         if (-net > reverseFrameRet) reverseFrameRet = -net;   // 実後退量(上限の計上用)
         for (i = 0; i < balls.length; i++) balls[i].d += net;
       }
+    } else if (eff.stop > 0) {
+      // 錨: 何も動かない。前進だけを止めるので、消した後の詰め・スライド・
+      // 追撃マッチは通常どおり動く
     } else if (eff.reverseHold > 0) {
       // 吹き戻し後の凪: 錨と同様に前進だけ止める(反動・磁力・重なり解消は
       // 生かすので、開いた隙間は閉じ続ける)。タイマー減算は powerups.update

@@ -204,6 +204,8 @@
   // 「凪」(静止)を挟んでから前進を再開する。
   // 効果時間(PP.POWERUPS の dur)は、風が流れに勝てず戻し切れない場合の
   // 保険の上限としてだけ働く。
+  // ⚓ 錨との力関係は 逆風 > 錨(chain.js advance): 両方が効いていれば押し戻しが勝ち、
+  // その間は錨の残り秒数を減らさない(powerups.update)ので風が止んだ後に錨が続く。
   PP.REVERSE_SPEED = 160;   // 逆風の初速(風速) px/s
   PP.REVERSE_ACCEL = 180;   // 逆風の加速度 px/s^2(発動からゆっくり風が強まる)
   PP.REVERSE_MAX = 1400;    // 逆風の最大風速 px/s(速い区間でも風が勝てる強さ)
@@ -903,9 +905,15 @@
                                        // 縦 2600 と合わせても 1/180 秒の移動は玉の当たり半径より小さい)
     announceFrom: 20,                  // この風速(m/s)以上の風が来たら砲の上に文言を出す(99 で出さない)
     // 音は SE(audio.js の galeNotice / galeChanged)。音量はそちらの sfx(...) の第2引数
-    // 🔭 羅針の眼の曲線予測: 実弾と同じ積分を step 秒刻みで maxSteps 回まで先読みし、
-    // dots 個の点で描く。再計算は砲が動いたときと hz 回/秒(全玉走査なので間引く)
-    preview: { step: 1 / 120, maxSteps: 240, dots: 32, hz: 20 },
+    // 🔭 羅針の眼の先読み: 実弾と同じ積分を step 秒刻みで maxSteps 回まで先読みし、
+    // 「風で流される先」の着弾点を求める(dots は先読み点列の器の大きさ。検証用の
+    // 観測口 PP.cannon.simulateGalePath が返す)。再計算は砲が動いたときと hz 回/秒。
+    // 表示は中心線(風なしと同じ直線)+「流され線」: 中心線の着弾点に長さ len の短い縦線
+    // (上下に内向きの山形)が生まれ、loop 秒かけて風下へ横滑りしながら縮んで薄れ、
+    // 流される先でちょうど消える。hold 秒の間を置いて繰り返す。風が無ければ出さず、
+    // 横ずれが minLen px 未満でも出さない(cannon.js layoutDrift)
+    preview: { step: 1 / 120, maxSteps: 240, dots: 32, hz: 20,
+               drift: { loop: 0.9, hold: 0.25, len: PP.R * 3, minLen: 6 } },
     // 画面を横切る風の筋(fx プール)。本数/秒 = 風速 × perStrength、長さ px、寿命 ms
     streaks: { perStrength: 0.9, len: 140, dur: 900 },
     // 画面全体を横切る「風の帯」(薄い光の帯が風下へ流れる。gale.js の gust)。

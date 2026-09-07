@@ -274,6 +274,9 @@
     var ek = effectKeys || (effectKeys = Object.keys(g.effects));
     for (var ei = 0; ei < ek.length; ei++) {
       var k = ek[ei];
+      // ⚓ 錨は 🌬️ 逆風が吹いている間は減らない(chain.js advance の力関係 逆風 > 錨)。
+      // 風で押し戻している間に錨の秒数が溶けると、両方拾った価値が消えてしまう
+      if (k === "stop" && g.effects.reverse > 0) continue;
       if (g.effects[k] > 0) g.effects[k] = Math.max(0, g.effects[k] - dt);
     }
     // 状態異常(bossFx)タイマーの減算はここ1か所だけ。
