@@ -47,7 +47,7 @@
     var base = PP.ITEMS.dropChance;
     var chance = base + Math.min(g.combo, 5) * PP.ITEMS.comboBonus;
     // コース補正(基本率換算の加算)
-    chance += (((g.builtCourse && g.builtCourse.dropMult) || 1) - 1) * base;
+    chance += ((PP.courseUtils.valueOr(g.builtCourse, "dropMult", 1)) - 1) * base;
     // 【強化】嗅覚・目利きの上乗せポイント(1段=+何pt の足し算。upgrades.js)
     chance += PP.upgrades.dropBonus();
     // 危機ボーナス: 樽に呑まれ始めるほど上がる(あふれ寸前で +crisisDropBonus)。

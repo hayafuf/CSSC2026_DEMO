@@ -650,6 +650,12 @@
   <!-- 設定の保存(PP.store)。audio.js が読み込み時に音量を復元するため最上流で読む -->
   <script src="js/store.js"></script>
   <script src="js/config.js"></script>
+  <script src="js/combat-config.js"></script>
+  <script src="js/courses.js"></script>
+  <script src="js/upgrade-config.js"></script>
+  <script src="js/game-state.js"></script>
+  <script src="js/lifecycle.js"></script>
+  <script src="js/startup.js"></script>
   <!-- コース API / エディタで共有する純粋なデータ操作 -->
   <script src="js/course-utils.js"></script>
   <script src="js/background.js"></script>
@@ -657,10 +663,12 @@
   <script src="js/rail.js"></script>
   <script src="js/ball.js"></script>
   <script src="js/fx.js"></script>
+  <script src="js/chain-rules.js"></script>
   <script src="js/chain.js"></script>
   <script src="js/powerups.js"></script>
   <script src="js/gale.js"></script>
   <script src="js/night.js"></script>
+  <script src="js/projectiles.js"></script>
   <script src="js/cannon.js"></script>
   <script src="js/hud.js"></script>
   <script src="js/crisis.js"></script>
@@ -669,10 +677,15 @@
   <script src="js/gameover.js"></script>
   <script src="js/course-view.js"></script>
   <!-- ボス戦(クラーケンの海域)。main より先に読む(startLevel が PP.boss を呼ぶ) -->
+  <script src="js/boss-view.js"></script>
+  <script src="js/boss-projectiles.js"></script>
+  <script src="js/boss-attacks.js"></script>
   <script src="js/boss.js"></script>
   <script src="js/skull.js"></script>
   <!-- 入力イベントを main のゲーム進行から分離。main の初期化時に接続する -->
   <script src="js/input.js"></script>
+  <script src="js/session.js"></script>
+  <script src="js/chain-view.js"></script>
   <script src="js/main.js"></script>
   <!-- ポーズ機能(main の後: PP.game / PP.hud / PP.audio を使う) -->
   <script src="js/pause.js"></script>
@@ -686,6 +699,8 @@
        (defer どうしは記述順に実行されるので course-api → editor → my-course の
         依存順はそのまま保たれる) -->
   <script src="js/course-api.js" defer></script>
+  <script src="js/editor-model.js" defer></script>
+  <script src="js/editor-view.js" defer></script>
   <script src="js/editor.js" defer></script>
   <!-- 【課題3】エディタで作った自作コースの登録(course-api の後に読む) -->
   <script src="js/my-course.js" defer></script>

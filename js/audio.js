@@ -675,12 +675,16 @@
     function finish() {
       if (finished) return;
       finished = true;
+      clearTimeout(timeout);
       done();
     }
-    setTimeout(finish, TIMEOUT);
+    var timeout = setTimeout(finish, TIMEOUT);
+    function progress(loaded, total) {
+      if (!finished && onProgress) onProgress(loaded, total);
+    }
     decideSeMode(function () {
-      if (seMode === "buffer") preloadBuffers(onProgress, finish);
-      else preloadHtml(onProgress, finish);
+      if (seMode === "buffer") preloadBuffers(progress, finish);
+      else preloadHtml(progress, finish);
     });
   }
 

@@ -196,7 +196,7 @@
   function measure(course, laneIndex) {
     var CTRL = ctrlOf(course, laneIndex);
     var ox = [], oy = [], oc = [0];
-    if (course && course.sharp) buildSharp(CTRL, course.corner || 26, ox, oy);
+    if (course && course.sharp) buildSharp(CTRL, course.corner == null ? 26 : course.corner, ox, oy);
     else buildSpline(CTRL, ox, oy);
     for (var i = 1; i < ox.length; i++) {
       var dx = ox[i] - ox[i - 1], dy = oy[i] - oy[i - 1];

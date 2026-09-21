@@ -38,11 +38,33 @@
   }
 
   function copyEditableLane(lane) {
-    return {
+    var copy = {
       ctrl: copyPoints(lane.ctrl),
       tunnels: copySpans(lane.tunnels),
       raised: copySpans(lane.raised)
     };
+    if (lane.raisedOver) copy.raisedOver = lane.raisedOver.slice();
+    return copy;
+  }
+
+  // エディタに入力欄がなくても、ゲームが使う設定は往復保存で保持する。
+  // 許可したキーだけをコピーし、外部JSONを共有状態へ直接混ぜない。
+  function copyMetadata(source, target) {
+    target = target || {};
+    ["name", "nameKey", "boss", "spawnCluster", "dropMult", "skullMult"].forEach(function (key) {
+      if (source[key] !== undefined) target[key] = source[key];
+    });
+    if (source.speed) target.speed = normalizeSpeed(source.speed);
+    return target;
+  }
+
+  function removeLane(lanes, index) {
+    lanes.splice(index, 1);
+    lanes.forEach(function (lane) {
+      if (!lane.raisedOver) return;
+      lane.raisedOver = lane.raisedOver.filter(function (other) { return other !== index; })
+        .map(function (other) { return other > index ? other - 1 : other; });
+    });
   }
 
   function normalizeCtrl(spec) {
@@ -106,6 +128,11 @@
   }
 
   PP.courseUtils = {
+    valueOr: function (course, key, fallback) {
+      return course && course[key] != null ? course[key] : fallback;
+    },
+    copyMetadata: copyMetadata,
+    removeLane: removeLane,
     isNumber: isNumber,
     copyPoint: copyPoint,
     copyPoints: copyPoints,

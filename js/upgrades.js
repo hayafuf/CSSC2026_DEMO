@@ -454,15 +454,15 @@
     if (id === "cluster") {
       // 塊率の基準はコースごとに違う(コース5は 0.75)ので、絶対値ではなく
       // 「今のコースでどれだけ増えるか」の +% で見せる
-      var base = (PP.game.builtCourse && PP.game.builtCourse.spawnCluster) || PP.SPAWN_CLUSTER;
+      var base = PP.courseUtils.valueOr(PP.game.builtCourse, "spawnCluster", PP.SPAWN_CLUSTER);
       var cur = 1 - (1 - base) * Math.pow(0.85, lv);
       var nx = 1 - (1 - base) * Math.pow(0.85, lv + 1);
       return t("ug.prev.cluster", { n: Math.round((nx - cur) * 100) });
     }
     if (id === "barrelcap") return t("ug.prev.barrelcap", { a: PP.barrelCap(), b: PP.barrelCap() + 1 });
     if (id === "coin") {
-      var c0 = Math.max(2, PP.LIFE.coinsPerLife - lv);
-      var c1 = Math.max(2, PP.LIFE.coinsPerLife - lv - 1);
+      var c0 = PP.coinsPerLife(lv);
+      var c1 = PP.coinsPerLife(lv + 1);
       return t("ug.prev.coin", { a: c0, b: c1 });
     }
     if (id === "combo") {
@@ -470,7 +470,7 @@
                                      b: (PP.COMBO_WINDOW * valAt(def, lv + 1)).toFixed(1) });
     }
     if (id === "wildshot") {
-      return t("ug.prev.wildshot", { a: PP.WILD.baseMax + lv, b: PP.WILD.baseMax + lv + 1 });
+      return t("ug.prev.wildshot", { a: wildCapacity(lv), b: wildCapacity(lv + 1) });
     }
     if (id === "parry") {
       // レベルの主役は弾き返し確率(ユーザー体感の「当たり」)。受付秒も
@@ -812,9 +812,12 @@
   // 虹玉の最大ストックを組み直す。加算元が2つ(カード「七海の虹玉」の段数と、
   // コンティニュー報酬 wildBonus)あるので、代入は必ずここ1か所に集める。
   // 別々の場所で g.wildMax へ代入すると、あとから走った側が相手の加算を消してしまう
+  function wildCapacity(lv) {
+    return PP.WILD.baseMax + lv + (PP.game.wildBonus || 0);
+  }
   function recalcWildMax() {
     var g = PP.game;
-    g.wildMax = PP.WILD.baseMax + level("wildshot") + (g.wildBonus || 0);
+    g.wildMax = wildCapacity(level("wildshot"));
     return g.wildMax;
   }
 

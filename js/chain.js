@@ -148,7 +148,7 @@
       // マッチも磁石も通常どおり効く。弾幕の管理は skull.js)。ボス戦には出さない。
       // コース定義の skullMult で出現率をコース単位で増減できる(コース5は 0.5)
       var skullChance = PP.SKULL.chance *
-        ((PP.game.builtCourse && PP.game.builtCourse.skullMult) || 1);
+        (PP.courseUtils.valueOr(PP.game.builtCourse, "skullMult", 1));
       // 強化圧: 強化を取るほど骸骨玉も湧きやすくなる(PP.UPGRADE_PRESSURE)
       if (PP.upgrades && PP.upgrades.skullPressure) skullChance *= PP.upgrades.skullPressure();
       // チュートリアル中は湧かせない(「障害物」ステップが skullify で1体だけ目覚めさせる)
@@ -757,10 +757,7 @@
   //         判定が担当するので、ここでは数えない
   // 配列は物理順(index 0 = 樽側)なので、隣の玉を見るだけで決まる
   function ownsBalls(balls, i) {
-    var t = balls[i];
-    if (i > 0 && !balls[i - 1].treasure) return true;
-    var b = balls[i + 1];
-    return !!b && !b.treasure && b.wave === t.wave && t.d - b.d <= D + 0.5;
+    return PP.chainRules.treasureHasOwner(balls, i, D);
   }
 
   // 宝玉の解放・粉砕(レーン lane 内)
@@ -827,15 +824,9 @@
 
   // index の玉を含む「接触している同色の連なり」を左右に伸ばし、3個以上なら消す。
   function resolveMatchAt(lane, index, chained) {
-    var balls = lane.balls;
-    if (index < 0 || index >= balls.length) return false;
-    var c = balls[index].color;
-    if (c === null || c === undefined) return false;
-    var i = index, j = index;
-    while (i > 0 && balls[i - 1].color === c &&
-           balls[i - 1].d - balls[i].d <= D + 1) i--;
-    while (j + 1 < balls.length && balls[j + 1].color === c &&
-           balls[j].d - balls[j + 1].d <= D + 1) j++;
+    var run = PP.chainRules.colorRun(lane.balls, index, D);
+    if (!run) return false;
+    var i = run.first, j = run.last;
     // 【強化】救済(海神の加護)中は、撃った弾の割り込み(chained=false)に限り
     // 2個で消える。chained=false はこの経路(updatePendingMatches)だけが通るので、
     // 磁力合流・連鎖・爆発の巻き込みで盤面が勝手に2個ずつ溶ける事故は起きない

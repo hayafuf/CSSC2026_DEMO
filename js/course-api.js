@@ -48,21 +48,24 @@
   var isNum = courseUtils.isNumber;
   var copyPt = courseUtils.copyPoint;
   var copyLane = courseUtils.copyLane;
-  var normalizeSpeed = courseUtils.normalizeSpeed;
   var normalizeLanes = courseUtils.normalizeLanes;
 
-  // ---- Course: 作りかけ/完成のコース1つを表す ----
+  /**
+   * 作りかけ/完成のコース。表示物を持たない、保存・編集用のデータ。
+   * @constructor
+   * @param {Object} spec 名前・形状・レーンと、任意のゲーム設定。
+   * @property {string} name コース名。
+   * @property {Array} lanes レーン定義。ctrlは[x,y,角丸半径?]の配列。
+   * @property {Object} [speed] entry/holeはpx/秒、curveは無次元。
+   */
   function Course(spec) {
     spec = spec || {};
     this.name = spec.name || PP.i18n.t("api.defaultName");
     this.sharp = !!spec.sharp;
     this.corner = isNum(spec.corner) ? spec.corner : 24;
     this.overpass = !!spec.overpass;
-    // チェーン速度のプロファイル(部分指定可・省略で既定)。レーンが短いコースほど
-    // 落とさないと洞窟から樽まで一瞬で届く。※ エディタ(editor.js)は speed と
-    // lane.raisedOver を扱わないので、エディタで開いて保存し直すとこの2つは落ちる
-    // (エディタの橋は raised の区間指定で作る)。
-    this.speed = normalizeSpeed(spec.speed);
+    // UIに入力欄がない設定も、複製・編集・保存で保持する。
+    courseUtils.copyMetadata(spec, this);
     this.lanes = normalizeLanes(spec);   // [{ctrl, tunnels?, raised?, raisedOver?}, …]
     this.ctrl = this.lanes[0].ctrl;      // 互換: 単一レーン API・エディタは先頭レーンを読む
   }
@@ -76,7 +79,7 @@
       overpass: this.overpass,
       lanes: this.lanes.map(copyLane)
     };
-    if (this.speed) out.speed = normalizeSpeed(this.speed);
+    courseUtils.copyMetadata(this, out);
     return out;
   };
 
@@ -172,7 +175,7 @@
                 overpass: this.overpass,
                 ctrl: this.lanes[0].ctrl.map(copyPt),
                 lanes: this.lanes.map(copyLane) };
-    if (this.speed) out.speed = normalizeSpeed(this.speed);
+    courseUtils.copyMetadata(this, out);
     return out;
   };
   Course.prototype.toJSON = function () { return JSON.stringify(this.toObject()); };
@@ -185,11 +188,22 @@
 
   // localStorage へ保存(スロット名で管理)
   Course.prototype.save = function (slot) {
-    slot = slot || this.name;
+    slot = String(slot || this.name);
     try {
-      localStorage.setItem(LS_PREFIX + slot, this.toJSON());
+      assertSlot(slot);
       var idx = readIndex();
-      if (idx.indexOf(slot) < 0) { idx.push(slot); writeIndex(idx); }
+      var key = LS_PREFIX + slot;
+      var previous = localStorage.getItem(key);
+      localStorage.setItem(key, this.toJSON());
+      try {
+        if (idx.indexOf(slot) < 0) idx.push(slot);
+        writeIndex(idx);
+      } catch (error) {
+        // 一覧への書き込みまで成功して初めて保存完了。既存データを復元する。
+        if (previous === null) localStorage.removeItem(key);
+        else localStorage.setItem(key, previous);
+        throw error;
+      }
     } catch (e) {
       throw new Error(PP.i18n.t("api.saveFailed", { msg: e.message }));
     }
@@ -197,12 +211,37 @@
   };
 
   // ---- モジュール公開: PP.courseAPI ----
+  function assertSlot(slot) {
+    if (slot === "index") throw new Error('"index" is reserved for the course list.');
+  }
   function readIndex() {
-    try { return JSON.parse(localStorage.getItem(LS_INDEX) || "[]"); }
-    catch (e) { return []; }
+    // Storageへのアクセス失敗は呼び出し元に伝える。壊れたJSONだけを復元対象にする。
+    var raw = localStorage.getItem(LS_INDEX), list;
+    try { list = JSON.parse(raw); } catch (e) { list = null; }
+    if (Array.isArray(list) && list.every(function (slot) {
+      return typeof slot === "string" && slot !== "index";
+    })) return list;
+    list = [];
+    for (var i = 0; i < localStorage.length; i++) {
+      var key = localStorage.key(i);
+      if (!key || key === LS_INDEX || key.indexOf(LS_PREFIX) !== 0) continue;
+      var courseJSON = localStorage.getItem(key);
+      try {
+        var data = JSON.parse(courseJSON);
+        if (!data || (!Array.isArray(data.ctrl) && !Array.isArray(data.lanes))) continue;
+        var lanes = normalizeLanes(data);
+        if (!lanes.every(function (lane) {
+          return lane.ctrl.length >= MIN_POINTS && lane.ctrl.every(function (point) {
+            return isNum(point[0]) && isNum(point[1]);
+          });
+        })) continue;
+        list.push(key.slice(LS_PREFIX.length));
+      } catch (e) { /* 壊れたコースは削除せず、一覧の復元対象から外す。 */ }
+    }
+    return list.sort();
   }
   function writeIndex(list) {
-    try { localStorage.setItem(LS_INDEX, JSON.stringify(list)); } catch (e) {}
+    localStorage.setItem(LS_INDEX, JSON.stringify(list));
   }
 
   function decode(str) {
@@ -228,12 +267,14 @@
 
     // 保存済みスロットの読み書き
     load: function (slot) {
+      assertSlot(String(slot));
       var raw = localStorage.getItem(LS_PREFIX + slot);
       if (!raw) throw new Error(PP.i18n.t("api.slotMissing", { slot: slot }));
       return new Course(JSON.parse(raw));
     },
     slots: function () { return readIndex(); },
     remove: function (slot) {
+      assertSlot(String(slot));
       localStorage.removeItem(LS_PREFIX + slot);
       writeIndex(readIndex().filter(function (s) { return s !== slot; }));
     },

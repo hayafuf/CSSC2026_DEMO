@@ -62,7 +62,7 @@
   var muzzleGlow = null, shotGlows = [];
   var bossGlow = null;              // ボスに当たる月明かり(青白。ボス海域だけ alpha を上げる)
   var ghostCont = null, ghostImg = null, ghosts = [], ghostsUsed = 0;   // 玉の位置を示すゴースト
-  var mouths = [];                  // 樽の口の常夜灯 { x, y, glow }(レーンごと。燃料なし)
+  var mouths = [];                  // 樽の常夜灯 { lane, d, x, y, ang, glow }(口から手前 barrelLen の区間に barrelStep おき。燃料なし)
   var mouthPool = [];
   var hits = [];                    // 着弾点に残る光 { x, y, t, glow }(固定長プール、古い順に使い回す)
   var HIT_MAX = 6;
@@ -239,14 +239,23 @@
     var lanes = PP.game.lanes || [];
     for (var li = 0; li < lanes.length; li++) {
       var lane = lanes[li], rail = lane.rail;
-      // 樽の口の常夜灯(月明かり寄りの青白。呑まれかけの玉を数えられる最低限の公平さ)
-      rail.posAtInto(rail.holeD, _pos);
-      var mg = mouthPool.pop() || new createjs.Bitmap(coolImg);
-      mg.regX = mg.regY = coolImg._r;
-      mg.scaleX = mg.scaleY = N.barrelR / coolImg._r;
-      mg.x = _pos.x; mg.y = _pos.y; mg.alpha = 0.5;
-      glowCont.addChild(mg);
-      mouths.push({ x: _pos.x, y: _pos.y, glow: mg });
+      // 樽の常夜灯(月明かり寄りの青白。燃料なし・常時): 樽の口から手前へ barrelLen の
+      // 区間を barrelStep おきに溝に沿った光で一続きに照らす。樽際の「あと何個で溢れるか」
+      // は夜でも常に読める、が公平さの最低線。光の絵は端(口)を濃く、手前ほど薄く
+      var d0 = Math.max(0, rail.holeD - N.barrelLen);
+      for (var md = rail.holeD; md >= d0; md -= N.barrelStep) {
+        rail.posAtInto(md, _pos);
+        var mg = mouthPool.pop() || new createjs.Bitmap(coolImg);
+        var mang = Math.atan2(_pos.ty, _pos.tx);
+        mg.regX = mg.regY = coolImg._r;
+        mg.scaleX = N.barrelR / coolImg._r * N.lanternStretch;
+        mg.scaleY = N.barrelR / coolImg._r / Math.sqrt(N.lanternStretch);
+        mg.rotation = mang * 180 / Math.PI;
+        mg.x = _pos.x; mg.y = _pos.y;
+        mg.alpha = md === rail.holeD ? 0.5 : 0.28;
+        glowCont.addChild(mg);
+        mouths.push({ lane: lane, d: md, x: _pos.x, y: _pos.y, ang: mang, glow: mg });
+      }
       // 最初の灯りは半間隔先(洞窟の口ではなく列が見え始める所)、樽の直前は置かない
       for (var d = N.spacing * 0.5; d < rail.holeD - R * 2; d += N.spacing) {
         if (rail.tunnelAt(d)) continue;          // トンネルの中は玉も見えないので無意味
@@ -398,11 +407,12 @@
     if (PP.game.effects.spyglass > 0) return false;
     var rail = lane.rail;
     if (rail.tunnelAt(d)) return false;
+    if (d >= rail.holeD - N.barrelLen - N.barrelR) return false;   // 樽の常夜灯の区間(縁の伸びぶんも含む)
     rail.posAtInto(d, _pos);   // _pos は reset 以外で使っていない(reset 中に isDark は呼ばれない)
     var x = _pos.x, y = _pos.y, dx, dy;
     dx = x - PP.cannon.x; dy = y - PP.cannon.muzzleY();
     if (dx * dx + dy * dy < N.cannonR * N.cannonR) return false;
-    for (var mi = 0; mi < mouths.length; mi++) {
+    for (var mi = 0; mi < mouths.length; mi++) {   // 他レーンの樽の常夜灯が近くにある場合
       dx = x - mouths[mi].x; dy = y - mouths[mi].y;
       if (dx * dx + dy * dy < N.barrelR * N.barrelR) return false;
     }
@@ -448,8 +458,8 @@
     }
     // 5) 💎 宝玉は自ら光る(列の中の宝玉の周りだけ小さく開く)
     PP.game.eachLaneBall(treasureHole);
-    // 6) 樽の口の常夜灯
-    for (var mi = 0; mi < mouths.length; mi++) hole(mouths[mi].x, mouths[mi].y, N.barrelR);
+    // 6) 樽の常夜灯(口から手前 barrelLen の区間。溝に沿って伸ばした穴を並べて一続きにする)
+    for (var mi = 0; mi < mouths.length; mi++) holeAlong(mouths[mi].x, mouths[mi].y, mouths[mi].ang, N.barrelR);
     // 7) 着弾点に残る光(hitSec 秒で縮んで消える)
     for (var hi = 0; hi < hits.length; hi++) {
       var h = hits[hi];

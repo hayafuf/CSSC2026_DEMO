@@ -135,18 +135,7 @@
 
   // 全ステージ制覇(とタイトルからの初回出航)はラン単位の状態を畳んで再出航する。
   function resetRun(startLevel, restartLevel) {
-    var game = PP.game;
-    game.level = restartLevel();
-    game.score = 0;
-    game.coins = 0;
-    game.lives = PP.LIFE.startLives;
-    game.continues = 0;
-    game.continueStages = [];
-    game.failStreak = 0;
-    game.newUnlock = null;   // 解禁のお祝いは制覇画面で済んでいる
-    PP.upgrades.onRunReset();
-    PP.hud.hideOverlay();
-    startLevel();
+    PP.session.newRun(restartLevel());
   }
 
   // 難易度ボタン / 1〜5 キーで難易度を選ぶ。ロック中(config.js の PP.diffLocked)は
@@ -165,23 +154,8 @@
   // ゲームオーバーからのコンティニュー: 同じ海域をスコア0で再挑戦。
   // 宝玉の力(upgrades)・虹玉ストック・難易度・レベルは維持する。
   // どこでコンティニューしたかを記録し、全クリア時の結果表示に出す。
-  function continueRun(startLevel) {
-    var game = PP.game;
-    game.continues++;
-    game.continueStages.push(game.level);
-    game.failStreak++;                 // ピティドロップの連続失敗として数える
-    // 救済: ゲームオーバーのたびに虹玉(切り札)の最大数を1つ増やし、そのうえで全回復する。
-    // ピティドロップ(powerups.js)と同じ「負けた人ほど道具が厚くなる」思想。
-    // 最大数ごと増やすのは、切り札を温存したまま沈んだ(=満タンの)プレイヤーだけ
-    // 補充がまるごと無駄になり、いちばん苦しい人が救われない状態を避けるため
-    game.wildBonus = (game.wildBonus || 0) + 1;
-    PP.upgrades.recalcWildMax();
-    game.wildCharges = game.wildMax;
-    game.score = 0;
-    game.coins = 0;
-    game.lives = PP.LIFE.startLives;   // maxLives(3)ではなく出航時の枚数へ全回復
-    PP.hud.hideOverlay();
-    startLevel();                      // レベル・upgrades は維持(イントロ付きで再開)
+  function continueRun() {
+    PP.session.continueRun();
   }
 
   function onStageDown(event, startLevel, restartLevel) {
@@ -292,9 +266,7 @@
         PP.cannon.fire();
       }
     } else if (game.state === "clear") {
-      game.level++;
-      PP.hud.hideOverlay();
-      startLevel();
+      PP.session.nextLevel();
     } else if (game.state === "over") {
       // 進路はボタンで選ぶ(ボタン外のクリックは誤爆防止で何もしない)
       var pick = PP.hud.hitOverChoice(event.stageX, event.stageY);
